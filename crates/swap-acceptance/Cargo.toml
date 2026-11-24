@@ -1,0 +1,17 @@
+[package]
+name = "swap-acceptance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Executable Gherkin acceptance tests for Monsquaz Swap"
+
+[dev-dependencies]
+cucumber = "0.23"
+swap-core = { path = "../swap-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[test]]
+name = "cucumber"
+harness = false

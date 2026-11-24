@@ -93,3 +93,85 @@ Rules for messages:
 - Is a skip/leave framed without shame?
 - Does an error tell them how to fix it?
 - Would a first-time participant understand "claim" vs "submit"?
+
+## UI quality gate
+
+Every UI issue must produce visual evidence. The app must look intentional, calm,
+and consistent. It must not look like a generated admin template.
+
+### Design system
+
+- One spacing scale: 4, 8, 12, 16, 24, 32, 48 px. Do not invent values.
+- One type scale: display, h1, h2, h3, body, small, mono. Limit weights.
+- One radius scale and one shadow scale.
+- One density mode by default. Tables may use a compact mode, but rows must
+  remain readable.
+- Use CSS grid/flex and shared gaps. Do not position with magic margins.
+- Buttons have a clear hierarchy: primary, secondary, quiet, danger.
+- Status uses text + icon + color. Never color alone.
+- Icons are from one set. Do not mix emoji and line icons in the same control.
+- Use real sample data in screenshots. No lorem ipsum, no "Item 1".
+
+### Layout and density
+
+- One primary action per view. Secondary actions are visibly secondary.
+- Maximum two levels of nested cards. Avoid a card inside a card inside a card.
+- Tables show the columns the host needs. Move the rest into a detail panel.
+- Long text wraps; it does not overflow. Truncate only with a tooltip or detail.
+- No horizontal scroll at 1024 px unless the content is a real matrix.
+- Every empty state explains the next action.
+- Every loading state avoids layout shift.
+- Every error state keeps the user's work and offers a fix.
+
+### Screenshot matrix
+
+Capture every view in these states:
+
+| State | Required |
+|---|---|
+| Empty / first run | yes |
+| Loading / skeleton | yes |
+| Populated with realistic data | yes |
+| Error / permission denied | yes |
+| Long content / long names | yes |
+| Dense table / many rows | yes |
+| 1280×800 | yes |
+| 1024×700 minimum | yes |
+| 200% zoom | yes |
+| Dark and light | yes |
+
+Views: setup wizard, mission control, event wizard, participant manager,
+schedule planner (matrix + graph), round board, file browser, audit log, reveal
+presenter, export, settings, logs, dry run.
+
+Store curated screenshots under `docs/ui/screens/`. Name them by view and state.
+Use a deterministic seed and sample data.
+
+### Review waves
+
+Run at least three independent reviews for a major UI milestone:
+
+1. **Visual design:** alignment, spacing, hierarchy, density, consistency,
+   typography, color, overflow, responsive behavior.
+2. **UX and copy:** task clarity, next action, jargon, empty/error states,
+   destructive confirmations, first-time host.
+3. **Accessibility:** contrast, focus order, keyboard, screen-reader labels,
+   color-only status, zoom, motion.
+
+Use fresh subagents with no memory of building the UI. Give them the screenshots
+and the user tasks. Record findings in the tracker. Fix every must-fix and
+re-capture. Repeat until no must-fix remains.
+
+### Reject list
+
+- Misaligned labels or inputs.
+- Inconsistent gaps between sections.
+- Crowded tables with no detail view.
+- More than one primary button per screen.
+- Placeholder or fake data in a review screenshot.
+- A modal inside a modal.
+- Scrollbars inside scrollbars.
+- A chart or graph that does not explain itself.
+- A playful visual that hides the next action.
+- A screen that only works at one width.
+

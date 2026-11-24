@@ -100,12 +100,28 @@ instruction, and error message. Read `ai-rules/STE.md` before you write a spec.
 The playful product voice is allowed in user-facing copy. It must not make an
 instruction ambiguous.
 
+## UI quality gate
+
+A UI issue is not done until the visual evidence exists and the review waves
+pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
+
+- Capture every affected view at 1280×800 and at the minimum 1024×700 width.
+- Capture empty, loading, populated, error, long-content, and dense-table
+  states.
+- Check alignment, spacing, density, typography, contrast, overflow, focus, and
+  responsive behavior.
+- Run at least three independent reviews in waves: visual design, UX/copy, and
+  accessibility. Fix every must-fix, then re-capture.
+- Store the curated screenshots under `docs/ui/screens/` and record the review.
+- Do not use placeholder text or fake-looking data in a review screenshot.
+
 ## Definition of done
 
 - The behaviour has a Gherkin scenario in `specs/features/` (or a recorded
   verification command for a chore).
 - A failing test existed first, or the change is a docs/chore.
 - New specifications follow `ai-rules/STE.md`.
+- For UI work, the UI quality gate passes with screenshots and review evidence.
 - `scripts/check.sh` passes.
 - The tracker has evidence and the issue is closed through the CLI.
 - Docs and decisions are updated where intent changed.

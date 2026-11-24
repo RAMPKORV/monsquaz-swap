@@ -99,6 +99,16 @@ No live bot in pull-request CI. Use fake adapters and recorded payloads.
 - Public aggregates are suppressed below the k-threshold.
 - Claim, submit, advance, and reveal are idempotent.
 
+## UI review gate
+
+- Capture every view in empty, loading, populated, error, long-content, and
+  dense states at 1280×800 and 1024×700.
+- Capture 200% zoom and both themes.
+- Run three independent review waves: visual design, UX/copy, accessibility.
+- Store curated screenshots under `docs/ui/screens/`.
+- No must-fix may remain before a UI milestone closes.
+- Re-capture after every fix. A screenshot from an older build is not evidence.
+
 ## Manual game day
 
 Cast: host, 6–8 participants, one mobile-only, one slow, one forgetful, one

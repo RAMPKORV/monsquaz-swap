@@ -69,9 +69,14 @@ receipt. A DM sent during a short outage is recovered once.
 - Audit log.
 - Settings and logs.
 - View-as-participant and host dry run.
+- **UI quality gate:** screenshot every view in empty, loading, populated,
+  error, long-content, and dense states at 1280×800 and 1024×700; run three
+  independent review waves (visual, UX/copy, accessibility); fix every must-fix
+  and re-capture. Store the curated set under `docs/ui/screens/`.
 
 **Exit:** a host can create and inspect a full event without editing files or
-the database.
+the database. The UI review waves have no must-fix. A first-time host can
+complete the main journey without help.
 
 ## M5 — Classic end-to-end
 
@@ -119,6 +124,8 @@ package. No owner/title leaks before the reveal.
 - Performance at 40 participants.
 - Accessibility pass.
 - Privacy export/delete.
+- Final UI polish: repeat the screenshot matrix at 200% zoom and light theme;
+  run a fourth review wave on density, consistency, and the reveal presenter.
 
 **Exit:** 10k-seed nightly run is green for seven days; the red-team rubric has
 no hard fail; a clean-machine restore drill passes.

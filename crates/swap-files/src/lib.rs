@@ -11,5 +11,6 @@ pub mod store;
 pub use pack::{PackManifest, PackReport, SampleInfo, check_samples};
 pub use policy::{
     DEFAULT_EXTENSIONS, DEFAULT_MAX_SIZE, FileError, FileKind, FilePolicy, ValidatedFile,
+    sha256_hex,
 };
 pub use store::{BlobStore, StoreError, StoredBlob};

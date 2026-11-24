@@ -25,11 +25,15 @@ This file is a router. Detailed rules live in `ai-rules/`.
 ## Current state
 
 - Runnable Tauri 2 + Rust + React/TS shell; `swap-core` holds the first hard
-  invariant (`SeenLedger`).
+  invariant (`SeenLedger`) and the seeded classic scheduler.
+- `swap-db` owns the SQLite schema, migrations, and repositories. `swap-files`
+  validates intake and stores content by SHA-256. `swap-discord` defines the
+  transport contract. `swap-engine` runs the classic walking skeleton.
 - Product spec and Gherkin live in `docs/` and `specs/features/`.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.
-- Event engine, Discord adapter, persistence, and UI screens are next.
+- The live Twilight gateway, async queue, deadline automation, reveal exports,
+  and UI screens are next.
 
 ## Non-negotiable invariants
 

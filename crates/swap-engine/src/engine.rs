@@ -1,0 +1,1064 @@
+use swap_core::{
+    AssignmentStatus, EventState, Membership, ParticipantId, Readiness, Role, Schedule, StateError,
+    TrackCode, TrackSpec, TrackState,
+};
+use swap_db::{
+    AssignmentRecord, AssignmentRepo, Connection, Db, DbError, EventRecord, EventRepo, FileRecord,
+    FileRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
+    SeenRepo, TrackRecord, TrackRepo, Transaction,
+};
+use swap_files::{BlobStore, FileError, ValidatedFile};
+use thiserror::Error;
+
+use crate::effects::Effect;
+use crate::ids::{assignment_id, plan_commitment, track_code};
+use crate::settings::{EventSettings, Mode, SettingsError};
+
+#[derive(Debug, Error)]
+pub enum EngineError {
+    #[error(transparent)]
+    Db(#[from] DbError),
+    #[error(transparent)]
+    File(#[from] FileError),
+    #[error(transparent)]
+    Store(#[from] swap_files::StoreError),
+    #[error(transparent)]
+    Schedule(#[from] swap_core::ScheduleError),
+    #[error(transparent)]
+    Settings(#[from] SettingsError),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    State(#[from] StateError),
+    #[error("event not found: {0}")]
+    EventNotFound(String),
+    #[error("event already exists: {0}")]
+    EventExists(String),
+    #[error("the event id is not a safe identifier")]
+    InvalidEventId,
+    #[error("the event name is empty")]
+    EmptyEventName,
+    #[error("participant not found: {0}")]
+    ParticipantNotFound(String),
+    #[error("the event is in state {state:?}; {action} requires {expected}")]
+    WrongEventState {
+        action: &'static str,
+        state: EventState,
+        expected: &'static str,
+    },
+    #[error("the participant has already seeded a track")]
+    AlreadySeeded,
+    #[error("the participant left the event")]
+    ParticipantLeft,
+    #[error("the participant must seed a track before this action")]
+    NotSeeded,
+    #[error("the participant is not ready for a new offer: {0}")]
+    ParticipantNotReady(String),
+    #[error("the event has no active participants")]
+    NoParticipants,
+    #[error("the event has no seeded tracks")]
+    NoSeededTracks,
+    #[error("the event needs at least two active participants to schedule a round")]
+    NoRounds,
+    #[error("the event has no committed plan")]
+    NoPlan,
+    #[error("round {round} is outside the plan (0..{rounds})")]
+    RoundOutOfRange { round: u32, rounds: u32 },
+    #[error("round {round} still has active assignments")]
+    RoundNotResolved { round: u32 },
+    #[error("round {round} has not started")]
+    PlanNotFinished { round: u32 },
+    #[error("round {round} is already open or resolved")]
+    RoundAlreadyOpened { round: u32 },
+    #[error("round {expected} must open before round {requested}")]
+    RoundOutOfOrder { expected: u32, requested: u32 },
+    #[error("track {0} has no file")]
+    NoFile(String),
+    #[error("track {0} cannot reach the requested state")]
+    TrackPath(String),
+    #[error("assignment not found: {0}")]
+    AssignmentNotFound(String),
+    #[error("the assignment does not belong to this participant")]
+    NotAssignmentOwner,
+    #[error("the assignment is in state {0:?}")]
+    WrongAssignmentState(AssignmentStatus),
+    #[error("the offer has expired")]
+    OfferExpired,
+    #[error("the offer is not due yet")]
+    OfferNotDue,
+    #[error("the participant has no active assignment")]
+    NoActiveAssignment,
+    #[error("the file format changed from .{current} to .{submitted}")]
+    FormatChange { current: String, submitted: String },
+    #[error("the reveal is blocked by {count} active assignments")]
+    PendingAssignments { count: usize, ids: Vec<String> },
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinRequest<'a> {
+    pub event_id: &'a str,
+    pub user_id: &'a str,
+    pub display_name: &'a str,
+    pub timezone: &'a str,
+    pub max_handoffs: u32,
+    pub filename: &'a str,
+    pub bytes: &'a [u8],
+}
+
+#[derive(Debug, Clone)]
+pub struct SubmitRequest<'a> {
+    pub event_id: &'a str,
+    pub user_id: &'a str,
+    pub filename: &'a str,
+    pub bytes: &'a [u8],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinOutcome {
+    pub track_code: String,
+    pub sha256: String,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockOutcome {
+    pub active: usize,
+    pub fill_ins: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleOutcome {
+    pub version: u32,
+    pub rounds: u32,
+    pub commitment: String,
+    pub assignments: Vec<PlanAssignmentRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenRoundOutcome {
+    pub round: u32,
+    pub offers: usize,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimOutcome {
+    pub assignment_id: String,
+    pub track_code: String,
+    pub filename: String,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmitOutcome {
+    pub version: u32,
+    pub sha256: String,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkipOutcome {
+    pub status: AssignmentStatus,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpireOutcome {
+    pub assignment_id: String,
+    pub track_code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreditEntry {
+    pub round: u32,
+    pub participant_id: String,
+    pub status: AssignmentStatus,
+    pub fill_in: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackCredits {
+    pub track_code: String,
+    pub seed_owner: String,
+    pub entries: Vec<CreditEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealOutcome {
+    pub tracks: Vec<TrackCredits>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventStatus {
+    pub event_id: String,
+    pub state: EventState,
+    pub rounds: u32,
+    pub committed: bool,
+    pub active_assignments: usize,
+    pub submitted_assignments: usize,
+}
+
+pub fn create_event(
+    db: &Db,
+    id: &str,
+    name: &str,
+    seed: u64,
+    settings: &EventSettings,
+    now: i64,
+) -> Result<(), EngineError> {
+    if !is_safe_id(id) {
+        return Err(EngineError::InvalidEventId);
+    }
+    if name.trim().is_empty() {
+        return Err(EngineError::EmptyEventName);
+    }
+    settings.validate()?;
+    if EventRepo::get(db.conn(), id)?.is_some() {
+        return Err(EngineError::EventExists(id.to_string()));
+    }
+    EventRepo::insert(
+        db.conn(),
+        &EventRecord {
+            id: id.to_string(),
+            name: name.trim().to_string(),
+            state: EventState::Signup,
+            seed,
+            settings_json: serde_json::to_string(settings)?,
+            created_at: now,
+            updated_at: now,
+        },
+    )?;
+    Ok(())
+}
+
+pub fn signup(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+    display_name: &str,
+    timezone: &str,
+    max_handoffs: u32,
+    now: i64,
+) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Signup, "signup", "signup")?;
+    if let Some(mut existing) = ParticipantRepo::get(db.conn(), event_id, user_id)? {
+        match existing.membership {
+            Membership::SignedUp => {
+                existing.display_name = display_name.to_string();
+                existing.timezone = timezone.to_string();
+                existing.max_handoffs = max_handoffs;
+                existing.updated_at = now;
+                ParticipantRepo::upsert(db.conn(), &existing)?;
+                return Ok(());
+            }
+            Membership::Seeded | Membership::Active => return Err(EngineError::AlreadySeeded),
+            Membership::Left | Membership::Removed => return Err(EngineError::ParticipantLeft),
+        }
+    }
+    ParticipantRepo::upsert(
+        db.conn(),
+        &ParticipantRecord {
+            event_id: event_id.to_string(),
+            user_id: user_id.to_string(),
+            display_name: display_name.to_string(),
+            role: Role::Participant,
+            membership: Membership::SignedUp,
+            readiness: Readiness::Ready,
+            timezone: timezone.to_string(),
+            max_handoffs,
+            created_at: now,
+            updated_at: now,
+        },
+    )?;
+    Ok(())
+}
+
+pub fn join_with_seed(
+    db: &Db,
+    store: &BlobStore,
+    request: &JoinRequest<'_>,
+    now: i64,
+) -> Result<JoinOutcome, EngineError> {
+    let event = load_event(db, request.event_id)?;
+    require_state(&event, EventState::Signup, "joining", "signup")?;
+    let settings = parse_settings(&event)?;
+    let validated = settings
+        .file_policy()
+        .validate(request.filename, request.bytes)?;
+
+    if let Some(existing) = ParticipantRepo::get(db.conn(), request.event_id, request.user_id)? {
+        match existing.membership {
+            Membership::Seeded | Membership::Active => return Err(EngineError::AlreadySeeded),
+            Membership::Left | Membership::Removed => return Err(EngineError::ParticipantLeft),
+            Membership::SignedUp => {}
+        }
+    }
+
+    let tracks = TrackRepo::list_for_event(db.conn(), request.event_id)?;
+    if tracks.iter().any(|track| track.owner_id == request.user_id) {
+        return Err(EngineError::AlreadySeeded);
+    }
+    let code = unique_track_code(&tracks, event.seed);
+
+    let blob = store.store(request.bytes)?;
+    let participant = ParticipantRecord {
+        event_id: request.event_id.to_string(),
+        user_id: request.user_id.to_string(),
+        display_name: request.display_name.to_string(),
+        role: Role::Participant,
+        membership: Membership::Seeded,
+        readiness: Readiness::Ready,
+        timezone: request.timezone.to_string(),
+        max_handoffs: request.max_handoffs,
+        created_at: now,
+        updated_at: now,
+    };
+    let track = TrackRecord {
+        event_id: request.event_id.to_string(),
+        code: code.clone(),
+        owner_id: request.user_id.to_string(),
+        state: TrackState::Seeded,
+        created_at: now,
+    };
+    let file = file_record(
+        request.event_id,
+        &code,
+        1,
+        request.user_id,
+        &validated,
+        &blob.relative_path,
+        now,
+    );
+
+    let transaction = begin(db)?;
+    ParticipantRepo::upsert(&transaction, &participant)?;
+    TrackRepo::insert(&transaction, &track)?;
+    FileRepo::insert(&transaction, &file)?;
+    commit(transaction)?;
+
+    let effects = vec![Effect::Dm {
+        user_id: request.user_id.to_string(),
+        content: format!(
+            "Seed received for track {code}. SHA-256: {}. Size: {} bytes.",
+            validated.sha256, validated.size
+        ),
+    }];
+    Ok(JoinOutcome {
+        track_code: code,
+        sha256: validated.sha256,
+        effects,
+    })
+}
+
+pub fn lock_roster(db: &Db, event_id: &str, now: i64) -> Result<LockOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Signup, "roster lock", "signup")?;
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    if participants.is_empty() {
+        return Err(EngineError::NoParticipants);
+    }
+    let tracks = TrackRepo::list_for_event(db.conn(), event_id)?;
+    if tracks.is_empty() {
+        return Err(EngineError::NoSeededTracks);
+    }
+
+    let mut active = 0;
+    let mut fill_ins = 0;
+    let transaction = begin(db)?;
+    for mut participant in participants {
+        if !matches!(
+            participant.membership,
+            Membership::SignedUp | Membership::Seeded
+        ) {
+            continue;
+        }
+        let has_track = tracks
+            .iter()
+            .any(|track| track.owner_id == participant.user_id);
+        if has_track {
+            participant.membership = Membership::Active;
+            participant.role = Role::Participant;
+            active += 1;
+        } else {
+            participant.membership = Membership::Active;
+            participant.role = Role::FillIn;
+            fill_ins += 1;
+        }
+        participant.updated_at = now;
+        ParticipantRepo::upsert(&transaction, &participant)?;
+    }
+
+    if active == 0 {
+        return Err(EngineError::NoSeededTracks);
+    }
+
+    EventRepo::set_state(&transaction, event_id, EventState::ScheduleReview, now)?;
+    commit(transaction)?;
+    Ok(LockOutcome { active, fill_ins })
+}
+
+pub fn generate_schedule(
+    db: &Db,
+    event_id: &str,
+    now: i64,
+) -> Result<ScheduleOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "schedule generation",
+        "schedule review",
+    )?;
+    if parse_settings(&event)?.mode != Mode::Classic {
+        return Err(EngineError::WrongEventState {
+            action: "classic scheduling",
+            state: event.state,
+            expected: "classic mode",
+        });
+    }
+    let settings = parse_settings(&event)?;
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let active: Vec<&ParticipantRecord> = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active && participant.role == Role::Participant
+        })
+        .collect();
+    if active.is_empty() {
+        return Err(EngineError::NoParticipants);
+    }
+    let active_ids: Vec<&str> = active
+        .iter()
+        .map(|participant| participant.user_id.as_str())
+        .collect();
+    let tracks: Vec<TrackRecord> = TrackRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .filter(|track| active_ids.contains(&track.owner_id.as_str()))
+        .collect();
+    if tracks.len() != active.len() {
+        return Err(EngineError::NoSeededTracks);
+    }
+    let max_rounds = active.len().saturating_sub(1) as u32;
+    if max_rounds == 0 {
+        return Err(EngineError::NoRounds);
+    }
+    let rounds = settings.rounds.unwrap_or(max_rounds);
+    if rounds == 0 || rounds > max_rounds {
+        return Err(EngineError::Schedule(
+            swap_core::ScheduleError::TooManyRounds {
+                requested: rounds,
+                max: max_rounds,
+            },
+        ));
+    }
+
+    let people: Vec<ParticipantId> = active
+        .iter()
+        .map(|participant| ParticipantId::new(participant.user_id.clone()))
+        .collect();
+    let specs: Vec<TrackSpec> = tracks
+        .iter()
+        .map(|track| TrackSpec {
+            code: TrackCode::new(track.code.clone()),
+            owner: ParticipantId::new(track.owner_id.clone()),
+        })
+        .collect();
+    let schedule = Schedule::generate(&people, &specs, rounds, event.seed)?;
+
+    let previous = PlanRepo::latest(db.conn(), event_id)?;
+    let version = previous.map(|plan| plan.version + 1).unwrap_or(1);
+    let settings_json = serde_json::to_string(&settings)?;
+    let planned: Vec<PlanAssignmentRecord> = schedule
+        .assignments
+        .iter()
+        .map(|assignment| PlanAssignmentRecord {
+            event_id: event_id.to_string(),
+            plan_version: version,
+            round: assignment.round,
+            track_code: assignment.track.0.clone(),
+            participant_id: assignment.participant.0.clone(),
+        })
+        .collect();
+    let plan = PlanRecord {
+        event_id: event_id.to_string(),
+        version,
+        seed: event.seed,
+        rounds,
+        settings_json,
+        commitment: String::new(),
+        committed_at: now,
+        reason: None,
+    };
+    let commitment = plan_commitment(&plan, &planned);
+    let plan = PlanRecord {
+        commitment: commitment.clone(),
+        ..plan
+    };
+
+    let transaction = begin(db)?;
+    PlanRepo::insert(&transaction, &plan)?;
+    for assignment in &planned {
+        PlanRepo::insert_assignment(&transaction, assignment)?;
+    }
+    commit(transaction)?;
+
+    Ok(ScheduleOutcome {
+        version,
+        rounds,
+        commitment,
+        assignments: planned,
+    })
+}
+
+pub fn start_event(db: &Db, event_id: &str, now: i64) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "event start",
+        "schedule review",
+    )?;
+    if PlanRepo::latest(db.conn(), event_id)?.is_none() {
+        return Err(EngineError::NoPlan);
+    }
+    let next = event.state.transition_to(EventState::Active)?;
+    EventRepo::set_state(db.conn(), event_id, next, now)?;
+    Ok(())
+}
+
+pub fn open_round(
+    db: &Db,
+    event_id: &str,
+    round: u32,
+    now: i64,
+) -> Result<OpenRoundOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Active, "round open", "active")?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    if round >= plan.rounds {
+        return Err(EngineError::RoundOutOfRange {
+            round,
+            rounds: plan.rounds,
+        });
+    }
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    if assignments
+        .iter()
+        .any(|assignment| assignment.round == round)
+    {
+        return Err(EngineError::RoundAlreadyOpened { round });
+    }
+    for previous in 0..round {
+        if !assignments
+            .iter()
+            .any(|assignment| assignment.round == previous)
+        {
+            return Err(EngineError::RoundOutOfOrder {
+                expected: previous,
+                requested: round,
+            });
+        }
+    }
+    let active_assignments = AssignmentRepo::list_active(db.conn(), event_id)?;
+    if let Some(active) = active_assignments.first() {
+        return Err(EngineError::RoundNotResolved {
+            round: active.round,
+        });
+    }
+    let settings = parse_settings(&event)?;
+    let planned = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+    let for_round: Vec<&PlanAssignmentRecord> = planned
+        .iter()
+        .filter(|assignment| assignment.round == round)
+        .collect();
+    if for_round.is_empty() {
+        return Err(EngineError::RoundOutOfRange {
+            round,
+            rounds: plan.rounds,
+        });
+    }
+
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let mut effects = Vec::with_capacity(for_round.len());
+    let transaction = begin(db)?;
+    for planned_assignment in &for_round {
+        let participant = participants
+            .iter()
+            .find(|participant| participant.user_id == planned_assignment.participant_id)
+            .ok_or_else(|| {
+                EngineError::ParticipantNotFound(planned_assignment.participant_id.clone())
+            })?;
+        if participant.membership != Membership::Active || participant.readiness != Readiness::Ready
+        {
+            return Err(EngineError::ParticipantNotReady(
+                planned_assignment.participant_id.clone(),
+            ));
+        }
+        let id = assignment_id(event_id, round, &planned_assignment.track_code);
+        let due_at = now + settings.claim_window_secs;
+        AssignmentRepo::insert(
+            &transaction,
+            &AssignmentRecord {
+                id: id.clone(),
+                event_id: event_id.to_string(),
+                track_code: planned_assignment.track_code.clone(),
+                participant_id: planned_assignment.participant_id.clone(),
+                round,
+                status: AssignmentStatus::Offered,
+                offered_at: now,
+                claimed_at: None,
+                due_at: Some(due_at),
+                submitted_at: None,
+                created_at: now,
+                updated_at: now,
+            },
+        )?;
+        move_track(
+            &transaction,
+            event_id,
+            &planned_assignment.track_code,
+            TrackState::Offered,
+        )?;
+        effects.push(Effect::Offer {
+            user_id: planned_assignment.participant_id.clone(),
+            event_id: event_id.to_string(),
+            assignment_id: id,
+            track_code: planned_assignment.track_code.clone(),
+            due_at,
+            claim_window_secs: settings.claim_window_secs,
+        });
+    }
+    commit(transaction)?;
+
+    Ok(OpenRoundOutcome {
+        round,
+        offers: effects.len(),
+        effects,
+    })
+}
+
+pub fn claim(
+    db: &Db,
+    store: &BlobStore,
+    event_id: &str,
+    assignment_id: &str,
+    user_id: &str,
+    now: i64,
+) -> Result<ClaimOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "claim")?;
+    let settings = parse_settings(&event)?;
+    let assignment = AssignmentRepo::get(db.conn(), assignment_id)?
+        .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.to_string()))?;
+    if assignment.participant_id != user_id {
+        return Err(EngineError::NotAssignmentOwner);
+    }
+    if assignment.status != AssignmentStatus::Offered {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let due_at = assignment.due_at.ok_or(EngineError::OfferExpired)?;
+    if now > due_at {
+        return Err(EngineError::OfferExpired);
+    }
+    let next_due = now + settings.round_window_secs;
+
+    let transaction = begin(db)?;
+    AssignmentRepo::claim(&transaction, assignment.id.as_str(), now, next_due, now)?;
+    SeenRepo::record(
+        &transaction,
+        event_id,
+        &assignment.track_code,
+        user_id,
+        "claim",
+        now,
+    )?;
+    move_track(
+        &transaction,
+        event_id,
+        &assignment.track_code,
+        TrackState::InCustody,
+    )?;
+    commit(transaction)?;
+
+    let current = latest_file(db, event_id, &assignment.track_code)?;
+    let bytes = store.read(&current.sha256)?;
+    let filename = format!("{}.{}", assignment.track_code, current.extension);
+    let effects = vec![Effect::TrackFile {
+        user_id: user_id.to_string(),
+        track_code: assignment.track_code.clone(),
+        filename: filename.clone(),
+        bytes,
+        caption: format!(
+            "Track {}. Your turn. Due at {next_due} UTC.",
+            assignment.track_code
+        ),
+    }];
+
+    Ok(ClaimOutcome {
+        assignment_id: assignment.id,
+        track_code: assignment.track_code,
+        filename,
+        effects,
+    })
+}
+
+pub fn submit(
+    db: &Db,
+    store: &BlobStore,
+    request: &SubmitRequest<'_>,
+    now: i64,
+) -> Result<SubmitOutcome, EngineError> {
+    let event = load_event(db, request.event_id)?;
+    require_open_event(&event, "submission")?;
+    let settings = parse_settings(&event)?;
+    let assignment =
+        AssignmentRepo::latest_for_participant(db.conn(), request.event_id, request.user_id)?
+            .ok_or(EngineError::NoActiveAssignment)?;
+    if !matches!(
+        assignment.status,
+        AssignmentStatus::Claimed | AssignmentStatus::Overdue | AssignmentStatus::Submitted
+    ) {
+        return Err(EngineError::NoActiveAssignment);
+    }
+    let current = latest_file(db, request.event_id, &assignment.track_code)?;
+    let validated = settings
+        .file_policy()
+        .validate(request.filename, request.bytes)?;
+    if validated.extension != current.extension {
+        return Err(EngineError::FormatChange {
+            current: current.extension,
+            submitted: validated.extension,
+        });
+    }
+
+    let blob = store.store(request.bytes)?;
+    let version = current.version + 1;
+    let file = file_record(
+        request.event_id,
+        &assignment.track_code,
+        version,
+        request.user_id,
+        &validated,
+        &blob.relative_path,
+        now,
+    );
+    let transaction = begin(db)?;
+    FileRepo::insert(&transaction, &file)?;
+    AssignmentRepo::submit(&transaction, &assignment.id, now, now)?;
+    SeenRepo::record(
+        &transaction,
+        request.event_id,
+        &assignment.track_code,
+        request.user_id,
+        "submit",
+        now,
+    )?;
+    move_track(
+        &transaction,
+        request.event_id,
+        &assignment.track_code,
+        TrackState::Submitted,
+    )?;
+    commit(transaction)?;
+
+    let effects = vec![Effect::Dm {
+        user_id: request.user_id.to_string(),
+        content: format!(
+            "Received version {version} of track {}. SHA-256: {}. Latest version wins.",
+            assignment.track_code, validated.sha256
+        ),
+    }];
+    Ok(SubmitOutcome {
+        version,
+        sha256: validated.sha256,
+        effects,
+    })
+}
+
+pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "skip")?;
+    let assignment = AssignmentRepo::latest_for_participant(db.conn(), event_id, user_id)?
+        .ok_or(EngineError::NoActiveAssignment)?;
+    let (status, seen_reason) = match assignment.status {
+        AssignmentStatus::Offered => (AssignmentStatus::SkippedBeforeClaim, None),
+        AssignmentStatus::Claimed | AssignmentStatus::Overdue => (
+            AssignmentStatus::SkippedAfterClaim,
+            Some("skip_after_claim"),
+        ),
+        other => return Err(EngineError::WrongAssignmentState(other)),
+    };
+
+    let transaction = begin(db)?;
+    AssignmentRepo::update_status(&transaction, &assignment.id, status, now)?;
+    if let Some(reason) = seen_reason {
+        SeenRepo::record(
+            &transaction,
+            event_id,
+            &assignment.track_code,
+            user_id,
+            reason,
+            now,
+        )?;
+    }
+    move_track(
+        &transaction,
+        event_id,
+        &assignment.track_code,
+        TrackState::Pool,
+    )?;
+    commit(transaction)?;
+
+    let effects = vec![Effect::Dm {
+        user_id: user_id.to_string(),
+        content: format!(
+            "You skipped track {}. The track returns to the pool unchanged.",
+            assignment.track_code
+        ),
+    }];
+    Ok(SkipOutcome { status, effects })
+}
+
+pub fn expire_offer(
+    db: &Db,
+    event_id: &str,
+    assignment_id: &str,
+    now: i64,
+) -> Result<ExpireOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "offer expiry")?;
+    let assignment = AssignmentRepo::get(db.conn(), assignment_id)?
+        .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.to_string()))?;
+    if assignment.status != AssignmentStatus::Offered {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    if assignment.due_at.is_some_and(|due_at| now < due_at) {
+        return Err(EngineError::OfferNotDue);
+    }
+
+    let transaction = begin(db)?;
+    AssignmentRepo::update_status(&transaction, &assignment.id, AssignmentStatus::Expired, now)?;
+    move_track(
+        &transaction,
+        event_id,
+        &assignment.track_code,
+        TrackState::Pool,
+    )?;
+    commit(transaction)?;
+
+    Ok(ExpireOutcome {
+        assignment_id: assignment.id,
+        track_code: assignment.track_code,
+    })
+}
+
+pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    match event.state {
+        EventState::Active | EventState::Paused => {}
+        _ => {
+            return Err(EngineError::WrongEventState {
+                action: "reveal",
+                state: event.state,
+                expected: "active or paused",
+            });
+        }
+    }
+    let active = AssignmentRepo::list_active(db.conn(), event_id)?;
+    if !active.is_empty() {
+        return Err(EngineError::PendingAssignments {
+            count: active.len(),
+            ids: active.into_iter().map(|assignment| assignment.id).collect(),
+        });
+    }
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    if let Some(plan) = PlanRepo::latest(db.conn(), event_id)? {
+        for round in 0..plan.rounds {
+            if !assignments
+                .iter()
+                .any(|assignment| assignment.round == round)
+            {
+                return Err(EngineError::PlanNotFinished { round });
+            }
+        }
+    }
+    let mut tracks = Vec::new();
+    for track in TrackRepo::list_for_event(db.conn(), event_id)? {
+        let entries = assignments
+            .iter()
+            .filter(|assignment| assignment.track_code == track.code)
+            .filter(|assignment| {
+                matches!(
+                    assignment.status,
+                    AssignmentStatus::Submitted
+                        | AssignmentStatus::SkippedAfterClaim
+                        | AssignmentStatus::SkippedBeforeClaim
+                )
+            })
+            .map(|assignment| CreditEntry {
+                round: assignment.round,
+                participant_id: assignment.participant_id.clone(),
+                status: assignment.status,
+                fill_in: participants
+                    .iter()
+                    .find(|participant| participant.user_id == assignment.participant_id)
+                    .is_some_and(|participant| participant.role == Role::FillIn),
+            })
+            .collect();
+        tracks.push(TrackCredits {
+            track_code: track.code,
+            seed_owner: track.owner_id,
+            entries,
+        });
+    }
+    let next = event.state.transition_to(EventState::Reveal)?;
+    EventRepo::set_state(db.conn(), event_id, next, now)?;
+    Ok(RevealOutcome { tracks })
+}
+
+pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {
+    let event = load_event(db, event_id)?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?;
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    Ok(EventStatus {
+        event_id: event.id,
+        state: event.state,
+        rounds: plan.as_ref().map(|plan| plan.rounds).unwrap_or(0),
+        committed: plan.is_some(),
+        active_assignments: assignments
+            .iter()
+            .filter(|assignment| {
+                matches!(
+                    assignment.status,
+                    AssignmentStatus::Offered
+                        | AssignmentStatus::Claimed
+                        | AssignmentStatus::Overdue
+                )
+            })
+            .count(),
+        submitted_assignments: assignments
+            .iter()
+            .filter(|assignment| assignment.status == AssignmentStatus::Submitted)
+            .count(),
+    })
+}
+
+fn begin(db: &Db) -> Result<Transaction<'_>, EngineError> {
+    Ok(db.conn().unchecked_transaction().map_err(DbError::from)?)
+}
+
+fn commit(transaction: Transaction<'_>) -> Result<(), EngineError> {
+    transaction.commit().map_err(DbError::from)?;
+    Ok(())
+}
+
+fn load_event(db: &Db, event_id: &str) -> Result<EventRecord, EngineError> {
+    EventRepo::get(db.conn(), event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))
+}
+
+fn parse_settings(event: &EventRecord) -> Result<EventSettings, EngineError> {
+    Ok(serde_json::from_str(&event.settings_json)?)
+}
+
+fn require_state(
+    event: &EventRecord,
+    expected: EventState,
+    action: &'static str,
+    expected_label: &'static str,
+) -> Result<(), EngineError> {
+    if event.state == expected {
+        Ok(())
+    } else {
+        Err(EngineError::WrongEventState {
+            action,
+            state: event.state,
+            expected: expected_label,
+        })
+    }
+}
+
+fn require_open_event(event: &EventRecord, action: &'static str) -> Result<(), EngineError> {
+    match event.state {
+        EventState::Active | EventState::Paused => Ok(()),
+        state => Err(EngineError::WrongEventState {
+            action,
+            state,
+            expected: "active or paused",
+        }),
+    }
+}
+
+fn unique_track_code(tracks: &[TrackRecord], seed: u64) -> String {
+    let mut salt = 0u32;
+    loop {
+        let candidate = track_code(seed, salt);
+        if !tracks.iter().any(|track| track.code == candidate) {
+            return candidate;
+        }
+        salt = salt.wrapping_add(1);
+    }
+}
+
+fn file_record(
+    event_id: &str,
+    track_code: &str,
+    version: u32,
+    holder_id: &str,
+    validated: &ValidatedFile,
+    storage_path: &str,
+    now: i64,
+) -> FileRecord {
+    FileRecord {
+        id: format!("{event_id}:{track_code}:{version}"),
+        event_id: event_id.to_string(),
+        track_code: track_code.to_string(),
+        version,
+        holder_id: holder_id.to_string(),
+        sha256: validated.sha256.clone(),
+        size: validated.size,
+        extension: validated.extension.clone(),
+        storage_path: storage_path.to_string(),
+        created_at: now,
+    }
+}
+
+fn latest_file(db: &Db, event_id: &str, track_code: &str) -> Result<FileRecord, EngineError> {
+    FileRepo::list_for_track(db.conn(), event_id, track_code)?
+        .pop()
+        .ok_or_else(|| EngineError::NoFile(track_code.to_string()))
+}
+
+fn move_track(
+    connection: &Connection,
+    event_id: &str,
+    track_code: &str,
+    target: TrackState,
+) -> Result<(), EngineError> {
+    for _ in 0..4 {
+        let track = TrackRepo::get(connection, event_id, track_code)?
+            .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+        if track.state == target {
+            return Ok(());
+        }
+        let next = if track.state.can_transition_to(target) {
+            target
+        } else if track.state.can_transition_to(TrackState::Pool) {
+            TrackState::Pool
+        } else {
+            return Err(EngineError::TrackPath(track_code.to_string()));
+        };
+        TrackRepo::set_state(connection, event_id, track_code, next)?;
+    }
+    Ok(())
+}
+
+fn is_safe_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+}

@@ -50,14 +50,16 @@ Target Cargo workspace:
 |---|---|---|
 | `swap-core` | domain types, invariants, scheduling, state machines | pure, sync, no I/O, no async, no Discord/Tauri |
 | `swap-db` | rusqlite repositories, migrations, ledger projection | one writer, `user_version`, in-memory tests |
-| `swap-discord` | Twilight adapter, command router, DM/claim delivery | maps Discord payloads to domain DTOs; no domain rules |
+| `swap-engine` | event commands, classic loop, plan commitment, effects | sync, no transport, no Tauri; returns effects |
+| `swap-discord` | Twilight adapter contract, command router, DM/claim delivery | maps Discord payloads to domain DTOs; no domain rules |
 | `swap-files` | quarantine, hashing, validation, scrub, preview, export | never trusts filenames; no auto-open |
 | `swap-sim` | fake Discord/clock/FS, synthetic participants, adversarial scenarios | deterministic seeds; used by tests and host dry-run |
 | `swap-acceptance` | cucumber-rs step definitions | calls app services through ports |
 | `src-tauri` | Tauri commands, state, supervisor, UI IPC | thin; validates DTOs; no business rules |
 
-The first slice ships only `swap-core` and `src-tauri`; add the others as the
-corresponding issues start.
+The current slice includes `swap-core`, `swap-db`, `swap-files`,
+`swap-discord`, `swap-engine`, and `src-tauri`. Add the live gateway, async
+queue, scrub/preview, simulator, and UI as the corresponding issues start.
 
 ## Ports and adapters
 

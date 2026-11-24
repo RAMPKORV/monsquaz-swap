@@ -48,13 +48,20 @@ Discord
 |---|---|
 | `swap-core` | pure domain, invariants, scheduler, state machines |
 | `swap-db` | rusqlite repositories, migrations, ledger projection |
+| `swap-engine` | classic event loop, plans, commitments, effects |
 | `swap-discord` | Twilight adapter, router, DM/claim delivery |
 | `swap-files` | quarantine, hash, validate, scrub, preview, export |
 | `swap-sim` | fake Discord/clock/FS, synthetic agents, adversarial runs |
 | `swap-acceptance` | cucumber-rs step definitions |
 | `src-tauri` | Tauri commands, state, supervisor, UI IPC |
 
-v0.1 ships `swap-core` and `src-tauri`. The other crates land with their issues.
+`swap-engine` is synchronous. It commits state and returns Discord effects.
+The caller dispatches the effects through `DiscordPort`. This keeps the event
+loop deterministic in tests and makes retries explicit.
+
+The current slice ships `swap-core`, `swap-db`, `swap-files`, `swap-discord`,
+`swap-engine`, and `src-tauri`. The live gateway, async queue, scrub/preview,
+and UI screens land with their issues.
 
 ## Data flow
 
@@ -91,7 +98,8 @@ deadline reaches
 - Tables: events, participants, tracks, versions/files, assignments, seen
   ledger, offers, extensions, audit, DM cursors, pack reports, comments.
 - Owner/author data is separate from recipient-facing projections.
-- Discord IDs are 64-bit. Store as INTEGER; serialize to the UI as strings.
+- Discord IDs are 64-bit snowflakes. Store them as TEXT and pass them through
+  unchanged; never parse them into a 53-bit JavaScript number.
 - Files live in a user-chosen library. The DB stores hashes, sizes, relative
   paths, and opaque IDs. The UI never sees absolute paths.
 

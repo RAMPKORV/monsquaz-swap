@@ -163,7 +163,7 @@ fn only_one_active_assignment_per_track_and_person() {
         ),
     )
     .unwrap();
-    TrackRepo::insert(db.conn(), &track("evt-1", "T02", "alice")).unwrap();
+    TrackRepo::insert(db.conn(), &track("evt-1", "T02", "bob")).unwrap();
 
     AssignmentRepo::insert(
         db.conn(),

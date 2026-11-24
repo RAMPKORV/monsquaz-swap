@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "allow",
+    "external_directory": {
+      "**": "deny",
+      "/tmp": "allow",
+      "/tmp/*": "allow",
+      "/tmp/**": "allow",
+      "/home/patrik/Projects/MonsquazSwap-worktrees": "allow",
+      "/home/patrik/Projects/MonsquazSwap-worktrees/*": "allow",
+      "/home/patrik/Projects/MonsquazSwap-worktrees/**": "allow",
+      "/home/patrik/.local/bin/**": "allow",
+      "/home/patrik/.npm-global/**": "allow",
+      "/home/patrik/.local/share/pnpm/**": "allow",
+      "/home/patrik/.cache/pnpm/**": "allow",
+      "/home/patrik/.cargo/**": "allow",
+      "/home/patrik/Projects/kuk/tools/bin/**": "allow"
+    },
+    "doom_loop": "ask"
+  },
+  "permissions": [
+    { "action": "read", "resource": "*.env", "effect": "ask" },
+    { "action": "read", "resource": "*.env.*", "effect": "ask" },
+    { "action": "read", "resource": "*.env.example", "effect": "allow" }
+  ]
+}

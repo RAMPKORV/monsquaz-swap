@@ -1,0 +1,29 @@
+{
+  "git": {
+    "main_branch": "main",
+    "remote": "origin"
+  },
+  "license": "MIT",
+  "paths": {
+    "decisions": "docs/generated/DECISIONS.md",
+    "dump": "project/ledger/current.jsonl",
+    "features": "specs/generated",
+    "prd": "docs/generated/PRD.md",
+    "status": "docs/generated/STATUS.md"
+  },
+  "project": {
+    "description": "Anonymous Discord music-swap host and bot",
+    "kind": "desktop",
+    "name": "Monsquaz Swap",
+    "prefix": "MSW",
+    "slug": "monsquaz-swap",
+    "stack": "Tauri 2 + Rust (Twilight, rusqlite) + React/TypeScript"
+  },
+  "version": 1,
+  "workflow": {
+    "ceremony_default": "light",
+    "review_bar": 8,
+    "score_ttl_days": 14,
+    "wip_limit": 2
+  }
+}

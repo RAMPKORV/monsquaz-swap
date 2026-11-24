@@ -1,0 +1,20 @@
+{
+  "name": "monsquaz-swap",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@12.23.0",
+  "scripts": {
+    "dev": "pnpm --dir ui dev",
+    "build": "pnpm --dir ui build",
+    "typecheck": "pnpm --dir ui typecheck",
+    "test": "pnpm --dir ui test",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.6",
+    "typescript": "~6.0.3"
+  }
+}

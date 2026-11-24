@@ -1,0 +1,159 @@
+# Architecture
+
+Public system design. Detailed agent rules live in
+`ai-rules/ARCHITECTURE.md` and `ai-rules/SECURITY.md`.
+
+## Context
+
+Monsquaz Swap is a desktop host for anonymous music-swap events. The host runs
+a Tauri app that embeds a Discord bot. Participants use Discord DMs and buttons.
+The app stores the event in SQLite and the files in a local library. There is no
+inbound server and no website.
+
+```text
+Host app (Tauri 2.12)
+├─ React/TS UI
+├─ Rust main process
+│  ├─ domain + scheduler
+│  ├─ SQLite (rusqlite, WAL)
+│  ├─ file store + scrub + preview
+│  ├─ Discord bot (Twilight 0.18)
+│  └─ openmpt123 sidecar (preview; render later)
+└─ OS keychain (bot token)
+
+Discord
+├─ guild: announcements, chat, reveal, help
+├─ DMs: offers, claims, submissions, reminders
+└─ guild commands + buttons
+```
+
+## Process model
+
+- Tauri owns the window, tray, single-instance lock, keychain, SQLite writer,
+  file store, and command handlers.
+- The bot is a supervised Tokio task. A panic restarts the task with backoff.
+  A fatal token/permission error stops and shows a fix-it message.
+- One writer owns SQLite. Writes run on `spawn_blocking` with short
+  transactions. The bot never opens a second writer.
+- The openmpt123 renderer is a separate child process. A malformed module can
+  kill the renderer, not the app.
+- Shutdown cancels the bot, closes the shard, checkpoints WAL, and closes the
+  DB.
+- A watchdog detects a dead gateway; a periodic DM backfill recovers messages
+  sent while the app was offline.
+
+## Crates
+
+| Crate | Responsibility |
+|---|---|
+| `swap-core` | pure domain, invariants, scheduler, state machines |
+| `swap-db` | rusqlite repositories, migrations, ledger projection |
+| `swap-discord` | Twilight adapter, router, DM/claim delivery |
+| `swap-files` | quarantine, hash, validate, scrub, preview, export |
+| `swap-sim` | fake Discord/clock/FS, synthetic agents, adversarial runs |
+| `swap-acceptance` | cucumber-rs step definitions |
+| `src-tauri` | Tauri commands, state, supervisor, UI IPC |
+
+v0.1 ships `swap-core` and `src-tauri`. The other crates land with their issues.
+
+## Data flow
+
+A handoff:
+
+```text
+scheduler chooses (track, person)
+  → app creates an offer + audit entry
+  → Discord adapter sends a DM card
+  → person taps Claim
+  → app checks the seen ledger and custody
+  → app sends the scrubbed file
+  → person edits and submits (DM attachment)
+  → app downloads, hashes, validates, scrubs, stores
+  → app records the version and sends a receipt
+  → next handoff
+```
+
+A deadline:
+
+```text
+deadline reaches
+  → bot sends the participant a prompt
+  → bot sends the host a decision card
+  → host extends, skips, reassigns, or waits
+  → app records the action
+  → no silent auto-advance
+```
+
+## Persistence
+
+- SQLite with WAL, `foreign_keys=ON`, `synchronous=NORMAL`, `busy_timeout`.
+- Migrations use `user_version`; never edit an applied migration.
+- Tables: events, participants, tracks, versions/files, assignments, seen
+  ledger, offers, extensions, audit, DM cursors, pack reports, comments.
+- Owner/author data is separate from recipient-facing projections.
+- Discord IDs are 64-bit. Store as INTEGER; serialize to the UI as strings.
+- Files live in a user-chosen library. The DB stores hashes, sizes, relative
+  paths, and opaque IDs. The UI never sees absolute paths.
+
+## Discord
+
+- Twilight 0.18. Guild commands for instant registration. Persistent DM
+  buttons for participant actions.
+- Intents: `GUILDS` + `DIRECT_MESSAGES`. No privileged intents.
+- Claim-first delivery: an offer is not a file. The file is sent after Claim.
+- DM handshake at join stores the DM channel ID. Blocked DMs use a
+  host-approved private thread. The host sees the risk.
+- Download attachments immediately. Never forward CDN URLs.
+- Map Discord errors to human actions. Stagger DMs and respect 429s.
+- No prefix commands, no self-bot, no user token.
+
+## Files
+
+- Allowlist by extension and magic bytes. Default: modules, audio, zip.
+- 20 MiB cap for bot redistribution. Larger files use a link download or a
+  host import.
+- Format changes are forbidden by default.
+- Module-aware scrub plus A/B render. Keep the untouched original.
+- No auto-open. Parse in a child process with time and memory limits.
+- Preview WAVs are served through a scoped custom protocol, not a broad asset
+  directory.
+- Album export writes a ZIP, credits, manifest, README, cover, and runbook.
+  Large exports are host-mediated.
+
+## Anonymity
+
+- Separate owner/contributor tables. Recipient queries never join them.
+- Participant DTOs pass a redaction assertion.
+- Outbound filenames are opaque. Host storage is readable.
+- Public progress is status + countdown. No per-person counts before deadline.
+- Visible schedule exposes assignments only.
+- Comments are host+reveal only. Skips are host-only.
+- Reveal order is HMAC-sorted. No file hashes before reveal.
+- Stream-safe mode hides the mapping during a stream.
+- The host can see the mapping. The rules say so.
+
+## Security
+
+- Token in the OS keychain. Never in the UI, logs, SQLite, or git.
+- Tauri capabilities limited to `core:default` plus explicit needs. No `fs`,
+  `shell`, `http`, or `sql` plugins.
+- File bytes and absolute paths never cross IPC.
+- Validate every command argument. Return typed errors with no paths/secrets.
+- CSP hardening is a pre-release task; the scaffold uses `null`.
+- Single-instance lock; one bot session per token.
+
+## Release
+
+- GitHub Actions: tracker, UI, Rust, Tauri smoke on Ubuntu + Windows.
+- GitHub Releases: Windows NSIS, Linux `.deb` + AppImage.
+- Windows unsigned; SmartScreen warning documented.
+- macOS deferred until Apple signing is funded.
+- Auto-update off in v1. Update keys are not created.
+- `SHA256SUMS` + GitHub attestations are attached.
+
+## Open decisions
+
+- Album/keepsake delivery for files above 20 MiB (host-mediated link).
+- Exact retention period and backup expiry.
+- openmpt123 static build and sidecar packaging.
+- CSP hardening and final Tauri capability list.

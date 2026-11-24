@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Shorthand for the tracker CLI. Run from the repo root: ./bin/project status
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$here/../tools/project/cli.py" "$@"

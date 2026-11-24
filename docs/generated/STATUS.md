@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 15 · **Ready leaves:** 7  
+**Blocked issues:** 15 · **Ready leaves:** 6  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 28
+**Stale scores:** 27
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 17 |
+| Ready for implementation | 16 |
 | Implementation | 0 |
 | Reviewing | 1 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 1 |
+| Done | 2 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -30,10 +30,9 @@
 | 2 | `MSW-002` | Cucumber acceptance harness | ready | 4 |
 | 3 | `MSW-014` | SQLite schema, migrations, and repositories | ready | 4 |
 | 5 | `MSW-019` | Host UI shell, mission control, and settings | ready | 3 |
-| 15 | `MSW-013` | Classic Latin-square scheduler and property tests | ready | 2 |
-| 16 | `MSW-017` | Twilight adapter and setup wizard backend | ready | 2 |
-| 23 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
-| 24 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
+| 15 | `MSW-017` | Twilight adapter and setup wizard backend | ready | 2 |
+| 22 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
+| 23 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
 
 ## Last session
 

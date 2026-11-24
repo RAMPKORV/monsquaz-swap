@@ -74,6 +74,13 @@ Feature: Anonymity until reveal
     Then the commitment covers the schedule and the policy
     And the commitment does not contain a hash of any submitted file
 
+  Scenario: A small event is not blocked or warned
+    Given a host who creates an event with 3 participants
+    When the host starts the event
+    Then the app does not block the event
+    And the app does not show a small-event anonymity warning
+    And the rules state that small events are weak for anonymity
+
   Scenario: The reveal order does not follow submission time
     Given submissions at different times
     When the reveal orders the tracks

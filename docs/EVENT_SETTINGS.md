@@ -95,6 +95,8 @@ Rules:
 - Public progress must not allow a participant to identify who is late. Use
   status and countdown before the deadline.
 - The host can see the mapping. The rules must say this.
+- The app does not enforce a minimum participant count and does not show a
+  small-event anonymity warning. The rules state the limits; the host decides.
 
 ## 5. Host pack and samples
 
@@ -206,6 +208,7 @@ Rules:
 | Fun stats | On | On; minimal; off | No |
 | Runbook export | Markdown + HTML | Markdown + HTML; PDF; JSON; none | No |
 | Personal keepsake | On | On; final album only; host | No |
+| Large export delivery | Host chooses; default host-mediated link | Host-mediated link; split DMs; Discord parts | No |
 | Album order | Secret-shuffled | Secret-shuffled; host curated; submission order | No |
 
 ## 11. Commit-reveal, audit, privacy
@@ -263,10 +266,8 @@ action for each section.
 
 | # | Question | Default | Trigger |
 |---|---|---|---|
-| 1 | Large export delivery | Host-mediated link | Before keepsake export |
-| 2 | Exact retention period | Until host deletes; backups 90 days | Before public release |
-| 3 | Small-event anonymity warning threshold | Warn below 5; no hard minimum | Before public release |
-| 4 | Windows SmartScreen copy | Document + checksum | Before beta |
-| 5 | Pack delivery channel | DM + pinned post | Before pack implementation |
-| 6 | Async content tags | Optional later; no participant groups | After v1 |
-| 7 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive | Before async implementation |
+| 1 | Exact retention period | Until host deletes; backups 90 days; logs 30 days | Before public release |
+| 2 | Windows SmartScreen copy | Document + checksum | Before beta |
+| 3 | Pack delivery channel | DM + pinned post | Before pack implementation |
+| 4 | Async content tags | Optional later; no participant groups | After v1 |
+| 5 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive | Before async implementation |

@@ -235,6 +235,7 @@ named command. IDs are stable.
 | REQ-ANON-006 | must | Skips SHALL be host-only during the event and show as anonymous gaps by default at reveal. | `anonymity.feature` |
 | REQ-ANON-007 | must | Stream-safe mode SHALL hide the mapping and redact IDs for screen sharing. | `anonymity.feature` |
 | REQ-ANON-008 | should | The host-can-see disclosure SHALL appear in the rules; host participation is allowed with disclosure. | `anonymity.feature` |
+| REQ-ANON-009 | must | The app SHALL NOT enforce a minimum participant count or show a small-event anonymity warning. The event rules SHALL state the anonymity limits and the host decides. | `anonymity.feature` |
 
 ### Reveal & export
 
@@ -246,6 +247,7 @@ named command. IDs are stable.
 | REQ-REVEAL-004 | must | The app SHALL export a full ZIP (finals, credits, manifest, cover, README) and a Markdown+HTML runbook. | `reveal.feature` |
 | REQ-REVEAL-005 | should | Each participant SHALL receive a personal keepsake of every version they touched, with credits unlocked at reveal. | `reveal.feature` |
 | REQ-REVEAL-006 | must | The album order SHALL be secret-shuffled by HMAC(track code, event secret), not submission order. | `reveal.feature` |
+| REQ-REVEAL-007 | should | Large album and keepsake exports SHALL use the host-chosen delivery method. The default is a host-mediated neutral link. | `reveal.feature` |
 
 ### Ops, recovery, privacy, release
 
@@ -300,16 +302,14 @@ anonymity test suites green.
 
 | # | Question | Status / default | Trigger |
 |---|---|---|---|
-| 1 | How are album/keepsake ZIPs delivered when >20 MiB? | Host-mediated neutral link; the app writes the ZIP locally. | Before REQ-REVEAL-005 |
-| 2 | Exact k for public aggregates / small-event warning | No hard minimum (host choice); warn below 5; recommend k≥5. | Before public release |
-| 3 | Host pack delivery: DM vs channel | DM to each participant at join/start; the host can also pin it. | Before REQ-FILES-002 |
-| 4 | Default retention period after archive | Keep until host deletes; document; backups expire 90 days. | Before public release |
-| 5 | Windows SmartScreen copy and checksum UX | Document; no signing in v1. | Before beta |
-| 6 | Render pipeline (openmpt123 vs WASM) | openmpt123 sidecar; preview v1, render later. | Before REQ-FILES-008 |
-| 7 | Release stream integration depth | Discord scheduled event + countdown; OBS external. | Before REQ-REVEAL-003 |
-| 8 | Participant name changes between join and reveal | Join-time display name snapshot; refresh with host review. | Before REQ-REVEAL-002 |
-| 9 | Async content tags | Optional later; no participant groups. | After v1 |
-| 10 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive. | Before async implementation |
+| 1 | Host pack delivery: DM vs channel | DM to each participant at join/start; the host can also pin it. | Before REQ-FILES-002 |
+| 2 | Default retention period after archive | Keep until host deletes; document; backups expire 90 days. | Before public release |
+| 3 | Windows SmartScreen copy and checksum UX | Document; no signing in v1. | Before beta |
+| 4 | Render pipeline (openmpt123 vs WASM) | openmpt123 sidecar; preview v1, render later. | Before REQ-FILES-008 |
+| 5 | Release stream integration depth | Discord scheduled event + countdown; OBS external. | Before REQ-REVEAL-003 |
+| 6 | Participant name changes between join and reveal | Join-time display name snapshot; refresh with host review. | Before REQ-REVEAL-002 |
+| 7 | Async content tags | Optional later; no participant groups. | After v1 |
+| 8 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive. | Before async implementation |
 
 **Assumptions**
 

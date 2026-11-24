@@ -63,6 +63,13 @@ Feature: Reveal and album
     And the app writes a Markdown and HTML runbook
     And the app writes a personal keepsake for each participant
 
+  Scenario: A large export uses the host choice
+    Given an album ZIP larger than 20 MiB
+    When the host exports the album
+    Then the app writes the ZIP locally
+    And the host chooses a neutral link or split DMs
+    And the bot does not attempt a direct ZIP upload above the cap
+
   Scenario: The schedule is disclosed at the reveal
     Given a hidden schedule
     When the host publishes the Discord reveal

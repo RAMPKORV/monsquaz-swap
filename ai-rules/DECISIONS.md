@@ -263,3 +263,17 @@ completeness is not a promise.
 re-offers (harassment/loop), auto-removal (harsh), changing the seen rule
 (weakens the core invariant).
 
+## D-027 — No small-event warning and host-chosen large exports
+
+**Context:** a hard minimum would block private small events. Large album ZIPs
+can exceed the Discord limit.
+**Decision:** do not enforce a minimum participant count and do not show a
+small-event anonymity warning; the rules state the limits. Large album and
+keepsake exports use the host-chosen delivery method; the default is a
+host-mediated neutral link.
+**Consequences:** the host can run a 2-person event. The app does not protect the
+host from weak anonymity. The host must choose a safe link host and verify the
+file.
+**Rejected:** a hard minimum, a mandatory warning, and a single fixed export
+channel.
+

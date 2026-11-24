@@ -4,7 +4,8 @@ use crate::db::DbError;
 
 /// Migration 001: the initial event, roster, track, assignment, file, and audit
 /// schema. Enums are stored as snake_case strings and validated by the codec.
-pub const MIGRATIONS: &[&str] = &[r#"
+pub const MIGRATIONS: &[&str] = &[
+    r#"
 CREATE TABLE events (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -117,7 +118,42 @@ CREATE INDEX assignments_by_event_round ON assignments(event_id, round);
 CREATE INDEX seen_pairs_by_event ON seen_pairs(event_id);
 CREATE INDEX files_by_track ON files(event_id, track_code, version);
 CREATE INDEX audit_by_event ON audit_log(event_id, at);
-"#];
+"#,
+    r#"
+-- Migration 002: committed schedule plans and one seed track per owner.
+CREATE UNIQUE INDEX one_track_per_owner ON tracks(event_id, owner_id);
+
+CREATE TABLE plan_versions (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
+    rounds INTEGER NOT NULL,
+    settings_json TEXT NOT NULL,
+    commitment TEXT NOT NULL,
+    committed_at INTEGER NOT NULL,
+    reason TEXT,
+    PRIMARY KEY (event_id, version)
+) STRICT;
+
+CREATE TABLE plan_assignments (
+    event_id TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    round INTEGER NOT NULL,
+    track_code TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    PRIMARY KEY (event_id, plan_version, round, track_code),
+    FOREIGN KEY (event_id, plan_version)
+        REFERENCES plan_versions(event_id, version) ON DELETE CASCADE,
+    FOREIGN KEY (event_id, track_code)
+        REFERENCES tracks(event_id, code) ON DELETE CASCADE,
+    FOREIGN KEY (event_id, participant_id)
+        REFERENCES participants(event_id, user_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX plan_assignments_by_round
+    ON plan_assignments(event_id, plan_version, round);
+"#,
+];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

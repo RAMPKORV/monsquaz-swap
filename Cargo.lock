@@ -3897,6 +3897,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "swap-engine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "swap-core",
+ "swap-db",
+ "swap-discord",
+ "swap-files",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "swap-files"
 version = "0.1.0"
 dependencies = [

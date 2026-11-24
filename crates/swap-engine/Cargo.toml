@@ -1,0 +1,22 @@
+[package]
+name = "swap-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Event application service for Monsquaz Swap"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+swap-core = { path = "../swap-core" }
+swap-db = { path = "../swap-db" }
+swap-discord = { path = "../swap-discord" }
+swap-files = { path = "../swap-files" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

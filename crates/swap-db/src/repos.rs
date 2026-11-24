@@ -289,6 +289,22 @@ impl TrackRepo {
         Ok(())
     }
 
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        code: &str,
+    ) -> Result<Option<TrackRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT event_id, code, owner_id, state, created_at
+                 FROM tracks WHERE event_id = ?1 AND code = ?2",
+                params![event_id, code],
+                row_to_raw_track,
+            )
+            .optional()?;
+        raw.map(TrackRecord::try_from).transpose()
+    }
+
     pub fn list_for_event(conn: &Connection, event_id: &str) -> Result<Vec<TrackRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT event_id, code, owner_id, state, created_at
@@ -300,6 +316,19 @@ impl TrackRepo {
         rows.into_iter()
             .map(TrackRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub fn set_state(
+        conn: &Connection,
+        event_id: &str,
+        code: &str,
+        state: TrackState,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE tracks SET state = ?1 WHERE event_id = ?2 AND code = ?3",
+            params![to_db(&state)?, event_id, code],
+        )?;
+        Ok(changed > 0)
     }
 }
 
@@ -477,6 +506,248 @@ impl AssignmentRepo {
             params![to_db(&status)?, updated_at, id],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn claim(
+        conn: &Connection,
+        id: &str,
+        claimed_at: i64,
+        due_at: i64,
+        updated_at: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments
+             SET status = 'claimed', claimed_at = ?1, due_at = ?2, updated_at = ?3
+             WHERE id = ?4 AND status = 'offered'",
+            params![claimed_at, due_at, updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn submit(
+        conn: &Connection,
+        id: &str,
+        submitted_at: i64,
+        updated_at: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments
+             SET status = 'submitted', submitted_at = ?1, updated_at = ?2
+             WHERE id = ?3 AND status IN ('claimed', 'overdue', 'submitted')",
+            params![submitted_at, updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn latest_for_participant(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: &str,
+    ) -> Result<Option<AssignmentRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT id, event_id, track_code, participant_id, round, status,
+                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+                 FROM assignments
+                 WHERE event_id = ?1 AND participant_id = ?2
+                 ORDER BY round DESC, created_at DESC LIMIT 1",
+                params![event_id, participant_id],
+                row_to_raw_assignment,
+            )
+            .optional()?;
+        raw.map(AssignmentRecord::try_from).transpose()
+    }
+
+    pub fn list_active(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<AssignmentRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, track_code, participant_id, round, status,
+                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+             FROM assignments
+             WHERE event_id = ?1 AND status IN ('offered', 'claimed', 'overdue')
+             ORDER BY round, track_code",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_raw_assignment)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(AssignmentRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanRecord {
+    pub event_id: String,
+    pub version: u32,
+    pub seed: u64,
+    pub rounds: u32,
+    pub settings_json: String,
+    pub commitment: String,
+    pub committed_at: i64,
+    pub reason: Option<String>,
+}
+
+struct RawPlan {
+    event_id: String,
+    version: i64,
+    seed: i64,
+    rounds: i64,
+    settings_json: String,
+    commitment: String,
+    committed_at: i64,
+    reason: Option<String>,
+}
+
+impl TryFrom<RawPlan> for PlanRecord {
+    type Error = DbError;
+
+    fn try_from(raw: RawPlan) -> Result<Self, DbError> {
+        Ok(Self {
+            event_id: raw.event_id,
+            version: raw.version as u32,
+            seed: raw.seed as u64,
+            rounds: raw.rounds as u32,
+            settings_json: raw.settings_json,
+            commitment: raw.commitment,
+            committed_at: raw.committed_at,
+            reason: raw.reason,
+        })
+    }
+}
+
+fn row_to_raw_plan(row: &Row<'_>) -> rusqlite::Result<RawPlan> {
+    Ok(RawPlan {
+        event_id: row.get(0)?,
+        version: row.get(1)?,
+        seed: row.get(2)?,
+        rounds: row.get(3)?,
+        settings_json: row.get(4)?,
+        commitment: row.get(5)?,
+        committed_at: row.get(6)?,
+        reason: row.get(7)?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanAssignmentRecord {
+    pub event_id: String,
+    pub plan_version: u32,
+    pub round: u32,
+    pub track_code: String,
+    pub participant_id: String,
+}
+
+struct RawPlanAssignment {
+    event_id: String,
+    plan_version: i64,
+    round: i64,
+    track_code: String,
+    participant_id: String,
+}
+
+impl TryFrom<RawPlanAssignment> for PlanAssignmentRecord {
+    type Error = DbError;
+
+    fn try_from(raw: RawPlanAssignment) -> Result<Self, DbError> {
+        Ok(Self {
+            event_id: raw.event_id,
+            plan_version: raw.plan_version as u32,
+            round: raw.round as u32,
+            track_code: raw.track_code,
+            participant_id: raw.participant_id,
+        })
+    }
+}
+
+fn row_to_raw_plan_assignment(row: &Row<'_>) -> rusqlite::Result<RawPlanAssignment> {
+    Ok(RawPlanAssignment {
+        event_id: row.get(0)?,
+        plan_version: row.get(1)?,
+        round: row.get(2)?,
+        track_code: row.get(3)?,
+        participant_id: row.get(4)?,
+    })
+}
+
+pub struct PlanRepo;
+
+impl PlanRepo {
+    pub fn insert(conn: &Connection, plan: &PlanRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO plan_versions
+                (event_id, version, seed, rounds, settings_json, commitment,
+                 committed_at, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &plan.event_id,
+                plan.version as i64,
+                plan.seed as i64,
+                plan.rounds as i64,
+                &plan.settings_json,
+                &plan.commitment,
+                plan.committed_at,
+                &plan.reason
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn latest(conn: &Connection, event_id: &str) -> Result<Option<PlanRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT event_id, version, seed, rounds, settings_json, commitment,
+                        committed_at, reason
+                 FROM plan_versions WHERE event_id = ?1
+                 ORDER BY version DESC LIMIT 1",
+                params![event_id],
+                row_to_raw_plan,
+            )
+            .optional()?;
+        raw.map(PlanRecord::try_from).transpose()
+    }
+
+    pub fn insert_assignment(
+        conn: &Connection,
+        assignment: &PlanAssignmentRecord,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO plan_assignments
+                (event_id, plan_version, round, track_code, participant_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                &assignment.event_id,
+                assignment.plan_version as i64,
+                assignment.round as i64,
+                &assignment.track_code,
+                &assignment.participant_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_assignments(
+        conn: &Connection,
+        event_id: &str,
+        plan_version: u32,
+    ) -> Result<Vec<PlanAssignmentRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT event_id, plan_version, round, track_code, participant_id
+             FROM plan_assignments
+             WHERE event_id = ?1 AND plan_version = ?2
+             ORDER BY round, track_code",
+        )?;
+        let rows = statement
+            .query_map(
+                params![event_id, plan_version as i64],
+                row_to_raw_plan_assignment,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(PlanAssignmentRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 

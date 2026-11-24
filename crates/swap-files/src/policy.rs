@@ -114,6 +114,26 @@ impl Default for FilePolicy {
 }
 
 impl FilePolicy {
+    pub fn from_extensions<I, S>(extensions: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut policy = Self {
+            allowed_extensions: BTreeSet::new(),
+            max_size: DEFAULT_MAX_SIZE,
+        };
+        for extension in extensions {
+            policy.allowed_extensions.insert(
+                extension
+                    .as_ref()
+                    .trim_start_matches('.')
+                    .to_ascii_lowercase(),
+            );
+        }
+        policy
+    }
+
     pub fn with_max_size(mut self, max_size: u64) -> Self {
         self.max_size = max_size;
         self

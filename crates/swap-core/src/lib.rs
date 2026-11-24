@@ -11,10 +11,12 @@
 
 pub mod ids;
 pub mod ledger;
+pub mod schedule;
 pub mod state;
 
 pub use ids::{ParticipantId, TrackCode};
 pub use ledger::{LedgerError, SeenLedger, Touch};
+pub use schedule::{Schedule, ScheduleError, ScheduledAssignment, TrackSpec};
 pub use state::{
     Assignment, AssignmentError, AssignmentStatus, EventState, Membership, Participant, Readiness,
     Role, StateError, Track, TrackState,

@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 15 · **Ready leaves:** 5  
+**Blocked issues:** 14 · **Ready leaves:** 5  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 26
+**Stale scores:** 25
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 15 |
+| Ready for implementation | 14 |
 | Implementation | 0 |
 | Reviewing | 1 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 3 |
+| Done | 4 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -27,11 +27,11 @@
 
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
-| 2 | `MSW-014` | SQLite schema, migrations, and repositories | ready | 4 |
-| 4 | `MSW-019` | Host UI shell, mission control, and settings | ready | 3 |
-| 14 | `MSW-017` | Twilight adapter and setup wizard backend | ready | 2 |
-| 21 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
-| 22 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
+| 2 | `MSW-015` | File quarantine, allowlist, hash, and pack report | ready | 3 |
+| 3 | `MSW-019` | Host UI shell, mission control, and settings | ready | 3 |
+| 13 | `MSW-017` | Twilight adapter and setup wizard backend | ready | 2 |
+| 20 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
+| 21 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
 
 ## Last session
 

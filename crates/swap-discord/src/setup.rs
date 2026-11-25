@@ -10,21 +10,63 @@ pub struct BotIdentity {
     pub username: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildSummary {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelSummary {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SetupError {
     #[error("the bot token is empty")]
     EmptyToken,
     #[error("the bot token does not have the expected three-part shape")]
     InvalidShape,
+    #[error("the bot token is not valid")]
+    TokenRejected,
+    #[error("the guild or channel is not valid")]
+    InvalidSelection,
+    #[error("the user id is not a Discord snowflake")]
+    InvalidUserId,
+    #[error("the bot cannot send a direct message to this user")]
+    DmClosed,
     #[error("token validation failed: {0}")]
     Validation(String),
+    #[error("Discord setup request failed: {0}")]
+    Discord(String),
 }
 
-/// The live implementation calls `GET /users/@me` with the bot token. The
-/// setup wizard uses this trait so tests never touch the network.
+/// The live implementation calls the Discord REST API. The setup wizard uses
+/// this trait so tests never touch the network.
 #[async_trait]
 pub trait TokenValidator: Send + Sync {
     async fn validate(&self, token: &str) -> Result<BotIdentity, SetupError>;
+}
+
+/// Directory and delivery operations for the setup wizard.
+///
+/// Each call takes the token because the host has not saved it yet. The
+/// implementation must never print or persist the token.
+#[async_trait]
+pub trait SetupDirectory: Send + Sync {
+    async fn validate_token(&self, token: &str) -> Result<BotIdentity, SetupError>;
+
+    async fn guilds(&self, token: &str) -> Result<Vec<GuildSummary>, SetupError>;
+
+    async fn channels(
+        &self,
+        token: &str,
+        guild_id: &str,
+    ) -> Result<Vec<ChannelSummary>, SetupError>;
+
+    /// Send a test direct message and return the Discord message id.
+    async fn send_test_dm(&self, token: &str, user_id: &str) -> Result<String, SetupError>;
 }
 
 pub fn validate_bot_token_shape(token: &str) -> Result<(), SetupError> {

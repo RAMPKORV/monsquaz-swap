@@ -1,7 +1,10 @@
 import type {
   ActivityEntry,
   AuditEntry,
+  BotPreview,
+  ChannelOption,
   Decision,
+  GuildOption,
   HostSettings,
   MissionControl,
   Scenario,
@@ -324,10 +327,14 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
 
 const defaultSettings: HostSettings = {
   botConfigured: true,
-  botIdentity: "Monsquaz Bot, application 1184",
+  botIdentity: "Monsquaz Bot (1184)",
+  tokenStorage: "keychain",
+  guildId: "8142276038192",
   guildName: "The Night Shift",
-  announcementChannel: "#swap-announcements",
-  revealChannel: "#swap-reveal",
+  announcementChannelId: "8142276040001",
+  announcementChannelName: "swap-announcements",
+  revealChannelId: "8142276040002",
+  revealChannelName: "swap-reveal",
   dmFallback: true,
   timezone: "Europe/Stockholm",
   retentionDays: 90,
@@ -345,9 +352,13 @@ export function demoSettings(scenario: Scenario): HostSettings {
       ...defaultSettings,
       botConfigured: false,
       botIdentity: "",
+      tokenStorage: "none",
+      guildId: "",
       guildName: "",
-      announcementChannel: "",
-      revealChannel: "",
+      announcementChannelId: "",
+      announcementChannelName: "",
+      revealChannelId: "",
+      revealChannelName: "",
       theme: "system",
     };
   }
@@ -355,17 +366,39 @@ export function demoSettings(scenario: Scenario): HostSettings {
     return {
       ...defaultSettings,
       botIdentity:
-        "Monsquaz Bot, application 1184, The Extremely Long Server Name for Testing",
+        "Monsquaz Bot With An Extremely Long Display Name That Keeps Going (1184)",
+      guildId: "8142276038192",
       guildName:
         "The Extremely Long Server Name for Testing and Occasionally Haunting",
-      announcementChannel: "#swap-announcements-and-release-notes",
-      revealChannel: "#swap-reveal-and-album-keepsakes",
+      announcementChannelId: "8142276040001",
+      announcementChannelName: "swap-announcements-and-release-notes",
+      revealChannelId: "8142276040002",
+      revealChannelName: "swap-reveal-and-album-keepsakes",
       timezone: "America/Argentina/Buenos_Aires",
       retentionDays: 365,
     };
   }
   return { ...defaultSettings, theme: "system" };
 }
+
+export const demoBotPreview: BotPreview = {
+  botId: "1184",
+  identity: "Monsquaz Bot (1184)",
+  inviteUrl:
+    "https://discord.com/oauth2/authorize?client_id=1184&scope=bot%20applications.commands&permissions=117760",
+};
+
+export const demoGuilds: GuildOption[] = [
+  { id: "8142276038192", name: "The Night Shift" },
+  { id: "8142276038193", name: "Basement Tapes" },
+];
+
+export const demoChannels: ChannelOption[] = [
+  { id: "8142276040001", name: "swap-announcements" },
+  { id: "8142276040002", name: "swap-reveal" },
+  { id: "8142276040003", name: "swap-chat" },
+  { id: "8142276040004", name: "swap-help" },
+];
 
 const auditSeeds: Array<[string, string, string, string, string]> = [
   ["25 Nov, 17:12", "Host", "Deadline extended", "S7F3A", "Holder asked for six hours; first extension is automatic."],

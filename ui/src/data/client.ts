@@ -6,8 +6,13 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   AuditEntry,
+  BotPreview,
+  BotSetupInput,
+  BotStatus,
+  ChannelOption,
   EventDraft,
   EventSummary,
+  GuildOption,
   HostSettings,
   MissionControl,
   PeopleData,
@@ -19,6 +24,9 @@ import type {
 } from "../types";
 import {
   demoAuditLog,
+  demoBotPreview,
+  demoChannels,
+  demoGuilds,
   demoMissionControl,
   demoPeople,
   demoPlan,
@@ -133,7 +141,112 @@ export async function loadSettings(scenario: Scenario): Promise<HostSettings> {
     await pause(160);
     return demoSettings(scenario);
   }
-  return invoke<HostSettings>("host_settings");
+  const settings = await invoke<HostSettings>("host_settings");
+  try {
+    const status = await invoke<BotStatus>("host_bot_status");
+    if (status.keychainError) {
+      return { ...settings, keychainError: true };
+    }
+    return {
+      ...settings,
+      keychainError: false,
+      botConfigured: status.configured,
+      tokenStorage: status.tokenStorage,
+    };
+  } catch {
+    return settings;
+  }
+}
+
+export async function validateBotToken(token: string): Promise<BotPreview> {
+  if (isDemoMode()) {
+    await pause(320);
+    const value = token.trim();
+    if (
+      value.length < 20 ||
+      value.split(".").length !== 3 ||
+      !/^[A-Za-z0-9._-]+$/.test(value)
+    ) {
+      throw new HostError(
+        "The token does not have the expected shape.",
+        "MSW-BOT-001",
+      );
+    }
+    return demoBotPreview;
+  }
+  return invoke<BotPreview>("host_bot_validate", { token });
+}
+
+export async function loadBotGuilds(token: string): Promise<GuildOption[]> {
+  if (isDemoMode()) {
+    await pause(240);
+    return demoGuilds;
+  }
+  return invoke<GuildOption[]>("host_bot_guilds", { token });
+}
+
+export async function loadBotChannels(
+  token: string,
+  guildId: string,
+): Promise<ChannelOption[]> {
+  if (isDemoMode()) {
+    await pause(240);
+    return demoChannels;
+  }
+  return invoke<ChannelOption[]>("host_bot_channels", { token, guildId });
+}
+
+export async function saveBotSetup(
+  input: BotSetupInput,
+): Promise<HostSettings> {
+  if (isDemoMode()) {
+    await pause(420);
+    const keychainDown =
+      new URLSearchParams(window.location.search).get("botKeychain") === "down";
+    if (keychainDown && !input.allowSessionOnly) {
+      throw new HostError(
+        "The OS keychain is not available. Install a Secret Service provider, or choose the session-only option.",
+        "MSW-BOT-002",
+      );
+    }
+    const guild = demoGuilds.find((entry) => entry.id === input.guildId);
+    const announcement = demoChannels.find(
+      (entry) => entry.id === input.announcementChannelId,
+    );
+    const reveal = demoChannels.find((entry) => entry.id === input.revealChannelId);
+    return {
+      ...demoSettings("default"),
+      botConfigured: true,
+      botIdentity: demoBotPreview.identity,
+      tokenStorage: input.allowSessionOnly ? "session" : "keychain",
+      guildId: guild?.id ?? "",
+      guildName: guild?.name ?? "",
+      announcementChannelId: announcement?.id ?? "",
+      announcementChannelName: announcement?.name ?? "",
+      revealChannelId: reveal?.id ?? "",
+      revealChannelName: reveal?.name ?? "",
+    };
+  }
+  return invoke<HostSettings>("host_bot_save", { input });
+}
+
+export async function sendBotTestDm(userId: string): Promise<string> {
+  if (isDemoMode()) {
+    await pause(260);
+    return "Preview: the test message is not sent in this build.";
+  }
+  return invoke<string>("host_bot_test_dm", { userId });
+}
+
+export async function clearBotSetup(): Promise<HostSettings> {
+  if (isDemoMode()) {
+    await pause(240);
+    return {
+      ...demoSettings("empty"),
+      theme: demoSettings("default").theme,
+    };
+  }
+  return invoke<HostSettings>("host_bot_clear");
 }
 
 export async function loadAuditLog(scenario: Scenario): Promise<AuditEntry[]> {

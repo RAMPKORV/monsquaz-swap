@@ -6,6 +6,7 @@ type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
 
 type ButtonProps = {
   children: ReactNode;
+  id?: string;
   variant?: ButtonVariant;
   icon?: IconName;
   onClick?: () => void;
@@ -13,10 +14,12 @@ type ButtonProps = {
   type?: "button" | "submit";
   className?: string;
   ariaLabel?: string;
+  describedBy?: string;
 };
 
 export function Button({
   children,
+  id,
   variant = "secondary",
   icon,
   onClick,
@@ -24,14 +27,17 @@ export function Button({
   type = "button",
   className = "",
   ariaLabel,
+  describedBy,
 }: ButtonProps) {
   return (
     <button
+      id={id}
       type={type}
       className={`button button--${variant} ${className}`.trim()}
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-describedby={describedBy}
     >
       {icon ? <Icon name={icon} size={18} /> : null}
       <span>{children}</span>
@@ -247,12 +253,14 @@ export function Dialog({
   onClose,
   footer,
   labelledBy = "dialog-title",
+  initialFocusId,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   footer: ReactNode;
   labelledBy?: string;
+  initialFocusId?: string;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -262,9 +270,13 @@ export function Dialog({
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const initial =
+      (initialFocusId
+        ? document.getElementById(initialFocusId)
+        : null) ??
       dialogRef.current?.querySelector<HTMLElement>(
         "input:not([disabled]), select:not([disabled]), textarea:not([disabled])",
-      ) ?? closeRef.current;
+      ) ??
+      closeRef.current;
     initial?.focus();
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {

@@ -20,6 +20,13 @@ Feature: Host operations and recovery
     And the app does not show the token
     And the app does not show the last characters of the token
 
+  Scenario: The host maps the announcement and reveal channels
+    Given a valid bot token and a guild
+    When the host selects the announcement channel and the reveal channel
+    Then the app stores both channel ids
+    And the app refuses the same channel twice
+    And the app refuses a channel that the bot cannot see
+
   Scenario: The bot registers the guild command
     Given a valid bot token and a guild
     When the bot connects to Discord

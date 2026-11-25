@@ -17,8 +17,9 @@ normalized events and decides what to do.
   and the short-lived response token. The token is redacted in `Debug` output.
 - The runtime does not download attachment bytes. It passes the URL and size to
   the application. The application downloads and stores the bytes.
-- The runtime does not send DMs or files. Delivery remains the `DiscordPort`
-  adapter for the offer and submission slice.
+- The runtime does not send DMs or files. The live `HttpDiscordPort` adapter
+  sends the setup test message and backs `fetch_dm_after`. The delivery loop
+  remains in the offer and submission slice.
 - `src-tauri/src/gateway_host.rs` owns the supervisor task on Tauri's runtime.
   The setup service starts it after it reads the keychain token.
 
@@ -85,7 +86,9 @@ cargo check -p monsquaz-swap --no-default-features
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and
   `host-status`. Discord command permissions do not apply per subcommand.
-- The host keychain and the start/stop UI commands remain in the setup slice.
+- The bot setup flow is in `docs/SETUP.md`. It stores the token in the OS
+  keychain, maps channels, and sends a test direct message.
+- The start/stop UI commands remain in the delivery slice.
 - Outbound DM, file delivery, and DM backfill remain in the offer and
   submission slice. `DiscordPort::fetch_dm_after` has no live adapter yet.
 - The real test guild smoke test needs `DISCORD_TOKEN` and `DISCORD_GUILD`.

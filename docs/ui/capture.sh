@@ -119,6 +119,14 @@ shot settings-populated-dark-1024 "view=settings" 1024 700
 shot settings-full-dark-1280x2000 "view=settings" 1280 2000
 shot settings-full-light-1280x2000 "view=settings&theme=light" 1280 2000
 shot settings-delete-dialog-dark-1280 "view=settings&dialog=delete" 1280 800
+shot settings-bot-dialog-dark-1280 "view=settings&dialog=bot" 1280 800
+shot settings-bot-dialog-light-1280 "view=settings&dialog=bot&theme=light" 1280 800
+shot settings-bot-dialog-dark-1024 "view=settings&dialog=bot" 1024 700
+shot settings-bot-dialog-empty-dark-1280 "view=settings&dialog=bot&state=empty" 1280 800
+shot settings-bot-dialog-token-error-dark-1280 "view=settings&dialog=bot&botError=token" 1280 800
+shot settings-bot-dialog-test-error-dark-1280 "view=settings&dialog=bot&botError=test" 1280 800
+shot settings-bot-dialog-keychain-dark-1280 "view=settings&dialog=bot&botError=keychain" 1280 800
+shot settings-bot-dialog-confirm-dark-1280 "view=settings&dialog=bot&botError=confirm" 1280 800
 shot settings-dirty-dark-1280 "view=settings&dirty=1" 1280 800
 shot settings-dirty-dark-1024 "view=settings&dirty=1" 1024 700
 

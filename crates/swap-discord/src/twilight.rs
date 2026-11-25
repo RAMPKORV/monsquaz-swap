@@ -25,8 +25,13 @@ use twilight_model::id::Id;
 use twilight_model::id::marker::GuildMarker;
 
 use crate::gateway::{GatewayConnector, GatewayError, GatewaySession};
+use crate::http::{HttpDiscordPort, is_text_channel};
 use crate::inbound::{DmAttachment, InboundEvent, InteractionRef};
-use crate::setup::{BotIdentity, SetupError, TokenValidator, validate_bot_token_shape};
+use crate::port::{DiscordError, DiscordPort, OutboundMessage};
+use crate::setup::{
+    BotIdentity, ChannelSummary, GuildSummary, SetupDirectory, SetupError, TokenValidator,
+    validate_bot_token_shape,
+};
 use crate::{
     CustomId, DiscordChannelId, DiscordGuildId, DiscordUserId, MessageId, SWAP_COMMAND,
     parse_swap_subcommand,
@@ -58,6 +63,114 @@ impl TwilightConfig {
     #[cfg(test)]
     fn token(&self) -> &str {
         &self.token
+    }
+}
+
+/// Live directory operations for the setup wizard.
+pub struct TwilightSetup;
+
+impl TwilightSetup {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TwilightSetup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl SetupDirectory for TwilightSetup {
+    async fn validate_token(&self, token: &str) -> Result<BotIdentity, SetupError> {
+        validate_bot_token_shape(token)?;
+        let http = Client::new(token.trim().to_string());
+        let user = http
+            .current_user()
+            .await
+            .map_err(map_setup_error)?
+            .model()
+            .await
+            .map_err(|error| SetupError::Discord(error.to_string()))?;
+        Ok(BotIdentity {
+            id: user.id.get().to_string(),
+            username: user.name,
+        })
+    }
+
+    async fn guilds(&self, token: &str) -> Result<Vec<GuildSummary>, SetupError> {
+        validate_bot_token_shape(token)?;
+        let http = Client::new(token.trim().to_string());
+        let guilds = http
+            .current_user_guilds()
+            .await
+            .map_err(map_setup_error)?
+            .models()
+            .await
+            .map_err(|error| SetupError::Discord(error.to_string()))?;
+        Ok(guilds
+            .into_iter()
+            .map(|guild| GuildSummary {
+                id: guild.id.get().to_string(),
+                name: guild.name,
+            })
+            .collect())
+    }
+
+    async fn channels(
+        &self,
+        token: &str,
+        guild_id: &str,
+    ) -> Result<Vec<ChannelSummary>, SetupError> {
+        validate_bot_token_shape(token)?;
+        let guild_id = guild_id
+            .parse::<u64>()
+            .map(Id::new)
+            .map_err(|_| SetupError::InvalidSelection)?;
+        let http = Client::new(token.trim().to_string());
+        let channels = http
+            .guild_channels(guild_id)
+            .await
+            .map_err(map_setup_error)?
+            .models()
+            .await
+            .map_err(|error| SetupError::Discord(error.to_string()))?;
+        Ok(channels
+            .into_iter()
+            .filter(|channel| is_text_channel(channel.kind))
+            .filter_map(|channel| {
+                let name = channel.name?;
+                Some(ChannelSummary {
+                    id: channel.id.get().to_string(),
+                    name,
+                })
+            })
+            .collect())
+    }
+
+    async fn send_test_dm(&self, token: &str, user_id: &str) -> Result<String, SetupError> {
+        validate_bot_token_shape(token)?;
+        let port =
+            HttpDiscordPort::new(token).map_err(|error| SetupError::Discord(error.to_string()))?;
+        let message = OutboundMessage {
+            content: "Monsquaz Swap test message. Your bot can reach you.".to_string(),
+        };
+        let message_id = port
+            .send_dm(&DiscordUserId::new(user_id), message)
+            .await
+            .map_err(|error| match error {
+                DiscordError::DmClosed => SetupError::DmClosed,
+                other => SetupError::Discord(other.to_string()),
+            })?;
+        Ok(message_id.0)
+    }
+}
+
+fn map_setup_error(error: twilight_http::Error) -> SetupError {
+    match error.kind() {
+        ErrorType::Unauthorized => SetupError::TokenRejected,
+        _ => SetupError::Discord("Discord rejected the setup request".to_string()),
     }
 }
 

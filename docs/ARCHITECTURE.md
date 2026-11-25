@@ -116,7 +116,8 @@ next.
 ## Discord
 
 The gateway runtime design, health states, backoff, rollback path, and live
-smoke command are in `docs/GATEWAY.md`.
+smoke command are in `docs/GATEWAY.md`. The bot setup and token storage rules
+are in `docs/SETUP.md`.
 
 - Twilight 0.18. Guild commands for instant registration. Persistent DM
   buttons for participant actions.

@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 13 · **Ready leaves:** 5  
+**Blocked issues:** 12 · **Ready leaves:** 5  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 25
+**Stale scores:** 24
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 13 |
+| Ready for implementation | 12 |
 | Implementation | 1 |
 | Reviewing | 1 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 6 |
+| Done | 7 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -27,11 +27,11 @@
 
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
-| 2 | `MSW-019` | Host UI shell, mission control, and settings | ready | 3 |
-| 3 | `MSW-030` | Twilight gateway runtime | ready | 3 |
-| 20 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
-| 21 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
-| 24 | `MSW-016` | Metadata scrub, A/B render, and preview sidecar | ready | 1 |
+| 2 | `MSW-030` | Twilight gateway runtime | ready | 3 |
+| 14 | `MSW-020` | Event wizard, participant manager, and schedule planner | ready | 2 |
+| 19 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
+| 20 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
+| 23 | `MSW-016` | Metadata scrub, A/B render, and preview sidecar | ready | 1 |
 
 ## Last session
 

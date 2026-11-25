@@ -91,6 +91,16 @@ deadline reaches
   → no silent auto-advance
 ```
 
+## Simulation
+
+`swap-sim` drives the real classic engine with deterministic participants:
+Reliable, Expires, SkipBeforeClaim, and SkipAfterClaim. Each run checks the
+schedule, per-round uniqueness, own-track exclusion, no-repeat pairs, seen
+semantics, retained versions, claim/file effect counts, reveal completeness,
+and opaque outbound names. The fuzz tests feed random containers, hostile
+header counts, and malformed WAV chunks. Groups, async, and outage profiles are
+next.
+
 ## Persistence
 
 - SQLite with WAL, `foreign_keys=ON`, `synchronous=NORMAL`, `busy_timeout`.

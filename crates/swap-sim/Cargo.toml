@@ -1,0 +1,20 @@
+[package]
+name = "swap-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Deterministic simulation harness for Monsquaz Swap"
+
+[dependencies]
+swap-core = { path = "../swap-core" }
+swap-db = { path = "../swap-db" }
+swap-engine = { path = "../swap-engine" }
+swap-files = { path = "../swap-files" }
+tempfile = "3"
+thiserror = "2"
+
+[dev-dependencies]
+swap-discord = { path = "../swap-discord" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

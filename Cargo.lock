@@ -4215,6 +4215,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "swap-sim"
+version = "0.1.0"
+dependencies = [
+ "swap-core",
+ "swap-db",
+ "swap-discord",
+ "swap-engine",
+ "swap-files",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "swift-rs"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

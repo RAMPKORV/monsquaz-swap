@@ -12,7 +12,7 @@ the acceptance coverage.
 | DB | rusqlite in-memory + temp files | migrations, constraints, transactions, ledger |
 | Acceptance | `cucumber-rs` + fake Discord | user journeys and error paths |
 | Contract | recorded Discord payloads / `wiremock` | Twilight request shapes and rate limits |
-| Simulation | `swap-sim` | long events, churn, groups, async, outages, leaks |
+| Simulation | `swap-sim` | classic profiles, invariants, leaks, fuzzing; groups/async/outages next |
 | UI | Vitest + Testing Library | views, states, accessibility basics |
 | E2E | WebdriverIO/Tauri driver | packaged app boot and one full journey |
 | Live smoke | real test guild + consenting humans | Discord accepts the real flow |

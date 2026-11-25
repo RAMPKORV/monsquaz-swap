@@ -367,6 +367,35 @@ impl SeenRepo {
         )?;
         Ok(count > 0)
     }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<SeenPairRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT track_code, participant_id, reason, first_seen_at
+             FROM seen_pairs WHERE event_id = ?1 ORDER BY first_seen_at, track_code",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], |row| {
+                Ok(SeenPairRecord {
+                    track_code: row.get(0)?,
+                    participant_id: row.get(1)?,
+                    reason: row.get(2)?,
+                    first_seen_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenPairRecord {
+    pub track_code: String,
+    pub participant_id: String,
+    pub reason: String,
+    pub first_seen_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

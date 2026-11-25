@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 12 · **Ready leaves:** 4  
+**Blocked issues:** 12 · **Ready leaves:** 3  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 23
+**Stale scores:** 22
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 11 |
+| Ready for implementation | 10 |
 | Implementation | 1 |
 | Reviewing | 1 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 8 |
+| Done | 9 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -29,8 +29,7 @@
 |---|---|---|---|---|
 | 2 | `MSW-030` | Twilight gateway runtime | ready | 3 |
 | 14 | `MSW-020` | Event wizard, participant manager, and schedule planner | ready | 2 |
-| 19 | `MSW-026` | Simulation harness and adversarial review | ready | 2 |
-| 20 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
+| 19 | `MSW-027` | Privacy export/delete and accessibility pass | ready | 2 |
 
 ## Last session
 

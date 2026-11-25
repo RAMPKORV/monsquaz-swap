@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 12 · **Ready leaves:** 1  
+**Blocked issues:** 16 · **Ready leaves:** 6  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 19
+**Stale scores:** 30
 
 ## Issues by status
 
@@ -14,11 +14,11 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 8 |
+| Ready for implementation | 18 |
 | Implementation | 1 |
 | Reviewing | 0 |
 | Testing | 0 |
-| Merging | 0 |
+| Merging | 1 |
 | Done | 12 |
 | Cancelled | 0 |
 | Duplicate | 0 |
@@ -28,6 +28,11 @@
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
+| 2 | `MSW-036` | Formal: check scripts and project-local skill | ready | 5 |
+| 3 | `MSW-040` | Formal: parser and custom-ID Kani proofs | ready | 5 |
+| 5 | `MSW-034` | Formal: claim/offer/custody/expiry model | ready | 3 |
+| 6 | `MSW-035` | Formal: anonymity projection tests and outbound audit | ready | 3 |
+| 27 | `MSW-042` | Balanced Latin square algorithm suite | ready | 2 |
 
 ## Last session
 

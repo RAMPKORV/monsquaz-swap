@@ -762,6 +762,10 @@ pub struct FileRecord {
     pub size: u64,
     pub extension: String,
     pub storage_path: String,
+    pub original_sha256: Option<String>,
+    pub original_storage_path: Option<String>,
+    pub audio_verified: bool,
+    pub scrub_summary_json: String,
     pub created_at: i64,
 }
 
@@ -775,6 +779,10 @@ struct RawFile {
     size: i64,
     extension: String,
     storage_path: String,
+    original_sha256: Option<String>,
+    original_storage_path: Option<String>,
+    audio_verified: i64,
+    scrub_summary_json: String,
     created_at: i64,
 }
 
@@ -792,6 +800,10 @@ impl TryFrom<RawFile> for FileRecord {
             size: raw.size as u64,
             extension: raw.extension,
             storage_path: raw.storage_path,
+            original_sha256: raw.original_sha256,
+            original_storage_path: raw.original_storage_path,
+            audio_verified: raw.audio_verified != 0,
+            scrub_summary_json: raw.scrub_summary_json,
             created_at: raw.created_at,
         })
     }
@@ -808,7 +820,11 @@ fn row_to_raw_file(row: &Row<'_>) -> rusqlite::Result<RawFile> {
         size: row.get(6)?,
         extension: row.get(7)?,
         storage_path: row.get(8)?,
-        created_at: row.get(9)?,
+        original_sha256: row.get(9)?,
+        original_storage_path: row.get(10)?,
+        audio_verified: row.get(11)?,
+        scrub_summary_json: row.get(12)?,
+        created_at: row.get(13)?,
     })
 }
 
@@ -819,8 +835,9 @@ impl FileRepo {
         conn.execute(
             "INSERT INTO files
                 (id, event_id, track_code, version, holder_id, sha256, size,
-                 extension, storage_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 extension, storage_path, original_sha256, original_storage_path,
+                 audio_verified, scrub_summary_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 &file.id,
                 &file.event_id,
@@ -831,6 +848,10 @@ impl FileRepo {
                 file.size as i64,
                 &file.extension,
                 &file.storage_path,
+                &file.original_sha256,
+                &file.original_storage_path,
+                file.audio_verified as i64,
+                &file.scrub_summary_json,
                 file.created_at
             ],
         )?;
@@ -844,7 +865,8 @@ impl FileRepo {
     ) -> Result<Vec<FileRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT id, event_id, track_code, version, holder_id, sha256, size,
-                    extension, storage_path, created_at
+                    extension, storage_path, original_sha256, original_storage_path,
+                    audio_verified, scrub_summary_json, created_at
              FROM files WHERE event_id = ?1 AND track_code = ?2 ORDER BY version",
         )?;
         let rows = statement

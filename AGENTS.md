@@ -27,8 +27,9 @@ This file is a router. Detailed rules live in `ai-rules/`.
 - Runnable Tauri 2 + Rust + React/TS shell; `swap-core` holds the first hard
   invariant (`SeenLedger`) and the seeded classic scheduler.
 - `swap-db` owns the SQLite schema, migrations, and repositories. `swap-files`
-  validates intake and stores content by SHA-256. `swap-discord` defines the
-  transport contract. `swap-engine` runs the classic walking skeleton.
+  validates intake, scrubs module metadata, A/B renders through openmpt123, and
+  stores content by SHA-256. `swap-discord` defines the transport contract.
+  `swap-engine` runs the classic walking skeleton.
 - Product spec and Gherkin live in `docs/` and `specs/features/`.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.

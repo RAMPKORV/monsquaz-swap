@@ -131,7 +131,14 @@ deadline reaches
 - 20 MiB cap for bot redistribution. Larger files use a link download or a
   host import.
 - Format changes are forbidden by default.
-- Module-aware scrub plus A/B render. Keep the untouched original.
+- Module-aware scrub zeroes the song title, message, tracker name, instrument,
+  sample, and file names. A malformed header is refused, not guessed.
+- A/B render compares the WAV `data` chunks, not the container metadata.
+  `openmpt123` runs in a temporary directory with a 30 second wall-clock limit.
+  A preview is 15 seconds. The delivery blob and the untouched original are
+  both content-addressed. SQLite stores both hashes. The original never leaves
+  the host. The renderer is discovered next to the app binary, then on PATH;
+  packaging the static sidecar remains.
 - No auto-open. Parse in a child process with time and memory limits.
 - Preview WAVs are served through a scoped custom protocol, not a broad asset
   directory.

@@ -7,11 +7,12 @@ use swap_db::{
     FileRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     SeenRepo, TrackRecord, TrackRepo, Transaction,
 };
-use swap_files::{BlobStore, FileError, ValidatedFile};
+use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
 use thiserror::Error;
 
 use crate::effects::Effect;
 use crate::ids::{assignment_id, plan_commitment, track_code};
+use crate::prepare::{DeliveryPreparer, PreparedBytes};
 use crate::settings::{EventSettings, Mode, SettingsError};
 
 #[derive(Debug, Error)]
@@ -22,6 +23,8 @@ pub enum EngineError {
     File(#[from] FileError),
     #[error(transparent)]
     Store(#[from] swap_files::StoreError),
+    #[error("the file could not be prepared for delivery: {0}")]
+    Prepare(#[from] swap_files::PrepareError),
     #[error(transparent)]
     Schedule(#[from] swap_core::ScheduleError),
     #[error(transparent)]
@@ -117,6 +120,7 @@ pub struct SubmitRequest<'a> {
 pub struct JoinOutcome {
     pub track_code: String,
     pub sha256: String,
+    pub original_sha256: String,
     pub effects: Vec<Effect>,
 }
 
@@ -153,6 +157,7 @@ pub struct ClaimOutcome {
 pub struct SubmitOutcome {
     pub version: u32,
     pub sha256: String,
+    pub original_sha256: String,
     pub effects: Vec<Effect>,
 }
 
@@ -277,6 +282,7 @@ pub fn signup(
 pub fn join_with_seed(
     db: &Db,
     store: &BlobStore,
+    preparer: &dyn DeliveryPreparer,
     request: &JoinRequest<'_>,
     now: i64,
 ) -> Result<JoinOutcome, EngineError> {
@@ -301,7 +307,13 @@ pub fn join_with_seed(
     }
     let code = unique_track_code(&tracks, event.seed);
 
-    let blob = store.store(request.bytes)?;
+    let prepared = preparer.prepare(request.bytes, validated.kind, &validated.extension)?;
+    let original_blob = store.store(request.bytes)?;
+    let delivery_blob = if prepared.delivery == request.bytes {
+        original_blob.clone()
+    } else {
+        store.store(&prepared.delivery)?
+    };
     let participant = ParticipantRecord {
         event_id: request.event_id.to_string(),
         user_id: request.user_id.to_string(),
@@ -327,7 +339,11 @@ pub fn join_with_seed(
         1,
         request.user_id,
         &validated,
-        &blob.relative_path,
+        StoredVersion {
+            delivery: &delivery_blob,
+            original: &original_blob,
+            prepared: &prepared,
+        },
         now,
     );
 
@@ -341,12 +357,13 @@ pub fn join_with_seed(
         user_id: request.user_id.to_string(),
         content: format!(
             "Seed received for track {code}. SHA-256: {}. Size: {} bytes.",
-            validated.sha256, validated.size
+            original_blob.sha256, original_blob.size
         ),
     }];
     Ok(JoinOutcome {
         track_code: code,
-        sha256: validated.sha256,
+        sha256: delivery_blob.sha256,
+        original_sha256: original_blob.sha256,
         effects,
     })
 }
@@ -706,6 +723,7 @@ pub fn claim(
 pub fn submit(
     db: &Db,
     store: &BlobStore,
+    preparer: &dyn DeliveryPreparer,
     request: &SubmitRequest<'_>,
     now: i64,
 ) -> Result<SubmitOutcome, EngineError> {
@@ -732,7 +750,13 @@ pub fn submit(
         });
     }
 
-    let blob = store.store(request.bytes)?;
+    let prepared = preparer.prepare(request.bytes, validated.kind, &validated.extension)?;
+    let original_blob = store.store(request.bytes)?;
+    let delivery_blob = if prepared.delivery == request.bytes {
+        original_blob.clone()
+    } else {
+        store.store(&prepared.delivery)?
+    };
     let version = current.version + 1;
     let file = file_record(
         request.event_id,
@@ -740,7 +764,11 @@ pub fn submit(
         version,
         request.user_id,
         &validated,
-        &blob.relative_path,
+        StoredVersion {
+            delivery: &delivery_blob,
+            original: &original_blob,
+            prepared: &prepared,
+        },
         now,
     );
     let transaction = begin(db)?;
@@ -766,12 +794,13 @@ pub fn submit(
         user_id: request.user_id.to_string(),
         content: format!(
             "Received version {version} of track {}. SHA-256: {}. Latest version wins.",
-            assignment.track_code, validated.sha256
+            assignment.track_code, original_blob.sha256
         ),
     }];
     Ok(SubmitOutcome {
         version,
-        sha256: validated.sha256,
+        sha256: delivery_blob.sha256,
+        original_sha256: original_blob.sha256,
         effects,
     })
 }
@@ -1002,13 +1031,19 @@ fn unique_track_code(tracks: &[TrackRecord], seed: u64) -> String {
     }
 }
 
+struct StoredVersion<'a> {
+    delivery: &'a StoredBlob,
+    original: &'a StoredBlob,
+    prepared: &'a PreparedBytes,
+}
+
 fn file_record(
     event_id: &str,
     track_code: &str,
     version: u32,
     holder_id: &str,
     validated: &ValidatedFile,
-    storage_path: &str,
+    stored: StoredVersion<'_>,
     now: i64,
 ) -> FileRecord {
     FileRecord {
@@ -1017,10 +1052,14 @@ fn file_record(
         track_code: track_code.to_string(),
         version,
         holder_id: holder_id.to_string(),
-        sha256: validated.sha256.clone(),
-        size: validated.size,
+        sha256: stored.delivery.sha256.clone(),
+        size: stored.delivery.size,
         extension: validated.extension.clone(),
-        storage_path: storage_path.to_string(),
+        storage_path: stored.delivery.relative_path.clone(),
+        original_sha256: Some(stored.original.sha256.clone()),
+        original_storage_path: Some(stored.original.relative_path.clone()),
+        audio_verified: stored.prepared.audio_verified,
+        scrub_summary_json: stored.prepared.scrub_summary_json.clone(),
         created_at: now,
     }
 }

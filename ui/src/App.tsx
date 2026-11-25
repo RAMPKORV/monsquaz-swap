@@ -9,11 +9,16 @@ import {
   StatusPill,
 } from "./components";
 import { Icon, type IconName } from "./icons";
+import { CommandPalette } from "./CommandPalette";
 import type {
   AuditEntry,
+  EventDraft,
   HostSettings,
   MissionControl,
+  PeopleData,
+  PlanData,
   Scenario,
+  SetupData,
   Theme,
   ViewKey,
 } from "./types";
@@ -24,10 +29,17 @@ import {
   initialScenario,
   initialView,
   isDemoMode,
+  createEvent,
+  generatePlan,
+  startEvent,
   loadAuditLog,
   loadMissionControl,
+  loadPeople,
+  loadPlan,
   loadSettings,
+  loadSetup,
   saveSettings,
+  setParticipantPaused,
   sendTestNotification,
 } from "./data/client";
 import {
@@ -36,6 +48,9 @@ import {
 } from "./views/MissionControl";
 import { SettingsSkeleton, SettingsView } from "./views/Settings";
 import { AuditLogSkeleton, AuditLogView } from "./views/AuditLog";
+import { SetupSkeleton, SetupView } from "./views/Setup";
+import { PeopleSkeleton, PeopleView } from "./views/People";
+import { PlannerSkeleton, PlannerView } from "./views/Planner";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -45,10 +60,14 @@ const navItems: Array<{ view: ViewKey; label: string; icon: IconName }> = [
   { view: "settings", label: "Settings", icon: "settings" },
 ];
 
-const toolItems: Array<{ label: string; icon: IconName }> = [
-  { label: "Event setup", icon: "plus" },
-  { label: "People", icon: "users" },
-  { label: "Schedule", icon: "shuffle" },
+const toolItems: Array<{
+  label: string;
+  icon: IconName;
+  view?: ViewKey;
+}> = [
+  { label: "Event setup", icon: "plus", view: "setup" },
+  { label: "Participants", icon: "users", view: "people" },
+  { label: "Schedule", icon: "shuffle", view: "plan" },
   { label: "Round board", icon: "disc" },
   { label: "Files", icon: "folder" },
 ];
@@ -63,23 +82,41 @@ export default function App() {
   const [view, setView] = useState<ViewKey>(() => initialView());
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [mission, setMission] = useState<MissionControl | null>(null);
+  const [setup, setSetup] = useState<SetupData | null>(null);
+  const [people, setPeople] = useState<PeopleData | null>(null);
+  const [plan, setPlan] = useState<PlanData | null>(null);
   const [settings, setSettings] = useState<HostSettings | null>(null);
   const [originalSettings, setOriginalSettings] =
     useState<HostSettings | null>(null);
   const [audit, setAudit] = useState<AuditEntry[] | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirty] = useState(
+    () =>
+      isDemoMode() &&
+      new URLSearchParams(window.location.search).get("dirty") === "1",
+  );
   const [saving, setSaving] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const reloadFocus = useRef(false);
+  const focusMainHeading = () => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("#main h1")?.focus();
+    });
+  };
   const [errorCode, setErrorCode] = useState("MSW-UI-001");
   const [themeChoice, setThemeChoice] = useState<HostSettings["theme"]>(() => {
     const value = new URLSearchParams(window.location.search).get("theme");
-    return value === "light" || value === "dark" ? value : "dark";
+    return value === "light" || value === "dark" ? value : "system";
   });
   const [systemTheme, setSystemTheme] = useState<Theme>("dark");
   const [toast, setToast] = useState<string | null>(null);
-  const [toastPaused, setToastPaused] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(() => initialDialog() === "delete");
   const [confirmText, setConfirmText] = useState("");
+  const [redactionPreview, setRedactionPreview] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(
+    () =>
+      isDemoMode() &&
+      new URLSearchParams(window.location.search).get("palette") === "1",
+  );
 
   const resolvedTheme: Theme =
     themeChoice === "system" ? systemTheme : themeChoice;
@@ -106,8 +143,11 @@ export default function App() {
       loadMissionControl(scenario),
       loadSettings(scenario),
       loadAuditLog(scenario),
+      loadSetup(scenario),
+      loadPeople(scenario),
+      loadPlan(scenario),
     ])
-      .then(([nextMission, nextSettings, nextAudit]) => {
+      .then(([nextMission, nextSettings, nextAudit, nextSetup, nextPeople, nextPlan]) => {
         if (cancelled) {
           return;
         }
@@ -121,7 +161,13 @@ export default function App() {
         setSettings(nextSettings);
         setOriginalSettings(nextSettings);
         setAudit(nextAudit);
-        setDirty(false);
+        setSetup(nextSetup);
+        setPeople(nextPeople);
+        setPlan(nextPlan);
+        setDirty(
+          isDemoMode() &&
+            new URLSearchParams(window.location.search).get("dirty") === "1",
+        );
         setStatus("ready");
       })
       .catch((error: unknown) => {
@@ -130,6 +176,10 @@ export default function App() {
         }
         setErrorCode(error instanceof HostError ? error.code : "MSW-UI-002");
         setStatus("error");
+        if (reloadFocus.current) {
+          reloadFocus.current = false;
+          focusMainHeading();
+        }
       });
     return () => {
       cancelled = true;
@@ -137,24 +187,15 @@ export default function App() {
   }, [reloadToken, scenario]);
 
   useEffect(() => {
-    setToastPaused(false);
-  }, [toast]);
-
-  useEffect(() => {
-    if (!toast || toastPaused) {
-      return;
-    }
-    const timer = window.setTimeout(() => setToast(null), 8000);
-    return () => window.clearTimeout(timer);
-  }, [toast, toastPaused]);
-
-  useEffect(() => {
     const titles: Record<ViewKey, string> = {
       mission: "Mission control",
+      setup: "Event setup",
+      people: "Participants",
+      plan: "Schedule planner",
       settings: "Settings",
       audit: "Audit log",
     };
-    document.title = `${titles[view]} · Monsquaz Swap`;
+    document.title = `${titles[view]}, Monsquaz Swap`;
     if (firstView.current) {
       firstView.current = false;
       return;
@@ -163,17 +204,148 @@ export default function App() {
   }, [view]);
 
   useEffect(() => {
-    document.body.classList.toggle("no-scroll", dialogOpen);
-    return () => document.body.classList.remove("no-scroll");
-  }, [dialogOpen]);
+    if (status === "ready" && reloadFocus.current) {
+      reloadFocus.current = false;
+      focusMainHeading();
+    }
+  }, [status]);
 
+  useEffect(() => {
+    if (view !== "plan") {
+      setRedactionPreview(false);
+    }
+  }, [view]);
+
+  useEffect(() => {
+    document.body.classList.toggle("no-scroll", dialogOpen || paletteOpen);
+    return () => document.body.classList.remove("no-scroll");
+  }, [dialogOpen, paletteOpen]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const modal = document.querySelector(
+        '[role="dialog"][aria-modal="true"]',
+      );
+      if (modal && !modal.classList.contains("palette")) {
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+
+  function reloadView() {
+    reloadFocus.current = true;
+    setReloadToken((value) => value + 1);
+  }
 
   function notify(label: string) {
+    if (label === "Open event setup" || label === "Start setup") {
+      setView("setup");
+      return;
+    }
+    if (label === "Open schedule planner") {
+      setView("plan");
+      return;
+    }
+    if (label === "Review participants") {
+      setView("people");
+      return;
+    }
+    if (label === "Open settings") {
+      setView("settings");
+      return;
+    }
     setToast(
       demo
         ? `Preview: “${label}” does not change Discord yet.`
         : `“${label}” is not wired in this build.`,
     );
+  }
+
+  async function handleGeneratePlan() {
+    if (demo) {
+      setToast("Preview: a draft schedule is generated from the seed ledger.");
+      return;
+    }
+    try {
+      await generatePlan();
+      setToast("Schedule generated. Review the matrix before you lock it.");
+      reloadView();
+    } catch (error) {
+      const detail =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "Check the roster and seeds.";
+      setToast(`Could not generate the schedule. ${detail}`);
+    }
+  }
+
+  async function handleSetPaused(userId: string, paused: boolean) {
+    if (demo) {
+      setToast(
+        paused
+          ? "Preview: the participant is paused. Offers skip them."
+          : "Preview: the participant is ready for offers.",
+      );
+      return;
+    }
+    try {
+      await setParticipantPaused(userId, paused);
+      setToast(paused ? "Participant paused." : "Participant resumed.");
+      reloadView();
+    } catch (error) {
+      const detail =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "The participant was not changed.";
+      setToast(`Could not update the participant. ${detail}`);
+      reloadView();
+    }
+  }
+
+  async function handleStartEvent() {
+    if (demo) {
+      setToast("Preview: the schedule is locked and the event starts.");
+      return;
+    }
+    try {
+      await startEvent();
+      setToast("Schedule locked. The event is live.");
+      reloadView();
+    } catch (error) {
+      const detail =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "Check the roster and schedule.";
+      setToast(`Could not start the event. ${detail}`);
+    }
+  }
+
+  async function handleCreateEvent(draft: EventDraft) {
+    try {
+      const created = await createEvent(draft);
+      setToast(
+        demo
+          ? `Preview: ${created.name} is ready. No Discord message was sent.`
+          : `${created.name} is ready.`,
+      );
+      setView("people");
+      reloadView();
+    } catch {
+      setToast("Could not create the event. Your draft is still here.");
+    }
   }
 
   function changeTheme(next: HostSettings["theme"]) {
@@ -189,7 +361,7 @@ export default function App() {
   }
 
   async function persistSettings() {
-    if (!settings) {
+    if (!settings || saving) {
       return;
     }
     setSaving(true);
@@ -199,6 +371,7 @@ export default function App() {
       setOriginalSettings(saved);
       setDirty(false);
       setToast("Settings saved on this computer.");
+      focusMainHeading();
     } catch {
       setToast("Could not save settings. Your changes are still here. Retry.");
     } finally {
@@ -214,6 +387,7 @@ export default function App() {
     setThemeChoice(originalSettings.theme);
     setDirty(false);
     setToast("Settings reset to the last saved values.");
+    focusMainHeading();
   }
 
   function retry() {
@@ -221,7 +395,7 @@ export default function App() {
       setStatus("error");
       return;
     }
-    setReloadToken((value) => value + 1);
+    reloadView();
   }
 
   const topbarLabel =
@@ -242,6 +416,12 @@ export default function App() {
     status === "loading" ? (
       view === "mission" ? (
         <MissionControlSkeleton />
+      ) : view === "setup" ? (
+        <SetupSkeleton />
+      ) : view === "people" ? (
+        <PeopleSkeleton />
+      ) : view === "plan" ? (
+        <PlannerSkeleton />
       ) : view === "settings" ? (
         <SettingsSkeleton />
       ) : (
@@ -257,17 +437,32 @@ export default function App() {
         onAction={notify}
         onNavigate={(next) => setView(next)}
       />
+    ) : view === "setup" && setup ? (
+      <SetupView data={setup} onCreate={handleCreateEvent} />
+    ) : view === "people" && people ? (
+      <PeopleView
+        data={people}
+        onAction={notify}
+        onSetPaused={handleSetPaused}
+      />
+    ) : view === "plan" && plan ? (
+      <PlannerView
+        data={plan}
+        onAction={notify}
+        onGeneratePlan={handleGeneratePlan}
+        onStartEvent={handleStartEvent}
+        onRedactionChange={setRedactionPreview}
+      />
     ) : view === "settings" && settings ? (
       <SettingsView
         settings={settings}
+        eventName={mission?.event?.name ?? "this event"}
         dirty={dirty}
-        saving={saving}
         onSettings={(next) => {
           setSettings(next);
           setDirty(true);
         }}
         onSave={persistSettings}
-        onReset={resetSettings}
         onDelete={() => {
           setConfirmText("");
           setDialogOpen(true);
@@ -285,11 +480,13 @@ export default function App() {
     ) : view === "audit" && audit ? (
       <AuditLogView
         entries={audit}
+        hasEvent={Boolean(mission?.event)}
+        timezone={settings?.timezone ?? "Europe/Stockholm"}
         onExport={() => {
           exportAuditCsv(audit);
           setToast("Audit log exported as CSV.");
         }}
-        onNavigate={() => setView("mission")}
+        onNavigate={() => setView(mission?.event ? "mission" : "setup")}
       />
     ) : (
       <div className="view">
@@ -303,7 +500,9 @@ export default function App() {
         Skip to content
       </a>
       <div
-        className={staticMode ? "app app--static" : "app"}
+        className={`app${staticMode ? " app--static" : ""}${
+          redactionPreview ? " app--redaction" : ""
+        }`}
         data-theme={resolvedTheme}
       >
         <Sidebar
@@ -314,18 +513,22 @@ export default function App() {
         />
         <div className="workspace">
           <header className="topbar">
-            <button
-              type="button"
-              className="event-switcher"
-              onClick={() => notify("Event switcher")}
-            >
+            <div className="event-switcher event-switcher--static">
               <span className="event-switcher__copy">
                 <span className="event-switcher__label">{topbarLabel}</span>
                 <strong>{topbarTitle}</strong>
               </span>
-              <Icon name="chevron-down" size={18} />
-            </button>
+            </div>
             <div className="topbar__actions">
+              <button
+                type="button"
+                className="command-trigger"
+                onClick={() => setPaletteOpen(true)}
+              >
+                <Icon name="search" size={16} />
+                <span>Jump to</span>
+                <kbd>Ctrl K</kbd>
+              </button>
               {demo ? <span className="preview-pill">Preview data</span> : null}
               <button
                 type="button"
@@ -358,8 +561,49 @@ export default function App() {
           <main id="main" className="content" tabIndex={-1}>
             {content}
           </main>
+          {view === "settings" && dirty && settings ? (
+            <div
+              className="settings-savebar"
+              role="region"
+              aria-label="Unsaved settings"
+            >
+              <span className="settings-savebar__copy" role="status">
+                <Icon name="alert" size={16} />
+                Unsaved changes
+              </span>
+              <Button variant="secondary" onClick={resetSettings}>
+                Discard changes
+              </Button>
+              <Button
+                variant="primary"
+                icon="check"
+                ariaLabel={saving ? "Saving settings" : "Save changes"}
+                onClick={persistSettings}
+              >
+                {saving ? "Saving…" : "Save changes"}
+              </Button>
+            </div>
+          ) : null}
+          <footer className="statusbar">
+            <span className="statusbar__item">SQLite, local</span>
+            <span className="statusbar__spacer" />
+            <span className="statusbar__item">
+              {mission?.event?.stage
+                ? `Event: ${mission.event.stage}`
+                : "No event"}
+            </span>
+            <span className="statusbar__item">v0.1.0</span>
+          </footer>
         </div>
       </div>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={(next) => setView(next)}
+        onAction={notify}
+        onToggleTheme={toggleTheme}
+      />
 
       {toast ? (
         <div
@@ -370,10 +614,6 @@ export default function App() {
               ? "alert"
               : "status"
           }
-          onMouseEnter={() => setToastPaused(true)}
-          onMouseLeave={() => setToastPaused(false)}
-          onFocus={() => setToastPaused(true)}
-          onBlur={() => setToastPaused(false)}
         >
           <Icon name="check" size={18} />
           <span>{toast}</span>
@@ -381,7 +621,10 @@ export default function App() {
             type="button"
             className="toast__close"
             aria-label="Dismiss message"
-            onClick={() => setToast(null)}
+            onClick={() => {
+              setToast(null);
+              focusMainHeading();
+            }}
           >
             <Icon name="x" size={16} />
           </button>
@@ -390,7 +633,7 @@ export default function App() {
 
       {dialogOpen ? (
         <Dialog
-          title="Delete local event data?"
+          title={`Delete ${mission?.event?.name ?? "local event data"} from this computer?`}
           onClose={() => setDialogOpen(false)}
           footer={
             <>
@@ -416,8 +659,10 @@ export default function App() {
           }
         >
           <p>
-            This removes the event database, every stored track version, and
-            local backups. Discord messages and exported albums stay.
+            This deletes the local database, every stored track version, and
+            every local backup for{" "}
+            {mission?.event?.name ?? "this event"}. Other events are not touched.
+            Discord messages and exported albums stay.
           </p>
           <p className="dialog__warning">
             This cannot be undone. Type <code>delete</code> to continue.
@@ -459,12 +704,9 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand__mark" aria-hidden="true">
-          <Icon name="shuffle" size={22} />
-        </span>
         <span className="brand__copy">
           <strong>Monsquaz</strong>
-          <span>Swap host</span>
+          <span>swap host</span>
         </span>
       </div>
 
@@ -486,19 +728,34 @@ function Sidebar({
         ))}
 
         <p className="nav__label nav__label--spaced">Event tools</p>
-        {toolItems.map((item) => (
-          <button
-            key={item.label}
-            type="button"
-            className="nav-item nav-item--disabled"
-            disabled
-            title="Available in the next event-tools milestone"
-          >
-            <Icon name={item.icon} size={18} />
-            <span>{item.label}</span>
-            <span className="nav-item__soon">Soon</span>
-          </button>
-        ))}
+        {toolItems.map((item) =>
+          item.view ? (
+            <button
+              key={item.label}
+              type="button"
+              className={`nav-item ${
+                view === item.view ? "nav-item--active" : ""
+              }`}
+              aria-current={view === item.view ? "page" : undefined}
+              onClick={() => onNavigate(item.view!)}
+            >
+              <Icon name={item.icon} size={18} />
+              <span>{item.label}</span>
+            </button>
+          ) : (
+            <button
+              key={item.label}
+              type="button"
+              className="nav-item nav-item--disabled"
+              disabled
+              title="Available in a later milestone"
+            >
+              <Icon name={item.icon} size={18} />
+              <span>{item.label}</span>
+              <span className="nav-item__soon">Soon</span>
+            </button>
+          ),
+        )}
       </nav>
 
       <div className="sidebar__footer">
@@ -522,7 +779,6 @@ function Sidebar({
                 : bot?.label ?? "Not configured"}
           </span>
         </div>
-        <span className="version">v0.1.0 · local-first</span>
       </div>
     </aside>
   );

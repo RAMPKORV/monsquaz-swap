@@ -959,6 +959,63 @@ impl FileRepo {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditRecord {
+    pub id: i64,
+    pub event_id: String,
+    pub at: i64,
+    pub actor: String,
+    pub action: String,
+    pub subject: Option<String>,
+    pub detail_json: String,
+    pub prev_hash: Option<String>,
+    pub hash: String,
+}
+
+struct RawAudit {
+    id: i64,
+    event_id: String,
+    at: i64,
+    actor: String,
+    action: String,
+    subject: Option<String>,
+    detail_json: String,
+    prev_hash: Option<String>,
+    hash: String,
+}
+
+impl TryFrom<RawAudit> for AuditRecord {
+    type Error = DbError;
+
+    fn try_from(raw: RawAudit) -> Result<Self, DbError> {
+        Ok(Self {
+            id: raw.id,
+            event_id: raw.event_id,
+            at: raw.at,
+            actor: raw.actor,
+            action: raw.action,
+            subject: raw.subject,
+            detail_json: raw.detail_json,
+            prev_hash: raw.prev_hash,
+            hash: raw.hash,
+        })
+    }
+}
+
+fn row_to_raw_audit(row: &Row<'_>) -> rusqlite::Result<RawAudit> {
+    Ok(RawAudit {
+        id: row.get(0)?,
+        event_id: row.get(1)?,
+        at: row.get(2)?,
+        actor: row.get(3)?,
+        action: row.get(4)?,
+        subject: row.get(5)?,
+        detail_json: row.get(6)?,
+        prev_hash: row.get(7)?,
+        hash: row.get(8)?,
+    })
+}
+
 pub struct AuditRepo;
 
 impl AuditRepo {
@@ -1001,6 +1058,18 @@ impl AuditRepo {
             ],
         )?;
         Ok(hash)
+    }
+
+    pub fn list_for_event(conn: &Connection, event_id: &str) -> Result<Vec<AuditRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, at, actor, action, subject, detail_json,
+                    prev_hash, hash
+             FROM audit_log WHERE event_id = ?1 ORDER BY id DESC",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_raw_audit)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(AuditRecord::try_from).collect()
     }
 
     pub fn last_hash(conn: &Connection, event_id: &str) -> Result<Option<String>, DbError> {

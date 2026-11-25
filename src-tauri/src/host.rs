@@ -2,10 +2,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager};
+
+use swap_core::{EventState, Membership, Role};
+use swap_db::{
+    AuditRepo, Db, EventRecord, EventRepo, MetaRepo, ParticipantRepo, PlanRepo, TrackRepo,
+};
+use swap_engine::{EventSettings, Mode, create_event, generate_schedule, lock_roster, start_event};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +30,7 @@ pub struct MissionControlDto {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EventSummaryDto {
+pub struct EventSummaryDto {
     id: String,
     name: String,
     mode: String,
@@ -138,7 +146,7 @@ impl Default for SettingsDto {
             dm_fallback: true,
             timezone: "Europe/Stockholm".to_string(),
             retention_days: 90,
-            theme: "dark".to_string(),
+            theme: "system".to_string(),
             notifications: NotificationsDto {
                 deadlines: true,
                 bot_offline: true,
@@ -181,28 +189,993 @@ pub fn tray_ready() -> bool {
     TRAY_READY.load(Ordering::Relaxed)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventDraftDto {
+    name: String,
+    mode: String,
+    rounds: Option<u32>,
+    claim_window_hours: i64,
+    round_window_hours: i64,
+    allowlist: Vec<String>,
+    pack_type: String,
+    pack_required: bool,
+    group_mode: String,
+    group_count: u32,
+    group_size: u32,
+    rotation: String,
+    swap_cadence: String,
+    schedule_visibility: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupDataDto {
+    first_run: bool,
+    event: Option<EventSummaryDto>,
+    draft: EventDraftDto,
+    warnings: Vec<SetupWarningDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupWarningDto {
+    id: String,
+    tone: String,
+    title: String,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeopleDataDto {
+    event: Option<EventSummaryDto>,
+    rows: Vec<PersonRowDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PersonRowDto {
+    id: String,
+    display_name: String,
+    role: String,
+    status: String,
+    seed_track: Option<String>,
+    timezone: String,
+    max_handoffs: u32,
+    joined: String,
+    delivery_risk: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanDataDto {
+    status: String,
+    event: Option<EventSummaryDto>,
+    rounds: u32,
+    tracks: usize,
+    participants: usize,
+    committed: bool,
+    matrix: Vec<MatrixTrackDto>,
+    graph: GraphDto,
+    groups: Vec<PlannerGroupDto>,
+    warnings: Vec<PlannerWarningDto>,
+    fun_score: Option<u32>,
+    fun_guardrails: Vec<GuardrailDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MatrixTrackDto {
+    track_code: String,
+    owner_group: String,
+    cells: Vec<PlanCellDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanCellDto {
+    round: u32,
+    track_code: String,
+    participant_id: String,
+    participant_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphDto {
+    round: u32,
+    edges: Vec<GraphEdgeDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphEdgeDto {
+    track_code: String,
+    participant_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannerGroupDto {
+    name: String,
+    size: usize,
+    tracks: usize,
+    participants: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannerWarningDto {
+    id: String,
+    severity: String,
+    title: String,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GuardrailDto {
+    label: String,
+    value: String,
+}
+
+fn default_draft() -> EventDraftDto {
+    EventDraftDto {
+        name: String::new(),
+        mode: "Classic".to_string(),
+        rounds: None,
+        claim_window_hours: 24,
+        round_window_hours: 24,
+        allowlist: swap_files::DEFAULT_EXTENSIONS
+            .iter()
+            .map(|extension| (*extension).to_string())
+            .collect(),
+        pack_type: "Module template + samples".to_string(),
+        pack_required: true,
+        group_mode: "Lookup".to_string(),
+        group_count: 1,
+        group_size: 5,
+        rotation: "Participants".to_string(),
+        swap_cadence: "K rounds".to_string(),
+        schedule_visibility: "Hidden".to_string(),
+    }
+}
+
+fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
+    EventDraftDto {
+        name: event.name.clone(),
+        mode: match settings.mode {
+            Mode::Classic => "Classic".to_string(),
+            Mode::Async => "Async".to_string(),
+        },
+        rounds: settings.rounds,
+        claim_window_hours: settings.claim_window_secs / 3600,
+        round_window_hours: settings.round_window_secs / 3600,
+        allowlist: settings.allowed_extensions.clone(),
+        pack_type: settings
+            .pack_type
+            .clone()
+            .unwrap_or_else(|| "Module template + samples".to_string()),
+        pack_required: settings.pack_required.unwrap_or(true),
+        group_mode: settings
+            .group_mode
+            .clone()
+            .unwrap_or_else(|| "Lookup".to_string()),
+        group_count: settings.group_count.unwrap_or(1),
+        group_size: settings.group_size.unwrap_or(5),
+        rotation: settings
+            .rotation
+            .clone()
+            .unwrap_or_else(|| "Participants".to_string()),
+        swap_cadence: settings
+            .swap_cadence
+            .clone()
+            .unwrap_or_else(|| "K rounds".to_string()),
+        schedule_visibility: settings
+            .schedule_visibility
+            .clone()
+            .unwrap_or_else(|| "Hidden".to_string()),
+    }
+}
+
+fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join("monsquaz.db"))
+}
+
+fn open_db(app: &AppHandle) -> Result<Db, String> {
+    Db::open(database_path(app)?).map_err(|error| error.to_string())
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
+}
+
+fn current_event(db: &Db) -> Result<Option<EventRecord>, String> {
+    let Some(id) =
+        MetaRepo::get(db.conn(), "host.current_event").map_err(|error| error.to_string())?
+    else {
+        return Ok(None);
+    };
+    EventRepo::get(db.conn(), &id).map_err(|error| error.to_string())
+}
+
+fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
+    let participants =
+        ParticipantRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let tracks =
+        TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let plan = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    let active = participants
+        .iter()
+        .filter(|participant| {
+            matches!(
+                participant.membership,
+                Membership::Seeded | Membership::Active
+            )
+        })
+        .count();
+    let fill_ins = participants
+        .iter()
+        .filter(|participant| {
+            participant.role == Role::FillIn
+                && matches!(
+                    participant.membership,
+                    Membership::Seeded | Membership::Active
+                )
+        })
+        .count();
+    let rounds = plan
+        .as_ref()
+        .map(|plan| plan.rounds)
+        .or(settings.rounds)
+        .unwrap_or_else(|| active.saturating_sub(1) as u32);
+    Ok(EventSummaryDto {
+        id: event.id.clone(),
+        name: event.name.clone(),
+        mode: match settings.mode {
+            Mode::Classic => "Classic".to_string(),
+            Mode::Async => "Async".to_string(),
+        },
+        stage: match event.state {
+            EventState::Draft | EventState::Signup => "Join phase",
+            EventState::ScheduleReview => "Schedule review",
+            EventState::Active => "Active",
+            EventState::Paused => "Paused",
+            EventState::Reveal | EventState::Archived => "Reveal",
+        }
+        .to_string(),
+        participants: active,
+        seeded: tracks.len(),
+        fill_ins,
+        tracks: tracks.len(),
+        round: if matches!(event.state, EventState::Active | EventState::Paused) {
+            1
+        } else {
+            0
+        },
+        rounds,
+    })
+}
+
 #[tauri::command]
-pub fn host_mission_control() -> MissionControlDto {
-    MissionControlDto {
-        first_run: true,
-        event: None,
-        bot: BotHealthDto {
+pub fn host_event_setup(app: AppHandle) -> Result<SetupDataDto, String> {
+    let db = open_db(&app)?;
+    setup_data(&db)
+}
+
+fn setup_data(db: &Db) -> Result<SetupDataDto, String> {
+    let Some(event) = current_event(db)? else {
+        return Ok(SetupDataDto {
+            first_run: true,
+            event: None,
+            draft: default_draft(),
+            warnings: Vec::new(),
+        });
+    };
+    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    Ok(SetupDataDto {
+        first_run: false,
+        event: Some(summary(db, &event)?),
+        draft: draft_from(&event, &settings),
+        warnings: Vec::new(),
+    })
+}
+
+#[tauri::command]
+pub fn host_set_participant_paused(
+    app: AppHandle,
+    user_id: String,
+    paused: bool,
+) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    set_participant_paused(&db, &user_id, paused)
+}
+
+fn set_participant_paused(db: &Db, user_id: &str, paused: bool) -> Result<PeopleDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let mut participant = ParticipantRepo::get(db.conn(), &event.id, user_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the participant is not in this event".to_string())?;
+    if matches!(
+        participant.membership,
+        Membership::Left | Membership::Removed
+    ) {
+        return Err("the participant has left the event".to_string());
+    }
+    participant.readiness = if paused {
+        swap_core::Readiness::Paused
+    } else {
+        swap_core::Readiness::Ready
+    };
+    participant.updated_at = now_secs();
+    ParticipantRepo::upsert(db.conn(), &participant).map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now_secs(),
+        "Host",
+        if paused {
+            "Participant paused"
+        } else {
+            "Participant resumed"
+        },
+        Some(&participant.display_name),
+        "{}",
+    )
+    .map_err(|error| error.to_string())?;
+    people_data(db)
+}
+
+#[tauri::command]
+pub fn host_people(app: AppHandle) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    people_data(&db)
+}
+
+fn people_data(db: &Db) -> Result<PeopleDataDto, String> {
+    let Some(event) = current_event(db)? else {
+        return Ok(PeopleDataDto {
+            event: None,
+            rows: Vec::new(),
+        });
+    };
+    let tracks =
+        TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let participants =
+        ParticipantRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let rows = participants
+        .into_iter()
+        .map(|participant| PersonRowDto {
+            id: participant.user_id.clone(),
+            display_name: participant.display_name,
+            role: match participant.role {
+                Role::Participant => "Seed",
+                Role::FillIn => "Fill-in",
+            }
+            .to_string(),
+            status: if participant.membership == Membership::Left {
+                "Left"
+            } else if participant.readiness == swap_core::Readiness::Paused {
+                "Paused"
+            } else {
+                "Ready"
+            }
+            .to_string(),
+            seed_track: tracks
+                .iter()
+                .find(|track| track.owner_id == participant.user_id)
+                .map(|track| track.code.clone()),
+            timezone: participant.timezone,
+            max_handoffs: participant.max_handoffs,
+            joined: String::new(),
+            delivery_risk: false,
+        })
+        .collect();
+    Ok(PeopleDataDto {
+        event: Some(summary(db, &event)?),
+        rows,
+    })
+}
+
+#[tauri::command]
+pub fn host_plan(app: AppHandle) -> Result<PlanDataDto, String> {
+    let db = open_db(&app)?;
+    plan_data(&db)
+}
+
+fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
+    let Some(event) = current_event(db)? else {
+        return Ok(PlanDataDto {
+            status: "No event".to_string(),
+            event: None,
+            rounds: 0,
+            tracks: 0,
+            participants: 0,
+            committed: false,
+            matrix: Vec::new(),
+            graph: GraphDto {
+                round: 0,
+                edges: Vec::new(),
+            },
+            groups: Vec::new(),
+            warnings: Vec::new(),
+            fun_score: None,
+            fun_guardrails: Vec::new(),
+        });
+    };
+    let summary = summary(db, &event)?;
+    let Some(plan) = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())?
+    else {
+        return Ok(PlanDataDto {
+            status: "No plan".to_string(),
+            event: Some(summary),
+            rounds: event_rounds(db, &event)?,
+            tracks: TrackRepo::list_for_event(db.conn(), &event.id)
+                .map_err(|error| error.to_string())?
+                .len(),
+            participants: ParticipantRepo::list_for_event(db.conn(), &event.id)
+                .map_err(|error| error.to_string())?
+                .len(),
+            committed: false,
+            matrix: Vec::new(),
+            graph: GraphDto {
+                round: 0,
+                edges: Vec::new(),
+            },
+            groups: Vec::new(),
+            warnings: Vec::new(),
+            fun_score: None,
+            fun_guardrails: Vec::new(),
+        });
+    };
+    let assignments = PlanRepo::list_assignments(db.conn(), &event.id, plan.version)
+        .map_err(|error| error.to_string())?;
+    let participants =
+        ParticipantRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let name_for = |user_id: &str| {
+        participants
+            .iter()
+            .find(|participant| participant.user_id == user_id)
+            .map(|participant| participant.display_name.clone())
+            .unwrap_or_else(|| user_id.to_string())
+    };
+    let tracks =
+        TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    let (groups, group_of) = planner_groups(&settings, &participants, &tracks);
+    let group_for = |owner_id: &str| {
+        group_of
+            .get(owner_id)
+            .cloned()
+            .unwrap_or_else(|| "—".to_string())
+    };
+    let matrix = tracks
+        .iter()
+        .map(|track| MatrixTrackDto {
+            track_code: track.code.clone(),
+            owner_group: group_for(&track.owner_id),
+            cells: (0..plan.rounds)
+                .map(|round| {
+                    let participant = assignments
+                        .iter()
+                        .find(|assignment| {
+                            assignment.round == round && assignment.track_code == track.code
+                        })
+                        .map(|assignment| assignment.participant_id.as_str())
+                        .unwrap_or("");
+                    PlanCellDto {
+                        round,
+                        track_code: track.code.clone(),
+                        participant_id: participant.to_string(),
+                        participant_name: name_for(participant),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    let edges = assignments
+        .iter()
+        .filter(|assignment| assignment.round == 0)
+        .map(|assignment| GraphEdgeDto {
+            track_code: assignment.track_code.clone(),
+            participant_name: name_for(&assignment.participant_id),
+        })
+        .collect();
+    let committed = matches!(
+        event.state,
+        EventState::Active | EventState::Paused | EventState::Reveal | EventState::Archived
+    );
+    Ok(PlanDataDto {
+        status: if committed { "Committed" } else { "Draft" }.to_string(),
+        event: Some(summary),
+        rounds: plan.rounds,
+        tracks: tracks.len(),
+        participants: participants.len(),
+        committed,
+        matrix,
+        graph: GraphDto { round: 0, edges },
+        groups,
+        warnings: Vec::new(),
+        fun_score: None,
+        fun_guardrails: Vec::new(),
+    })
+}
+
+fn planner_groups(
+    settings: &EventSettings,
+    participants: &[swap_db::ParticipantRecord],
+    tracks: &[swap_db::TrackRecord],
+) -> (
+    Vec<PlannerGroupDto>,
+    std::collections::BTreeMap<String, String>,
+) {
+    let count = settings.group_count.unwrap_or(1) as usize;
+    if settings.mode != Mode::Classic || count <= 1 {
+        return (Vec::new(), std::collections::BTreeMap::new());
+    }
+    let mut active: Vec<&swap_db::ParticipantRecord> = participants
+        .iter()
+        .filter(|participant| {
+            matches!(
+                participant.membership,
+                Membership::Seeded | Membership::Active
+            )
+        })
+        .collect();
+    active.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    if active.is_empty() {
+        return (Vec::new(), std::collections::BTreeMap::new());
+    }
+    let count = count.min(active.len());
+    let size = active.len().div_ceil(count);
+    let mut groups = Vec::new();
+    let mut group_of = std::collections::BTreeMap::new();
+    for (index, members) in active.chunks(size).enumerate() {
+        let name = group_name(index);
+        let owned = tracks
+            .iter()
+            .filter(|track| {
+                members
+                    .iter()
+                    .any(|participant| participant.user_id == track.owner_id)
+            })
+            .count();
+        for participant in members {
+            group_of.insert(participant.user_id.clone(), name.clone());
+        }
+        groups.push(PlannerGroupDto {
+            name,
+            size: members.len(),
+            tracks: owned,
+            participants: members
+                .iter()
+                .map(|participant| participant.display_name.clone())
+                .collect(),
+        });
+    }
+    (groups, group_of)
+}
+
+fn group_name(index: usize) -> String {
+    char::from(b'A' + (index % 26) as u8).to_string()
+}
+
+fn event_rounds(db: &Db, event: &EventRecord) -> Result<u32, String> {
+    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    if let Some(rounds) = settings.rounds {
+        return Ok(rounds);
+    }
+    let active = ParticipantRepo::list_for_event(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .filter(|participant| {
+            matches!(
+                participant.membership,
+                Membership::Seeded | Membership::Active
+            )
+        })
+        .count();
+    Ok(active.saturating_sub(1) as u32)
+}
+
+#[tauri::command]
+pub fn host_create_event(app: AppHandle, draft: EventDraftDto) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    create_host_event(&db, draft)
+}
+
+fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, String> {
+    if draft.name.trim().is_empty() {
+        return Err("the event name is empty".to_string());
+    }
+    let settings = EventSettings {
+        mode: if draft.mode == "Async" {
+            Mode::Async
+        } else {
+            Mode::Classic
+        },
+        rounds: draft.rounds,
+        claim_window_secs: (draft.claim_window_hours.max(1)) * 3600,
+        round_window_secs: (draft.round_window_hours.max(1)) * 3600,
+        max_file_bytes: swap_files::DEFAULT_MAX_SIZE,
+        allowed_extensions: draft.allowlist,
+        pack_type: Some(draft.pack_type),
+        pack_required: Some(draft.pack_required),
+        group_mode: Some(draft.group_mode),
+        group_count: Some(draft.group_count),
+        group_size: Some(draft.group_size),
+        rotation: Some(draft.rotation),
+        swap_cadence: Some(draft.swap_cadence),
+        schedule_visibility: Some(draft.schedule_visibility),
+    };
+    settings.validate().map_err(|error| error.to_string())?;
+    let now = now_secs();
+    let id = format!("evt-{}", now_nanos());
+    create_event(db, &id, &draft.name, now as u64, &settings, now)
+        .map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &id,
+        now,
+        "Host",
+        "Event created",
+        Some(&draft.name),
+        &serde_json::to_string(&settings).unwrap_or_else(|_| "{}".to_string()),
+    )
+    .map_err(|error| error.to_string())?;
+    MetaRepo::set(db.conn(), "host.current_event", &id).map_err(|error| error.to_string())?;
+    let event = EventRepo::get(db.conn(), &id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the event was not stored".to_string())?;
+    summary(db, &event)
+}
+
+#[tauri::command]
+pub fn host_generate_plan(app: AppHandle) -> Result<PlanDataDto, String> {
+    let db = open_db(&app)?;
+    generate_host_plan(&db)
+}
+
+fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    if event.state == EventState::Signup {
+        let participants = ParticipantRepo::list_for_event(db.conn(), &event.id)
+            .map_err(|error| error.to_string())?;
+        let tracks =
+            TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+        let seeded = participants
+            .iter()
+            .filter(|participant| {
+                matches!(participant.membership, Membership::Seeded)
+                    && tracks
+                        .iter()
+                        .any(|track| track.owner_id == participant.user_id)
+            })
+            .count();
+        let settings: EventSettings =
+            serde_json::from_str(&event.settings_json).unwrap_or_default();
+        if seeded < 2 {
+            return Err("the roster needs at least two seeded participants".to_string());
+        }
+        let max_rounds = seeded.saturating_sub(1) as u32;
+        if settings.rounds.is_some_and(|rounds| rounds > max_rounds) {
+            return Err(format!(
+                "the schedule can run at most {max_rounds} rounds for this roster"
+            ));
+        }
+        lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
+    }
+    let outcome = generate_schedule(db, &event.id, now).map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now,
+        "Host",
+        "Schedule generated",
+        Some(&format!("Plan v{}", outcome.version)),
+        &serde_json::json!({ "rounds": outcome.rounds, "commitment": outcome.commitment })
+            .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    plan_data(db)
+}
+
+#[tauri::command]
+pub fn host_start_event(app: AppHandle) -> Result<PlanDataDto, String> {
+    let db = open_db(&app)?;
+    start_host_event(&db)
+}
+
+fn start_host_event(db: &Db) -> Result<PlanDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    start_event(db, &event.id, now).map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now,
+        "Host",
+        "Event started",
+        None,
+        "{}",
+    )
+    .map_err(|error| error.to_string())?;
+    plan_data(db)
+}
+
+#[tauri::command]
+pub fn host_mission_control(app: AppHandle) -> Result<MissionControlDto, String> {
+    let db = open_db(&app)?;
+    let settings = host_settings(app).unwrap_or_default();
+    mission_control(&db, &settings)
+}
+
+fn mission_control(db: &Db, settings: &SettingsDto) -> Result<MissionControlDto, String> {
+    let Some(event) = current_event(db)? else {
+        return Ok(MissionControlDto {
+            first_run: true,
+            event: None,
+            bot: bot_health(settings, false),
+            next_action: None,
+            decisions: Vec::new(),
+            activity: Vec::new(),
+            timeline: Vec::new(),
+            facts: Vec::new(),
+        });
+    };
+    let event_summary = summary(db, &event)?;
+    let plan = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let settings_json: EventSettings =
+        serde_json::from_str(&event.settings_json).unwrap_or_default();
+    let audit =
+        AuditRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let activity = audit
+        .iter()
+        .take(6)
+        .map(|entry| ActivityDto {
+            id: format!("activity-{}", entry.id),
+            at: format_local_time(entry.at, &settings.timezone),
+            actor: entry.actor.clone(),
+            action: entry.action.clone(),
+            subject: entry.subject.clone().unwrap_or_default(),
+        })
+        .collect();
+    let seeded = event_summary.tracks > 0;
+    let roster = event_summary.participants > 0;
+    let planned = plan.is_some();
+    let mut timeline = vec![
+        TimelineStepDto {
+            id: "seeds".to_string(),
+            label: "Seeds".to_string(),
+            caption: format!(
+                "{} {}",
+                event_summary.tracks,
+                if event_summary.tracks == 1 {
+                    "track"
+                } else {
+                    "tracks"
+                }
+            ),
+            state: step_state(seeded, true),
+        },
+        TimelineStepDto {
+            id: "roster".to_string(),
+            label: "Roster".to_string(),
+            caption: format!("{} active", event_summary.participants),
+            state: step_state(roster, seeded),
+        },
+        TimelineStepDto {
+            id: "schedule".to_string(),
+            label: "Schedule".to_string(),
+            caption: plan
+                .as_ref()
+                .map(|plan| format!("Version {}", plan.version))
+                .unwrap_or_else(|| "Not committed".to_string()),
+            state: step_state(planned, roster),
+        },
+        TimelineStepDto {
+            id: "rounds".to_string(),
+            label: "Rounds".to_string(),
+            caption: format!("{} planned", event_summary.rounds),
+            state: if matches!(event.state, EventState::Active | EventState::Paused) {
+                "current"
+            } else if matches!(event.state, EventState::Reveal | EventState::Archived) {
+                "done"
+            } else {
+                "next"
+            }
+            .to_string(),
+        },
+        TimelineStepDto {
+            id: "reveal".to_string(),
+            label: "Reveal".to_string(),
+            caption: "After the final round".to_string(),
+            state: if matches!(event.state, EventState::Reveal | EventState::Archived) {
+                "current"
+            } else {
+                "next"
+            }
+            .to_string(),
+        },
+    ];
+    if !timeline.iter().any(|step| step.state == "current")
+        && let Some(first_next) = timeline.iter_mut().find(|step| step.state == "next")
+    {
+        first_next.state = "current".to_string();
+    }
+    let next_action = if matches!(
+        event.state,
+        EventState::Active | EventState::Paused | EventState::Reveal | EventState::Archived
+    ) {
+        None
+    } else if !roster {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Invite the first people".to_string(),
+            detail: "The event exists. Share the join instructions so people can send one seed track to the bot.".to_string(),
+            action_label: "Open event setup".to_string(),
+            secondary_label: None,
+            tone: "info".to_string(),
+        })
+    } else if !planned {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Build the schedule".to_string(),
+            detail: "The roster is in. Generate the draft schedule and check the matrix before anyone edits.".to_string(),
+            action_label: "Open schedule planner".to_string(),
+            secondary_label: None,
+            tone: "info".to_string(),
+        })
+    } else {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Lock the schedule".to_string(),
+            detail: "Review the assignment matrix, then lock the plan. Locking publishes a commitment without any file hash.".to_string(),
+            action_label: "Open schedule planner".to_string(),
+            secondary_label: None,
+            tone: "attention".to_string(),
+        })
+    };
+    let mut decisions = Vec::new();
+    if roster && event_summary.tracks < event_summary.participants {
+        decisions.push(DecisionDto {
+            id: "missing-seeds".to_string(),
+            kind: "Seeds".to_string(),
+            title: format!(
+                "{} people still need a seed",
+                event_summary.participants - event_summary.tracks
+            ),
+            detail: "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.".to_string(),
+            due: "Before roster lock".to_string(),
+            action_label: "Review".to_string(),
+        });
+    }
+    let facts = vec![
+        EventFactDto {
+            label: "Mode".to_string(),
+            value: match settings_json.mode {
+                Mode::Classic => format!("Classic, {} rounds", event_summary.rounds),
+                Mode::Async => "Async queue".to_string(),
+            },
+        },
+        EventFactDto {
+            label: "People".to_string(),
+            value: format!(
+                "{} active, including {} fill-ins",
+                event_summary.participants, event_summary.fill_ins
+            ),
+        },
+        EventFactDto {
+            label: "Tracks".to_string(),
+            value: format!("{} anonymous tracks", event_summary.tracks),
+        },
+        EventFactDto {
+            label: "Round length".to_string(),
+            value: format!("{} hours", settings_json.round_window_secs / 3600),
+        },
+        EventFactDto {
+            label: "Claim window".to_string(),
+            value: format!("{} hours", settings_json.claim_window_secs / 3600),
+        },
+        EventFactDto {
+            label: "Timezone".to_string(),
+            value: settings.timezone.clone(),
+        },
+    ];
+    Ok(MissionControlDto {
+        first_run: false,
+        event: Some(event_summary),
+        bot: bot_health(settings, true),
+        next_action,
+        decisions,
+        activity,
+        timeline,
+        facts,
+    })
+}
+
+fn step_state(done: bool, prerequisite: bool) -> String {
+    if done {
+        "done".to_string()
+    } else if prerequisite {
+        "current".to_string()
+    } else {
+        "next".to_string()
+    }
+}
+
+fn bot_health(settings: &SettingsDto, has_event: bool) -> BotHealthDto {
+    if !settings.bot_configured {
+        BotHealthDto {
             status: "Not configured".to_string(),
             label: "No bot connected".to_string(),
             detail: "Connect a bot token to send offers and collect files.".to_string(),
             last_seen: None,
-        },
-        next_action: None,
-        decisions: Vec::new(),
-        activity: Vec::new(),
-        timeline: Vec::new(),
-        facts: Vec::new(),
+        }
+    } else if has_event {
+        BotHealthDto {
+            status: "Offline".to_string(),
+            label: if settings.bot_identity.is_empty() {
+                "Monsquaz Bot".to_string()
+            } else {
+                settings.bot_identity.clone()
+            },
+            detail: "Bot token stored. Start the gateway to send offers.".to_string(),
+            last_seen: None,
+        }
+    } else {
+        BotHealthDto {
+            status: "Offline".to_string(),
+            label: "Monsquaz Bot".to_string(),
+            detail: "Bot token stored. Start the gateway when the event opens.".to_string(),
+            last_seen: None,
+        }
     }
 }
 
 #[tauri::command]
-pub fn host_audit_log() -> Vec<AuditEntryDto> {
-    Vec::new()
+pub fn host_audit_log(app: AppHandle) -> Result<Vec<AuditEntryDto>, String> {
+    let db = open_db(&app)?;
+    let settings = host_settings(app).unwrap_or_default();
+    audit_log(&db, &settings)
+}
+
+fn audit_log(db: &Db, settings: &SettingsDto) -> Result<Vec<AuditEntryDto>, String> {
+    let Some(event) = current_event(db)? else {
+        return Ok(Vec::new());
+    };
+    let entries =
+        AuditRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| AuditEntryDto {
+            id: format!("audit-{}", entry.id),
+            at: format_local_time(entry.at, &settings.timezone),
+            actor: entry.actor,
+            action: entry.action,
+            subject: entry.subject.unwrap_or_default(),
+            reason: String::new(),
+            code: format!("A-{:04}", entry.id),
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -256,6 +1229,17 @@ fn validate_settings(settings: &SettingsDto) -> Result<(), String> {
     Ok(())
 }
 
+fn format_local_time(seconds: i64, timezone: &str) -> String {
+    let zone: Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
+    let Some(instant) = DateTime::<Utc>::from_timestamp(seconds, 0) else {
+        return String::new();
+    };
+    instant
+        .with_timezone(&zone)
+        .format("%-d %b, %H:%M")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,13 +1279,287 @@ mod tests {
         assert!(!json.contains("secret"));
     }
 
+    fn test_db(name: &str) -> (Db, PathBuf) {
+        let directory = std::env::temp_dir().join(format!("monsquaz-{name}-{}", now_nanos()));
+        fs::create_dir_all(&directory).unwrap();
+        let db = Db::open(directory.join("test.db")).unwrap();
+        (db, directory)
+    }
+
+    fn seed_person(db: &Db, event_id: &str, id: &str, name: &str) {
+        ParticipantRepo::upsert(
+            db.conn(),
+            &swap_db::ParticipantRecord {
+                event_id: event_id.to_string(),
+                user_id: id.to_string(),
+                display_name: name.to_string(),
+                role: Role::Participant,
+                membership: Membership::Seeded,
+                readiness: swap_core::Readiness::Ready,
+                timezone: "Europe/Stockholm".to_string(),
+                max_handoffs: 8,
+                created_at: 100,
+                updated_at: 100,
+            },
+        )
+        .unwrap();
+    }
+
+    fn seed_track(db: &Db, event_id: &str, code: &str, owner: &str) {
+        TrackRepo::insert(
+            db.conn(),
+            &swap_db::TrackRecord {
+                event_id: event_id.to_string(),
+                code: code.to_string(),
+                owner_id: owner.to_string(),
+                state: swap_core::TrackState::Seeded,
+                created_at: 100,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_setup_people_and_plan_commands_read_the_same_event() {
+        let (db, directory) = test_db("event-round-trip");
+        let draft = EventDraftDto {
+            name: "Test Rotation".to_string(),
+            rounds: Some(2),
+            group_count: 2,
+            group_size: 2,
+            ..default_draft()
+        };
+        let created = create_host_event(&db, draft).unwrap();
+        assert_eq!(created.name, "Test Rotation");
+        assert_eq!(created.rounds, 2);
+
+        let setup = setup_data(&db).unwrap();
+        assert!(!setup.first_run);
+        assert_eq!(setup.event.as_ref().unwrap().name, "Test Rotation");
+        assert_eq!(setup.draft.name, "Test Rotation");
+
+        let people = people_data(&db).unwrap();
+        assert_eq!(people.event.as_ref().unwrap().name, "Test Rotation");
+        assert!(people.rows.is_empty());
+
+        let plan = plan_data(&db).unwrap();
+        assert_eq!(plan.status, "No plan");
+        assert_eq!(plan.rounds, 2);
+        assert_eq!(plan.tracks, 0);
+
+        seed_person(&db, &created.id, "u-alice", "Alice");
+        seed_person(&db, &created.id, "u-bob", "Bob");
+        seed_track(&db, &created.id, "A1", "u-alice");
+        seed_track(&db, &created.id, "B1", "u-bob");
+
+        let people = people_data(&db).unwrap();
+        assert_eq!(people.rows.len(), 2);
+        assert_eq!(people.rows[0].seed_track.as_deref(), Some("A1"));
+        assert_eq!(people.rows[1].seed_track.as_deref(), Some("B1"));
+
+        let paused = set_participant_paused(&db, "u-alice", true).unwrap();
+        assert_eq!(paused.rows[0].status, "Paused");
+        let resumed = set_participant_paused(&db, "u-alice", false).unwrap();
+        assert_eq!(resumed.rows[0].status, "Ready");
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert_eq!(entries[0].action, "Participant resumed");
+        assert_eq!(entries[1].action, "Participant paused");
+
+        PlanRepo::insert(
+            db.conn(),
+            &swap_db::PlanRecord {
+                event_id: created.id.clone(),
+                version: 1,
+                seed: 7,
+                rounds: 2,
+                settings_json: "{}".to_string(),
+                commitment: "commit-1".to_string(),
+                committed_at: 100,
+                reason: None,
+            },
+        )
+        .unwrap();
+        for (round, track, person) in [(0, "A1", "u-bob"), (0, "B1", "u-alice")] {
+            PlanRepo::insert_assignment(
+                db.conn(),
+                &swap_db::PlanAssignmentRecord {
+                    event_id: created.id.clone(),
+                    plan_version: 1,
+                    round,
+                    track_code: track.to_string(),
+                    participant_id: person.to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        let plan = plan_data(&db).unwrap();
+        assert_eq!(plan.status, "Draft");
+        assert_eq!(plan.matrix.len(), 2);
+        assert_eq!(plan.graph.edges.len(), 2);
+        assert!(
+            plan.graph
+                .edges
+                .iter()
+                .any(|edge| edge.track_code == "A1" && edge.participant_name == "Bob")
+        );
+        assert!(
+            plan.matrix
+                .iter()
+                .find(|track| track.track_code == "A1")
+                .unwrap()
+                .cells
+                .iter()
+                .any(|cell| cell.participant_name == "Bob")
+        );
+        assert_eq!(plan.groups.len(), 2);
+        assert_eq!(plan.groups[0].participants, vec!["Alice"]);
+        assert_eq!(plan.groups[0].tracks, 1);
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_bad_draft_does_not_create_an_event() {
+        let (db, directory) = test_db("bad-draft");
+        let draft = EventDraftDto {
+            name: "   ".to_string(),
+            ..default_draft()
+        };
+        assert!(create_host_event(&db, draft).is_err());
+        assert!(setup_data(&db).unwrap().first_run);
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn the_first_run_payload_matches_the_ui_contract() {
-        let json = serde_json::to_value(host_mission_control()).unwrap();
+        let (db, directory) = test_db("first-run");
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        let json = serde_json::to_value(mission).unwrap();
         assert_eq!(json["firstRun"], true);
         assert_eq!(json["event"], serde_json::Value::Null);
         assert_eq!(json["bot"]["status"], "Not configured");
         assert!(json["decisions"].as_array().unwrap().is_empty());
         assert!(json["timeline"].as_array().unwrap().is_empty());
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn mission_control_and_audit_log_follow_the_created_event() {
+        let (db, directory) = test_db("mission");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Live Mission".to_string(),
+                rounds: Some(2),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        assert!(!mission.first_run);
+        let summary = mission.event.as_ref().unwrap();
+        assert_eq!(summary.id, created.id);
+        assert_eq!(summary.name, "Live Mission");
+        assert_eq!(mission.timeline.len(), 5);
+        assert_eq!(mission.timeline[0].state, "current");
+        assert_eq!(mission.facts.len(), 6);
+        assert_eq!(
+            mission.next_action.as_ref().unwrap().action_label,
+            "Open event setup"
+        );
+
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].actor, "Host");
+        assert_eq!(entries[0].action, "Event created");
+        assert_eq!(entries[0].subject, "Live Mission");
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_planner_generates_a_real_schedule_from_seeded_tracks() {
+        let (db, directory) = test_db("generate-plan");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Three Seeds".to_string(),
+                rounds: Some(2),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for (id, name, code) in [
+            ("u-alice", "Alice", "A1"),
+            ("u-bob", "Bob", "B1"),
+            ("u-carol", "Carol", "C1"),
+        ] {
+            seed_person(&db, &created.id, id, name);
+            seed_track(&db, &created.id, code, id);
+        }
+
+        let plan = generate_host_plan(&db).unwrap();
+        assert_eq!(plan.status, "Draft");
+        assert_eq!(plan.matrix.len(), 3);
+        assert_eq!(plan.rounds, 2);
+        assert!(plan.matrix.iter().all(|track| track.cells.len() == 2));
+        assert!(
+            plan.matrix
+                .iter()
+                .flat_map(|track| track.cells.iter())
+                .all(|cell| !cell.participant_id.is_empty())
+        );
+        for round in 0..plan.rounds {
+            let mut people: Vec<&str> = plan
+                .matrix
+                .iter()
+                .flat_map(|track| track.cells.iter())
+                .filter(|cell| cell.round == round)
+                .map(|cell| cell.participant_id.as_str())
+                .collect();
+            people.sort_unstable();
+            people.dedup();
+            assert_eq!(people.len(), 3, "round {round} must use each person once");
+        }
+        for track in &plan.matrix {
+            for cell in &track.cells {
+                let owner = match track.track_code.as_str() {
+                    "A1" => "u-alice",
+                    "B1" => "u-bob",
+                    _ => "u-carol",
+                };
+                assert_ne!(cell.participant_id, owner);
+            }
+        }
+
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].action, "Schedule generated");
+        assert_eq!(entries[0].subject, "Plan v1");
+
+        let again = generate_host_plan(&db).unwrap();
+        assert_eq!(again.status, "Draft");
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert_eq!(entries[0].subject, "Plan v2");
+
+        let started = start_host_event(&db).unwrap();
+        assert!(started.committed);
+        assert_eq!(started.status, "Committed");
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert_eq!(entries[0].action, "Event started");
+
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        assert!(mission.next_action.is_none());
+        assert_eq!(mission.event.as_ref().unwrap().stage, "Active");
+        assert_eq!(mission.event.as_ref().unwrap().round, 1);
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
     }
 }

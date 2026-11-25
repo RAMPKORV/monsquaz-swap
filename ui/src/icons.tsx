@@ -22,6 +22,7 @@ export type IconName =
   | "refresh"
   | "download"
   | "pause"
+  | "play"
   | "lock"
   | "file"
   | "eye-off"
@@ -124,6 +125,7 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   "arrow-right": <path d="M4 12h16M14 6l6 6-6 6" />,
+  play: <path d="M8 5v14l11-7L8 5Z" />,
   "chevron-down": <path d="m6 9 6 6 6-6" />,
   x: <path d="M6 6l12 12M18 6 6 18" />,
   refresh: (

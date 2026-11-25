@@ -47,6 +47,11 @@ shot() {
   local height="$4"
   rm -rf "$PROFILE"
   mkdir -p "$PROFILE"
+  if [[ "$name" == *-light-* ]]; then
+    THEME=light
+  else
+    THEME=dark
+  fi
   "$CHROMIUM" \
     --headless=new \
     --no-sandbox \
@@ -57,7 +62,7 @@ shot() {
     --window-size="$width,$height" \
     --virtual-time-budget=4000 \
     --screenshot="$OUT/$name.png" \
-    "http://localhost:$PORT/?demo=1&static=1&$query" >/dev/null 2>&1
+    "http://localhost:$PORT/?demo=1&static=1&theme=$THEME&$query" >/dev/null 2>&1
   echo "wrote $OUT/$name.png"
 }
 
@@ -71,6 +76,39 @@ shot mission-populated-light-1280 "view=mission&theme=light" 1280 800
 shot mission-populated-dark-1024 "view=mission" 1024 700
 shot mission-populated-light-1024 "view=mission&theme=light" 1024 700
 shot mission-populated-dark-zoom200 "view=mission" 640 400
+shot shell-command-palette-dark-1280 "view=mission&palette=1" 1280 800
+
+shot setup-first-run-dark-1280 "view=setup&state=empty" 1280 800
+shot setup-loading-dark-1280 "view=setup&state=loading" 1280 800
+shot setup-populated-dark-1280 "view=setup" 1280 800
+shot setup-error-dark-1280 "view=setup&state=error" 1280 800
+shot setup-long-dark-1280 "view=setup&state=long" 1280 800
+shot setup-populated-light-1280 "view=setup&theme=light" 1280 800
+shot setup-populated-dark-1024 "view=setup" 1024 700
+
+shot people-empty-dark-1280 "view=people&state=empty" 1280 800
+shot people-loading-dark-1280 "view=people&state=loading" 1280 800
+shot people-populated-dark-1280 "view=people" 1280 800
+shot people-error-dark-1280 "view=people&state=error" 1280 800
+shot people-long-dark-1280 "view=people&state=long" 1280 800
+shot people-dense-dark-1280 "view=people&state=dense" 1280 800
+shot people-populated-light-1280 "view=people&theme=light" 1280 800
+shot people-populated-dark-1024 "view=people" 1024 700
+shot people-populated-dark-zoom200 "view=people" 640 800
+
+shot plan-empty-dark-1280 "view=plan&state=empty" 1280 800
+shot plan-loading-dark-1280 "view=plan&state=loading" 1280 800
+shot plan-populated-dark-1280 "view=plan" 1280 800
+shot plan-error-dark-1280 "view=plan&state=error" 1280 800
+shot plan-infeasible-dark-1280 "view=plan&state=infeasible" 1280 800
+shot plan-long-dark-1280 "view=plan&state=long" 1280 800
+shot plan-dense-dark-1280 "view=plan&state=dense" 1280 800
+shot plan-populated-light-1280 "view=plan&theme=light" 1280 800
+shot plan-populated-dark-1024 "view=plan" 1024 700
+shot plan-participant-view-dark-1280 "view=plan&participant=1" 1280 800
+shot plan-full-dark-1280x1600 "view=plan" 1280 1600
+shot plan-graph-dark-1280x1200 "view=plan" 1280 1200
+shot plan-populated-dark-zoom200 "view=plan" 640 800
 
 shot settings-first-run-dark-1280 "view=settings&state=empty" 1280 800
 shot settings-populated-dark-1280 "view=settings" 1280 800
@@ -81,6 +119,8 @@ shot settings-populated-dark-1024 "view=settings" 1024 700
 shot settings-full-dark-1280x2000 "view=settings" 1280 2000
 shot settings-full-light-1280x2000 "view=settings&theme=light" 1280 2000
 shot settings-delete-dialog-dark-1280 "view=settings&dialog=delete" 1280 800
+shot settings-dirty-dark-1280 "view=settings&dirty=1" 1280 800
+shot settings-dirty-dark-1024 "view=settings&dirty=1" 1024 700
 
 shot audit-empty-dark-1280 "view=audit&state=empty" 1280 800
 shot audit-loading-dark-1280 "view=audit&state=loading" 1280 800

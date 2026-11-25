@@ -1,6 +1,9 @@
+import { useState } from "react";
+import type { CSSProperties } from "react";
 import type { MissionControl } from "../types";
 import {
   Button,
+  Dialog,
   EmptyState,
   Meter,
   PageHeader,
@@ -25,6 +28,7 @@ export function MissionControlView({
   onAction: (label: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
 }) {
+  const [confirmPause, setConfirmPause] = useState(false);
   if (data.firstRun || !data.event) {
     return <FirstRun onAction={onAction} />;
   }
@@ -40,13 +44,25 @@ export function MissionControlView({
   return (
     <div className="view">
       <PageHeader
-        eyebrow="Mission control"
         title={event.name}
-        description={`${event.mode} · ${event.participants} people · Round ${event.round} of ${event.rounds}`}
+        description={`${
+          event.mode === "Classic" ? "Classic relay" : "Async queue"
+        }, host view.`}
         actions={
-          <StatusPill tone={stageTone(event.stage)}>
-            {event.stage}
-          </StatusPill>
+          <div className="header-actions">
+            <StatusPill tone={stageTone(event.stage)}>
+              {event.stage}
+            </StatusPill>
+            {event.stage === "Active" ? (
+              <Button
+                variant="quiet"
+                icon="pause"
+                onClick={() => setConfirmPause(true)}
+              >
+                Pause event…
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
@@ -71,11 +87,7 @@ export function MissionControlView({
           className={`next-action next-action--${data.nextAction.tone}`}
           aria-labelledby="next-action-title"
         >
-          <div className="next-action__marker" aria-hidden="true">
-            <Icon name="arrow-right" size={22} />
-          </div>
           <div className="next-action__copy">
-            <p className="eyebrow">{data.nextAction.eyebrow}</p>
             <h2 id="next-action-title">{data.nextAction.title}</h2>
             <p>{data.nextAction.detail}</p>
           </div>
@@ -87,7 +99,8 @@ export function MissionControlView({
             >
               {data.nextAction.actionLabel}
             </Button>
-            {data.nextAction.secondaryLabel ? (
+            {data.nextAction.secondaryLabel &&
+            !/^pause/i.test(data.nextAction.secondaryLabel) ? (
               <Button
                 variant="quiet"
                 icon="pause"
@@ -107,11 +120,15 @@ export function MissionControlView({
               <div>
                 <h2 id="round-progress-title">Round progress</h2>
                 <p className="card__subtitle">
-                  {event.rounds - event.round} rounds remain after this one.
+                  {event.round === 0
+                    ? "The schedule has not started."
+                    : `${event.rounds - event.round} rounds remain after this one.`}
                 </p>
               </div>
               <span className="card__meta">
-                Round {event.round} of {event.rounds}
+                {event.round === 0
+                  ? "Not started"
+                  : `Round ${event.round} of ${event.rounds}`}
               </span>
             </div>
             <Meter
@@ -119,20 +136,21 @@ export function MissionControlView({
               max={event.rounds}
               label="Classic round progress"
             />
-            <ol className="timeline">
+            <ol
+              className="timeline"
+              style={
+                {
+                  "--timeline-steps": Math.max(1, data.timeline.length),
+                } as CSSProperties
+              }
+            >
               {data.timeline.map((step) => (
                 <li
                   key={step.id}
                   className={`timeline__step timeline__step--${step.state}`}
                   aria-current={step.state === "current" ? "step" : undefined}
                 >
-                  <span className="timeline__dot" aria-hidden="true">
-                    {step.state === "done" ? (
-                      <Icon name="check" size={14} />
-                    ) : (
-                      <span />
-                    )}
-                  </span>
+                  <span className="timeline__dot" aria-hidden="true" />
                   <span className="timeline__label">
                     <span className="visually-hidden">
                       {step.state === "done"
@@ -171,8 +189,17 @@ export function MissionControlView({
               <ul className="decision-list">
                 {data.decisions.map((decision) => (
                   <li className="decision" key={decision.id}>
-                    <div className="decision__kind">
-                      <Icon name="alert" size={16} />
+                    <div
+                      className={`decision__kind ${
+                        decision.kind === "Schedule"
+                          ? "decision__kind--info"
+                          : ""
+                      }`}
+                    >
+                      <Icon
+                        name={decision.kind === "Schedule" ? "calendar" : "alert"}
+                        size={16}
+                      />
                       <span>{decision.kind}</span>
                     </div>
                     <div className="decision__copy">
@@ -183,6 +210,7 @@ export function MissionControlView({
                       <span className="decision__due">{decision.due}</span>
                       <Button
                         variant="secondary"
+                        ariaLabel={`${decision.actionLabel}: ${decision.title}`}
                         onClick={() => onAction(decision.title)}
                       >
                         {decision.actionLabel}
@@ -227,15 +255,13 @@ export function MissionControlView({
               <StatusPill tone={botTone}>{data.bot.status}</StatusPill>
             </div>
             <div className="bot-card">
-              <span className="bot-card__icon">
-                <Icon name="bot" size={24} />
-              </span>
+              <Icon name="bot" size={18} className="bot-card__mark" />
               <div>
                 <p className="bot-card__name">{data.bot.label}</p>
                 <p className="bot-card__detail">{data.bot.detail}</p>
                 {data.bot.lastSeen ? (
                   <p className="bot-card__seen">
-                    Last event {data.bot.lastSeen}
+                    Last check-in {data.bot.lastSeen}
                   </p>
                 ) : null}
               </div>
@@ -268,12 +294,41 @@ export function MissionControlView({
               icon="settings"
               onClick={() => onNavigate("settings")}
             >
-              Event settings
+              App settings
             </Button>
           </section>
 
         </aside>
       </div>
+
+      {confirmPause ? (
+        <Dialog
+          title="Pause the event?"
+          onClose={() => setConfirmPause(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmPause(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon="pause"
+                onClick={() => {
+                  setConfirmPause(false);
+                  onAction("Pause event");
+                }}
+              >
+                Pause event
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Offers stop and reminders pause. Every deadline moves later by the
+            pause length. People keep the tracks they hold.
+          </p>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -282,9 +337,8 @@ function FirstRun({ onAction }: { onAction: (label: string) => void }) {
   return (
     <div className="view">
       <PageHeader
-        eyebrow="First run"
-        title="Give your server a strange and beautiful album"
-        description="Monsquaz Swap runs the whole event on this computer: the bot, the schedule, the files, and the reveal."
+        title="Set up Monsquaz Swap"
+        description="Monsquaz Swap turns one seed per person into an anonymous album. Start with the bot, then open the event."
       />
       <div className="first-run">
         <ol className="setup-steps">

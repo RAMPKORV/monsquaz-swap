@@ -10,10 +10,14 @@ import { Icon } from "../icons";
 
 export function AuditLogView({
   entries,
+  hasEvent,
+  timezone,
   onExport,
   onNavigate,
 }: {
   entries: AuditEntry[];
+  hasEvent: boolean;
+  timezone: string;
   onExport: () => void;
   onNavigate: () => void;
 }) {
@@ -42,9 +46,8 @@ export function AuditLogView({
   return (
     <div className="view">
       <PageHeader
-        eyebrow="Audit log"
-        title="Every decision, in order"
-        description="Host actions and transitions. Only you can see this before the reveal; the CSV contains names and track codes. Times are Europe/Stockholm. Entries cannot be edited or deleted."
+        title="Audit log"
+        description={`Host actions and transitions. Only you can see this log. The CSV export contains participant names and track codes. Times are ${timezone}. Entries cannot be edited or deleted.`}
         actions={
           <Button
             variant="secondary"
@@ -60,11 +63,15 @@ export function AuditLogView({
       {entries.length === 0 ? (
         <EmptyState
           icon="audit"
-          title="No audit entries yet"
-          detail="Host actions and event transitions appear here. Nothing is hidden from the host."
+          title={hasEvent ? "No audit entries yet" : "No event yet"}
+          detail={
+            hasEvent
+              ? "Host actions and event transitions appear here. Nothing is hidden from the host."
+              : "Create an event to start the audit log. Every host action is written here and cannot be edited or deleted."
+          }
           action={
             <Button variant="secondary" onClick={onNavigate}>
-              Open mission control
+              {hasEvent ? "Open mission control" : "Open event setup"}
             </Button>
           }
         />
@@ -104,6 +111,7 @@ export function AuditLogView({
             </div>
             <p className="filter-count" role="status">
               {filtered.length} of {entries.length} entries
+              {filtered.length > 16 ? ", scroll for more" : ""}
             </p>
           </section>
 
@@ -125,7 +133,17 @@ export function AuditLogView({
               }
             />
           ) : (
-            <div className="table-card">
+            <div
+              className={`table-card ${
+                filtered.length > 16 ? "table-card--bounded" : ""
+              }`}
+              tabIndex={filtered.length > 16 ? 0 : undefined}
+              aria-label={
+                filtered.length > 16
+                  ? "Audit log, scroll for more entries"
+                  : undefined
+              }
+            >
               <table className="audit-table">
                 <caption className="visually-hidden">
                   Audit log entries, newest first

@@ -50,26 +50,30 @@ export function StatusPill({
   children: ReactNode;
   icon?: IconName;
 }) {
+  const fallback: IconName | undefined =
+    tone === "ok"
+      ? "check"
+      : tone === "warn" || tone === "danger"
+        ? "alert"
+        : tone === "info"
+          ? "clock"
+          : undefined;
+  const mark = icon ?? fallback;
   return (
     <span className={`status status--${tone}`}>
-      {icon ? (
-        <Icon name={icon} size={14} />
-      ) : (
-        <span className="status__dot" aria-hidden="true" />
-      )}
+      {mark ? <Icon name={mark} size={13} /> : null}
       <span>{children}</span>
     </span>
   );
 }
 
 export function PageHeader({
-  eyebrow,
   title,
   description,
   actions,
   titleId,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   actions?: ReactNode;
@@ -78,7 +82,6 @@ export function PageHeader({
   return (
     <header className="page-header">
       <div className="page-header__copy">
-        <p className="eyebrow">{eyebrow}</p>
         <h1 id={titleId} tabIndex={-1}>
           {title}
         </h1>
@@ -183,7 +186,7 @@ export function EmptyState({
       <span className="state-panel__icon">
         <Icon name={icon} size={28} />
       </span>
-      <h2>{title}</h2>
+      <h1 tabIndex={-1}>{title}</h1>
       <p>{detail}</p>
       {action ? <div className="state-panel__action">{action}</div> : null}
     </div>
@@ -221,7 +224,7 @@ export function ErrorState({
       <span className="state-panel__icon">
         <Icon name="alert" size={28} />
       </span>
-      <h2>{title}</h2>
+      <h1 tabIndex={-1}>{title}</h1>
       <p>{detail}</p>
       <p className="error-code">
         Error code <code>{code}</code>

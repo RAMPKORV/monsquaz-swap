@@ -21,6 +21,14 @@ pub struct EventSettings {
     pub round_window_secs: i64,
     pub max_file_bytes: u64,
     pub allowed_extensions: Vec<String>,
+    pub pack_type: Option<String>,
+    pub pack_required: Option<bool>,
+    pub group_mode: Option<String>,
+    pub group_count: Option<u32>,
+    pub group_size: Option<u32>,
+    pub rotation: Option<String>,
+    pub swap_cadence: Option<String>,
+    pub schedule_visibility: Option<String>,
 }
 
 impl Default for EventSettings {
@@ -35,6 +43,14 @@ impl Default for EventSettings {
                 .iter()
                 .map(|extension| (*extension).to_string())
                 .collect(),
+            pack_type: None,
+            pack_required: None,
+            group_mode: None,
+            group_count: None,
+            group_size: None,
+            rotation: None,
+            swap_cadence: None,
+            schedule_visibility: None,
         }
     }
 }
@@ -51,6 +67,10 @@ pub enum SettingsError {
     EmptyAllowlist,
     #[error("invalid extension: {0}")]
     InvalidExtension(String),
+    #[error("the group count must be between 1 and 4")]
+    GroupCount,
+    #[error("the group size must be between 2 and 20")]
+    GroupSize,
 }
 
 impl EventSettings {
@@ -66,6 +86,16 @@ impl EventSettings {
         }
         if self.allowed_extensions.is_empty() {
             return Err(SettingsError::EmptyAllowlist);
+        }
+        if let Some(count) = self.group_count
+            && !(1..=4).contains(&count)
+        {
+            return Err(SettingsError::GroupCount);
+        }
+        if let Some(size) = self.group_size
+            && !(2..=20).contains(&size)
+        {
+            return Err(SettingsError::GroupSize);
         }
         let mut seen = BTreeSet::new();
         for extension in &self.allowed_extensions {

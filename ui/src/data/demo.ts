@@ -8,6 +8,9 @@ import type {
   TimelineStep,
 } from "../types";
 
+const longEventName =
+  "The Extremely Long and Slightly Haunted Midwinter Remix Exchange, Volume Two";
+
 const defaultTimeline: TimelineStep[] = [
   {
     id: "seed",
@@ -62,8 +65,8 @@ const defaultDecisions: Decision[] = [
     kind: "Offer",
     title: "One offer expires in 3 hours",
     detail:
-      "S4K2M has not been claimed. If the offer expires, the track returns to the pool and the pair stays unseen.",
-    due: "25 Nov · 17:40 CET",
+      "S4K2M has not been claimed. If the offer expires, the offer does not count as seen and the track returns to the pool.",
+    due: "25 Nov, 17:40 CET",
     actionLabel: "Review",
   },
   {
@@ -83,7 +86,7 @@ const defaultActivity: ActivityEntry[] = [
     at: "17:12",
     actor: "Host",
     action: "extended a deadline",
-    subject: "S7F3A · +6 hours",
+    subject: "S7F3A, +6 hours",
   },
   {
     id: "activity-2",
@@ -124,8 +127,8 @@ const defaultActivity: ActivityEntry[] = [
 
 function defaultFacts() {
   return [
-    { label: "Mode", value: "Classic · 11 rounds" },
-    { label: "People", value: "12 active · 2 fill-ins" },
+    { label: "Mode", value: "Classic, 11 rounds" },
+    { label: "People", value: "12 active, including 2 fill-ins" },
     { label: "Tracks", value: "12 anonymous tracks" },
     { label: "Round length", value: "24 hours" },
     { label: "Claim window", value: "12 hours" },
@@ -152,7 +155,7 @@ function baseMission(): MissionControl {
     bot: {
       status: "Online",
       label: "Monsquaz Bot",
-      detail: "Discord connection healthy · 82 ms",
+      detail: "Discord connection healthy, 82 ms",
       lastSeen: "14 seconds ago",
     },
     nextAction: {
@@ -196,7 +199,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     mission.bot = {
       status: "Offline",
       label: "Monsquaz Bot",
-      detail: "Discord connection is down · offers are paused",
+      detail: "Discord connection is down, offers are paused",
       lastSeen: "18 minutes ago",
     };
     mission.nextAction = {
@@ -214,7 +217,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
   if (scenario === "long") {
     mission.event = {
       id: "long-event",
-      name: "The Extremely Long and Slightly Haunted Midwinter Remix Exchange, Volume Two",
+      name: longEventName,
       mode: "Classic",
       stage: "Active",
       participants: 48,
@@ -226,9 +229,9 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     };
     mission.bot = {
       status: "Online",
-      label: "Monsquaz Bot · The Extremely Long Server Name for Testing",
+      label: "Monsquaz Bot, The Extremely Long Server Name for Testing",
       detail:
-        "Discord connection healthy · 148 ms · last heartbeat received during a very busy offer batch",
+        "Discord connection healthy, 148 ms, last heartbeat received during a very busy offer batch",
       lastSeen: "6 seconds ago",
     };
     mission.nextAction = {
@@ -248,7 +251,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         title: "S2M8C is waiting for a second extension",
         detail:
           "The participant already used the automatic six-hour extension. A second extension needs a host decision and an audit note.",
-        due: "25 Nov · 18:15 CET",
+        due: "25 Nov, 18:15 CET",
         actionLabel: "Review",
       },
       {
@@ -275,7 +278,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         at: "13:20",
         actor: "Host",
         action: "recorded an override for",
-        subject: "S4K2M · fill-in sequence",
+        subject: "S4K2M, fill-in sequence",
       },
       {
         id: "long-activity-8",
@@ -299,10 +302,10 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       { id: "reveal", label: "Reveal", caption: "After stream", state: "next" },
     ];
     mission.facts = [
-      { label: "Mode", value: "Classic · 12 rounds" },
+      { label: "Mode", value: "Classic, 12 rounds" },
       {
         label: "People",
-        value: "40 active · 8 fill-ins · 3 paused for travel",
+        value: "40 active, 8 fill-ins, 3 paused for travel",
       },
       { label: "Tracks", value: "20 anonymous tracks" },
       { label: "Round length", value: "36 hours" },
@@ -321,14 +324,14 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
 
 const defaultSettings: HostSettings = {
   botConfigured: true,
-  botIdentity: "Monsquaz Bot · application 1184",
+  botIdentity: "Monsquaz Bot, application 1184",
   guildName: "The Night Shift",
   announcementChannel: "#swap-announcements",
   revealChannel: "#swap-reveal",
   dmFallback: true,
   timezone: "Europe/Stockholm",
   retentionDays: 90,
-  theme: "dark",
+  theme: "system",
   notifications: {
     deadlines: true,
     botOffline: true,
@@ -345,14 +348,14 @@ export function demoSettings(scenario: Scenario): HostSettings {
       guildName: "",
       announcementChannel: "",
       revealChannel: "",
-      theme: "dark",
+      theme: "system",
     };
   }
   if (scenario === "long") {
     return {
       ...defaultSettings,
       botIdentity:
-        "Monsquaz Bot · application 1184 · The Extremely Long Server Name for Testing",
+        "Monsquaz Bot, application 1184, The Extremely Long Server Name for Testing",
       guildName:
         "The Extremely Long Server Name for Testing and Occasionally Haunting",
       announcementChannel: "#swap-announcements-and-release-notes",
@@ -361,24 +364,24 @@ export function demoSettings(scenario: Scenario): HostSettings {
       retentionDays: 365,
     };
   }
-  return { ...defaultSettings, theme: "dark" };
+  return { ...defaultSettings, theme: "system" };
 }
 
 const auditSeeds: Array<[string, string, string, string, string]> = [
-  ["25 Nov · 17:12", "Host", "Deadline extended", "S7F3A", "Holder asked for six hours; first extension is automatic."],
-  ["25 Nov · 17:04", "Bot", "Offer sent", "S4K2M", "Round 3 offer delivered in a direct message."],
-  ["25 Nov · 16:48", "Noor", "Claim recorded", "S9Q1B", "Claim recorded; seen pair written to the ledger."],
-  ["25 Nov · 16:31", "Remy", "File submitted", "S2M8C", "Version 4 stored, hash checked, previous versions kept."],
-  ["25 Nov · 16:02", "Host", "Round opened", "Round 3", "Ten offers sent; two participants paused."],
-  ["25 Nov · 15:40", "Host", "Fill-in added", "Jules", "Fill-in added without a personal track."],
-  ["25 Nov · 15:22", "Host", "Settings updated", "Retention", "Retention set to 90 days for album files."],
-  ["25 Nov · 14:55", "Bot", "Round closed", "Round 2", "Eleven edits recorded; one anonymous gap."],
-  ["25 Nov · 14:20", "Ari", "Skip recorded", "S2M8C", "Skip after claim; track returned unchanged."],
-  ["25 Nov · 13:58", "Host", "Schedule saved", "Plan v1", "Commitment posted without any file hash."],
-  ["25 Nov · 12:40", "Bot", "Offer expired", "S9Q1B", "Offer expired; pair stays unseen and the track returned."],
-  ["25 Nov · 11:15", "Host", "Event paused", "All clocks", "Event paused for 24 hours; deadlines shifted."],
-  ["25 Nov · 10:02", "Sam", "Claim recorded", "S7F3A", "Claim recorded after a reminder."],
-  ["25 Nov · 09:31", "Host", "Audit exported", "Audit log", "CSV export for the event archive."],
+  ["25 Nov, 17:12", "Host", "Deadline extended", "S7F3A", "Holder asked for six hours; first extension is automatic."],
+  ["25 Nov, 17:04", "Bot", "Offer sent", "S4K2M", "Round 3 offer delivered in a direct message."],
+  ["25 Nov, 16:48", "Noor", "Claim recorded", "S9Q1B", "Claim recorded; this person now counts as having seen this track."],
+  ["25 Nov, 16:31", "Remy", "File submitted", "S2M8C", "Version 4 stored, hash checked, previous versions kept."],
+  ["25 Nov, 16:02", "Host", "Round opened", "Round 3", "Ten offers sent; two participants paused."],
+  ["25 Nov, 15:40", "Host", "Fill-in added", "Jules", "Fill-in added without a personal track."],
+  ["25 Nov, 15:22", "Host", "Settings updated", "Retention", "Retention set to 90 days for album files."],
+  ["25 Nov, 14:55", "Bot", "Round closed", "Round 2", "Eleven edits recorded. One track had no submission; the gap is anonymous."],
+  ["25 Nov, 14:20", "Ari", "Skip recorded", "S2M8C", "Skip after claim; track returned unchanged."],
+  ["25 Nov, 13:58", "Host", "Schedule saved", "Plan v1", "Schedule fingerprint posted. No music file was shared."],
+  ["25 Nov, 12:40", "Bot", "Offer expired", "S9Q1B", "Offer expired; the participant does not count as having seen the track; the track returned."],
+  ["25 Nov, 11:15", "Host", "Event paused", "All clocks", "Event paused for 24 hours; deadlines shifted."],
+  ["25 Nov, 10:02", "Sam", "Claim recorded", "S7F3A", "Claim recorded after a reminder."],
+  ["25 Nov, 09:31", "Host", "Audit exported", "Audit log", "CSV export for the event archive."],
 ];
 
 function auditEntry(
@@ -394,7 +397,7 @@ function auditEntry(
     action,
     subject,
     reason: long
-      ? `${reason} The host recorded the full reason so the event archive explains every override and every change without guessing.`
+      ? `${reason} Reason recorded in the append-only archive. The hash chain prevents later edits.`
       : reason,
     code: `A-${String(1042 + index).padStart(4, "0")}`,
   };
@@ -405,13 +408,452 @@ export function demoAuditLog(scenario: Scenario): AuditEntry[] {
     return [];
   }
   if (scenario === "dense") {
-    return Array.from({ length: 40 }, (_, index) =>
-      auditEntry(
-        index,
-        auditSeeds[index % auditSeeds.length]!,
-        index % 5 === 0,
-      ),
-    );
+    return Array.from({ length: 40 }, (_, index) => {
+      const seed = auditSeeds[index % auditSeeds.length]!;
+      const minutes = 17 * 60 + 40 - index * 11;
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+      const at = `25 Nov, ${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      return auditEntry(index, [at, seed[1], seed[2], seed[3], seed[4]], index % 5 === 0);
+    });
   }
   return auditSeeds.map((seed, index) => auditEntry(index, seed, scenario === "long"));
+}
+import type {
+  EventDraft,
+  EventSummary,
+  PeopleData,
+  PersonRow,
+  PlanData,
+  PlannerGroup,
+  PlannerWarning,
+  SetupData,
+  SetupWarning,
+} from "../types";
+
+const names = [
+  "Noor",
+  "Remy",
+  "Sam",
+  "Ari",
+  "Jules",
+  "Kai",
+  "Mira",
+  "Tove",
+  "Eli",
+  "Rui",
+  "Sasha",
+  "Wren",
+  "Ada",
+  "Bo",
+  "Cy",
+  "Dara",
+  "Emre",
+  "Fay",
+  "Gus",
+  "Hana",
+  "Ines",
+  "Joss",
+  "Kira",
+  "Lars",
+  "Mina",
+  "Nils",
+  "Oona",
+  "Pia",
+  "Quinn",
+  "Rosa",
+  "Sten",
+  "Thea",
+  "Umar",
+  "Vera",
+  "Will",
+  "Xena",
+  "Yann",
+  "Zoe",
+  "Alva",
+  "Bruno",
+];
+
+const trackCodes = [
+  "S7F3A",
+  "S4K2M",
+  "S9Q1B",
+  "S2M8C",
+  "S6R1D",
+  "S3T5N",
+  "S8W4H",
+  "S1P7J",
+  "S5Y9E",
+  "S0B3V",
+  "S6C8L",
+  "S2Z4Q",
+  "S1N6R",
+  "S8T2V",
+  "S3H9W",
+  "S6P4X",
+  "S2C7Y",
+  "S9D5Z",
+  "S5G1Q",
+  "S0J8L",
+  "S4M3B",
+  "S7R6E",
+  "S1V9U",
+  "S8K2D",
+  "S3F5G",
+  "S6H7J",
+  "S2L4N",
+  "S9P1S",
+  "S5R8T",
+  "S0W3X",
+  "S4Y6Z",
+  "S7B9C",
+  "S1E2F",
+  "S8G4H",
+  "S3J6K",
+  "S6L8M",
+  "S2N1P",
+  "S9Q3R",
+  "S5S5T",
+  "S0U7V",
+];
+
+function eventSummary(
+  participants: number,
+  tracks: number,
+  rounds: number,
+): EventSummary {
+  return {
+    id: "night-shift-2",
+    name: "Night Shift Vol. 2",
+    mode: "Classic",
+    stage: "Schedule review",
+    participants,
+    seeded: participants,
+    fillIns: Math.min(2, participants),
+    tracks,
+    round: 0,
+    rounds,
+  };
+}
+
+function defaultDraft(): EventDraft {
+  return {
+    name: "Night Shift Vol. 2",
+    mode: "Classic",
+    rounds: 8,
+    claimWindowHours: 12,
+    roundWindowHours: 24,
+    allowlist: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
+    packType: "Module template + samples",
+    packRequired: true,
+    groupMode: "Lookup",
+    groupCount: 2,
+    groupSize: 6,
+    rotation: "Participants",
+    swapCadence: "K rounds",
+    scheduleVisibility: "Hidden",
+  };
+}
+
+function warning(
+  id: string,
+  tone: SetupWarning["tone"],
+  title: string,
+  detail: string,
+): SetupWarning {
+  return { id, tone, title, detail };
+}
+
+export function demoSetup(scenario: Scenario): SetupData {
+  if (scenario === "empty") {
+    return {
+      firstRun: true,
+      event: null,
+      draft: {
+        ...defaultDraft(),
+        name: "",
+        rounds: null,
+        groupCount: 1,
+        groupSize: 5,
+        allowlist: [],
+      },
+      warnings: [],
+    };
+  }
+  const draft = defaultDraft();
+  if (scenario === "long") {
+    return {
+      firstRun: false,
+      event: null,
+      draft: {
+        ...draft,
+        name: longEventName,
+        rounds: 12,
+        groupCount: 4,
+        groupSize: 10,
+        swapCadence: "Calendar",
+        scheduleVisibility: "Visible assignments",
+      },
+      warnings: [
+        warning(
+          "setup-long-1",
+          "warn",
+          "Four groups of ten",
+          "Each phase gives every track ten possible contributors. The projected event lasts about three months at one release per day.",
+        ),
+        warning(
+          "setup-long-2",
+          "info",
+          "Pack review is on",
+          "A seed that adds an instrument or changes a pack sample is flagged for your review. It is never rejected automatically.",
+        ),
+      ],
+    };
+  }
+  return {
+    firstRun: false,
+    event: null,
+    draft,
+    warnings: [
+      warning(
+        "setup-1",
+        "info",
+        "Groups are suggested from the roster size",
+        "Two groups of six keep every track inside a smaller social circle. The host can override the count and size.",
+      ),
+      warning(
+        "setup-2",
+        "info",
+        "Pack review is on",
+        "Unknown samples are reported to the host. The seed is not rejected automatically.",
+      ),
+    ],
+  };
+}
+
+const longFirstNames = [
+  "Alexandria-Cassandra",
+  "Maximilian Theodor",
+  "Anastasia",
+  "Bartholomew James",
+  "Cecilia Margareta",
+  "Dimitri Alexandrov",
+  "Evangeline Rose",
+  "Ferdinand",
+  "Guinevere Alice",
+  "Henrik Wilhelm",
+  "Isabella Marie",
+  "Joaquim",
+  "Katarina",
+  "Leopold Alexander",
+  "Margareta Elisabeth",
+  "Nikolai",
+  "Ophelia Jane",
+  "Percival",
+  "Quintessa",
+  "Ragnar",
+];
+
+const longLastNames = [
+  "Voss",
+  "Lindqvist",
+  "Petrova",
+  "Whitfield",
+  "Holm",
+  "Bergström",
+  "Moreau",
+  "Okafor",
+];
+
+function personRow(index: number, long = false): PersonRow {
+  const name = long
+    ? `${longFirstNames[index % longFirstNames.length]} ${
+        longLastNames[index % longLastNames.length]
+      }`
+    : names[index % names.length];
+  const role = index % 6 === 4 ? "Fill-in" : "Seed";
+  const status = index === 3 ? "Paused" : index === 8 ? "Left" : "Ready";
+  return {
+    id: `user-${index.toString().padStart(2, "0")}`,
+    displayName: name,
+    role,
+    status,
+    seedTrack: role === "Seed" ? trackCodes[index % trackCodes.length] : null,
+    timezone:
+      long && index % 3 === 0
+        ? "America/Argentina/Buenos_Aires"
+        : index % 2 === 0
+          ? "Europe/Stockholm"
+          : "Europe/London",
+    maxHandoffs: 1 + (index % 3),
+    joined: `25 Nov, ${String(9 + (index % 8)).padStart(2, "0")}:${String((index * 7) % 60).padStart(2, "0")}`,
+    deliveryRisk: index === 6,
+  };
+}
+
+export function demoPeople(scenario: Scenario): PeopleData {
+  if (scenario === "empty") {
+    return { event: null, rows: [] };
+  }
+  const count = scenario === "dense" || scenario === "long" ? 40 : 12;
+  const rows = Array.from({ length: count }, (_, index) =>
+    personRow(index, scenario === "long"),
+  );
+  const event = eventSummary(count, count, Math.max(1, count - 1));
+  return {
+    event: scenario === "long" ? { ...event, name: longEventName } : event,
+    rows,
+  };
+}
+
+function plannerGroups(count: number): PlannerGroup[] {
+  const groupCount = count >= 40 ? 4 : 2;
+  const size = Math.ceil(count / groupCount);
+  return Array.from({ length: groupCount }, (_, groupIndex) => ({
+    name: String.fromCharCode(65 + groupIndex),
+    size: Math.min(size, count - groupIndex * size),
+    tracks: Math.min(size, count - groupIndex * size),
+    participants: Array.from(
+      { length: Math.min(size, count - groupIndex * size) },
+      (_, personIndex) => names[(groupIndex * size + personIndex) % names.length]!,
+    ),
+  }));
+}
+
+function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
+  const groupCount = count >= 40 ? 4 : 2;
+  const groupSize = Math.ceil(count / groupCount);
+  return Array.from({ length: count }, (_, trackIndex) => ({
+    trackCode: trackCodes[trackIndex % trackCodes.length]!,
+    ownerGroup: String.fromCharCode(65 + Math.floor(trackIndex / groupSize)),
+    cells: Array.from({ length: rounds }, (_, round) => {
+      const person = (trackIndex + round + 1) % count;
+      const name = names[person % names.length]!;
+      return {
+        round,
+        trackCode: trackCodes[trackIndex % trackCodes.length]!,
+        participantId: `user-${person.toString().padStart(2, "0")}`,
+        participantName: `${name} ${person + 1}`,
+      };
+    }),
+  }));
+}
+
+function buildGraph(count: number, round: number): PlanData["graph"] {
+  return {
+    round,
+    edges: Array.from({ length: count }, (_, trackIndex) => {
+      const person = (trackIndex + round + 1) % count;
+      return {
+        trackCode: trackCodes[trackIndex % trackCodes.length]!,
+        participantName: `${names[person % names.length]!} ${person + 1}`,
+      };
+    }),
+  };
+}
+
+function plannerWarning(
+  id: string,
+  severity: PlannerWarning["severity"],
+  title: string,
+  detail: string,
+): PlannerWarning {
+  return { id, severity, title, detail };
+}
+
+export function demoPlan(scenario: Scenario): PlanData {
+  if (scenario === "empty") {
+    return {
+      status: "No event",
+      event: null,
+      rounds: 0,
+      tracks: 0,
+      participants: 0,
+      committed: false,
+      matrix: [],
+      graph: { round: 0, edges: [] },
+      groups: [],
+      warnings: [],
+      funScore: null,
+      funGuardrails: [],
+    };
+  }
+  const dense = scenario === "dense" || scenario === "long";
+  const count = dense ? 40 : 12;
+  const rounds = dense ? 8 : 11;
+  const event = eventSummary(count, count, rounds);
+  if (scenario === "infeasible") {
+    return {
+      status: "Infeasible",
+      event,
+      rounds,
+      tracks: count,
+      participants: count,
+      committed: false,
+      matrix: buildMatrix(count, 3),
+      graph: buildGraph(count, 2),
+      groups: plannerGroups(count),
+      warnings: [
+        plannerWarning(
+          "plan-infeasible-1",
+          "danger",
+          "Round 4 cannot be filled",
+          "The planner could not fill round 4 within the group rules. These tracks could not be placed: S4K2M, S9Q1B, and S2M8C. No offers were sent and no one was marked as having seen a track.",
+        ),
+        plannerWarning(
+          "plan-infeasible-2",
+          "warn",
+          "A wider pool is available",
+          "The planner can draw from the global pool for this round. No pair is marked as seen until a claim.",
+        ),
+      ],
+      funScore: null,
+      funGuardrails: [
+        { label: "Coverage", value: "Blocked at round 4" },
+        { label: "No-repeat history", value: "Unchanged" },
+      ],
+    };
+  }
+  const warnings = dense
+    ? [
+        plannerWarning(
+          "plan-long-1",
+          "warn",
+          "Four groups of ten",
+          "Each track can reach up to ten contributors per round. The projected event lasts about three months.",
+        ),
+        plannerWarning(
+          "plan-long-2",
+          "info",
+          "Swap cadence is two rounds",
+          "The planner rotates participants four times. Tracks stay in their original group.",
+        ),
+      ]
+    : [
+        plannerWarning(
+          "plan-1",
+          "info",
+          "Round 8 is the last full-exposure round",
+          "After round 8, the planner switches to the capped schedule. No participant receives a track they have seen before.",
+        ),
+      ];
+  return {
+    status: "Draft",
+    event,
+    rounds,
+    tracks: count,
+    participants: count,
+    committed: false,
+    matrix: buildMatrix(count, rounds),
+    graph: buildGraph(count, 2),
+    groups: plannerGroups(count),
+    warnings,
+    funScore: dense ? 74 : 82,
+    funGuardrails: [
+      { label: "Social reach", value: dense ? "Good" : "Strong" },
+      { label: "Contributor variety", value: dense ? "Broad" : "Balanced" },
+      { label: "Fairness", value: "Within bounds" },
+      { label: "Freshness", value: dense ? "Moderate" : "High" },
+    ],
+  };
 }

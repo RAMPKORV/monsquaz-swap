@@ -1,4 +1,4 @@
-export type ViewKey = "mission" | "audit" | "settings";
+export type ViewKey = "mission" | "audit" | "settings" | "setup" | "people" | "plan";
 export type Theme = "dark" | "light";
 export type Scenario =
   | "default"
@@ -7,7 +7,8 @@ export type Scenario =
   | "error"
   | "long"
   | "dense"
-  | "offline";
+  | "offline"
+  | "infeasible";
 
 export type MissionControl = {
   firstRun: boolean;
@@ -103,4 +104,103 @@ export type HostSettings = {
     botOffline: boolean;
     releases: boolean;
   };
+};
+
+export type EventMode = "Classic" | "Async";
+
+export type SetupWarning = {
+  id: string;
+  tone: "info" | "warn" | "danger";
+  title: string;
+  detail: string;
+};
+
+export type EventDraft = {
+  name: string;
+  mode: EventMode;
+  rounds: number | null;
+  claimWindowHours: number;
+  roundWindowHours: number;
+  allowlist: string[];
+  packType: "Module template + samples" | "Samples only" | "Reference track" | "None";
+  packRequired: boolean;
+  groupMode: "Lookup" | "Single group" | "Manual";
+  groupCount: number;
+  groupSize: number;
+  rotation: "Participants" | "Track pools" | "Both";
+  swapCadence: "K rounds" | "Calendar" | "Host-triggered";
+  scheduleVisibility: "Hidden" | "Visible assignments";
+};
+
+export type SetupData = {
+  firstRun: boolean;
+  event: EventSummary | null;
+  draft: EventDraft;
+  warnings: SetupWarning[];
+};
+
+export type PersonRow = {
+  id: string;
+  displayName: string;
+  role: "Seed" | "Fill-in";
+  status: "Ready" | "Paused" | "Left";
+  seedTrack: string | null;
+  timezone: string;
+  maxHandoffs: number;
+  joined: string;
+  deliveryRisk: boolean;
+};
+
+export type PeopleData = {
+  event: EventSummary | null;
+  rows: PersonRow[];
+};
+
+export type PlanCell = {
+  round: number;
+  trackCode: string;
+  participantId: string;
+  participantName: string;
+  isYou?: boolean;
+};
+
+export type MatrixTrack = {
+  trackCode: string;
+  ownerGroup: string;
+  cells: PlanCell[];
+};
+
+export type PlannerGroup = {
+  name: string;
+  size: number;
+  tracks: number;
+  participants: string[];
+};
+
+export type PlannerWarning = {
+  id: string;
+  severity: "info" | "warn" | "danger";
+  title: string;
+  detail: string;
+};
+
+export type GraphEdge = {
+  trackCode: string;
+  participantName: string;
+  isYou?: boolean;
+};
+
+export type PlanData = {
+  status: "No event" | "No plan" | "Draft" | "Committed" | "Infeasible";
+  event: EventSummary | null;
+  rounds: number;
+  tracks: number;
+  participants: number;
+  committed: boolean;
+  matrix: MatrixTrack[];
+  graph: { round: number; edges: GraphEdge[] };
+  groups: PlannerGroup[];
+  warnings: PlannerWarning[];
+  funScore: number | null;
+  funGuardrails: Array<{ label: string; value: string }>;
 };

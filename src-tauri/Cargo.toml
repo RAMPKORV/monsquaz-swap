@@ -21,3 +21,8 @@ tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 swap-core = { path = "../crates/swap-core" }
+swap-db = { path = "../crates/swap-db" }
+swap-engine = { path = "../crates/swap-engine" }
+swap-files = { path = "../crates/swap-files" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"

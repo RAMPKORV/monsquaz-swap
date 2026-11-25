@@ -6,13 +6,25 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   AuditEntry,
+  EventDraft,
+  EventSummary,
   HostSettings,
   MissionControl,
+  PeopleData,
+  PlanData,
   Scenario,
+  SetupData,
   Theme,
   ViewKey,
 } from "../types";
-import { demoAuditLog, demoMissionControl, demoSettings } from "./demo";
+import {
+  demoAuditLog,
+  demoMissionControl,
+  demoPeople,
+  demoPlan,
+  demoSettings,
+  demoSetup,
+} from "./demo";
 
 export class HostError extends Error {
   readonly code: string;
@@ -42,13 +54,22 @@ export function initialScenario(): Scenario {
     "long",
     "dense",
     "offline",
+    "infeasible",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";
 }
 
 export function initialView(): ViewKey {
   const value = new URLSearchParams(window.location.search).get("view");
-  return value === "audit" || value === "settings" ? value : "mission";
+  const allowed: ViewKey[] = [
+    "mission",
+    "setup",
+    "people",
+    "plan",
+    "audit",
+    "settings",
+  ];
+  return allowed.includes(value as ViewKey) ? (value as ViewKey) : "mission";
 }
 
 export function initialTheme(): Theme {
@@ -180,4 +201,92 @@ export function exportAuditCsv(entries: AuditEntry[]): void {
   link.download = "monsquaz-audit-log.csv";
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+export async function loadSetup(scenario: Scenario): Promise<SetupData> {
+  if (scenario === "loading") {
+    return forceLoading<SetupData>();
+  }
+  if (scenario === "error") {
+    forceError();
+  }
+  if (isDemoMode()) {
+    await pause(180);
+    return demoSetup(scenario);
+  }
+  return invoke<SetupData>("host_event_setup");
+}
+
+export async function loadPeople(scenario: Scenario): Promise<PeopleData> {
+  if (scenario === "loading") {
+    return forceLoading<PeopleData>();
+  }
+  if (scenario === "error") {
+    forceError();
+  }
+  if (isDemoMode()) {
+    await pause(180);
+    return demoPeople(scenario);
+  }
+  return invoke<PeopleData>("host_people");
+}
+
+export async function setParticipantPaused(
+  userId: string,
+  paused: boolean,
+): Promise<PeopleData> {
+  if (isDemoMode()) {
+    await pause(220);
+    return demoPeople("default");
+  }
+  return invoke<PeopleData>("host_set_participant_paused", { userId, paused });
+}
+
+export async function loadPlan(scenario: Scenario): Promise<PlanData> {
+  if (scenario === "loading") {
+    return forceLoading<PlanData>();
+  }
+  if (scenario === "error") {
+    forceError();
+  }
+  if (isDemoMode()) {
+    await pause(180);
+    return demoPlan(scenario);
+  }
+  return invoke<PlanData>("host_plan");
+}
+
+export async function generatePlan(): Promise<PlanData> {
+  if (isDemoMode()) {
+    await pause(420);
+    return demoPlan("default");
+  }
+  return invoke<PlanData>("host_generate_plan");
+}
+
+export async function startEvent(): Promise<PlanData> {
+  if (isDemoMode()) {
+    await pause(360);
+    return demoPlan("default");
+  }
+  return invoke<PlanData>("host_start_event");
+}
+
+export async function createEvent(draft: EventDraft): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(420);
+    return {
+      id: "preview-event",
+      name: draft.name,
+      mode: draft.mode,
+      stage: "Schedule review",
+      participants: 0,
+      seeded: 0,
+      fillIns: 0,
+      tracks: 0,
+      round: 0,
+      rounds: draft.rounds ?? 0,
+    };
+  }
+  return invoke<EventSummary>("host_create_event", { draft });
 }

@@ -20,29 +20,27 @@ const themes: Array<{
   label: string;
   detail: string;
 }> = [
-  { value: "dark", label: "Dark", detail: "Warm stage light. The default." },
+  { value: "dark", label: "Dark", detail: "Warm stage light." },
   { value: "light", label: "Light", detail: "Paper and ink for bright rooms." },
   { value: "system", label: "Match system", detail: "Follow the OS setting." },
 ];
 
 export function SettingsView({
   settings,
+  eventName,
   dirty,
-  saving,
   onSettings,
   onSave,
-  onReset,
   onDelete,
   onTheme,
   onAction,
   onTestNotification,
 }: {
   settings: HostSettings;
+  eventName: string;
   dirty: boolean;
-  saving: boolean;
   onSettings: (next: HostSettings) => void;
   onSave: () => void;
-  onReset: () => void;
   onDelete: () => void;
   onTheme: (theme: HostSettings["theme"]) => void;
   onAction: (label: string) => void;
@@ -64,31 +62,19 @@ export function SettingsView({
         }}
       >
         <PageHeader
-          eyebrow="Settings"
-          title="The quiet parts of the operation"
+          title="Settings"
           description="Connection, channels, schedule defaults, and retention. Secrets stay on this computer and never appear in the window."
           actions={
-            settings.botConfigured ? (
-              dirty ? (
-                <>
-                  <Button variant="secondary" onClick={onReset}>
-                    Discard changes
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    icon="check"
-                    disabled={saving}
-                  >
-                    {saving ? "Saving…" : "Save changes"}
-                  </Button>
-                </>
-              ) : (
-                <span className="saved-state">
-                  <Icon name="check" size={16} />
-                  Saved
-                </span>
-              )
+            dirty ? (
+              <span className="saved-state saved-state--dirty">
+                <Icon name="alert" size={16} />
+                Unsaved changes
+              </span>
+            ) : settings.botConfigured ? (
+              <span className="saved-state">
+                <Icon name="check" size={16} />
+                Saved
+              </span>
             ) : (
               <Button
                 variant="primary"
@@ -101,16 +87,14 @@ export function SettingsView({
           }
         />
 
-        <p className="save-state" role="status">
-          <Icon name={dirty ? "alert" : "check"} size={16} />
-          {!settings.botConfigured
-            ? "No bot token is stored. Add one to connect Discord."
-            : saving
-              ? "Saving settings to this computer."
-              : dirty
-                ? "Unsaved changes. Select Save changes when you are ready."
-                : "Changes save only when you select Save changes."}
-        </p>
+        {dirty ? null : (
+          <p className="save-state" role="status">
+            <Icon name="check" size={16} />
+            {!settings.botConfigured
+              ? "No bot token is stored. Add one to connect Discord."
+              : "All changes are saved on this computer."}
+          </p>
+        )}
 
         <div className="settings-grid">
           <section className="card" aria-labelledby="connection-title">
@@ -172,7 +156,7 @@ export function SettingsView({
                   checked={settings.dmFallback}
                   onChange={(next) => update("dmFallback", next)}
                   label="Private-thread fallback"
-                  description="If a direct message fails, the bot uses a private thread you approved. You get an audit entry. Only you and the participant can see it."
+                  description="If a direct message fails, the bot opens a private thread with the participant and writes an audit entry. You and server moderators can open the thread. The bot never sends a track through a public channel."
                 />
               </div>
             </div>
@@ -193,7 +177,7 @@ export function SettingsView({
                 label="Announcement channel"
                 htmlFor="announcement-channel"
                 helpId="announcement-channel-help"
-                help="Round openings, deadlines, and the commitment."
+                help="Round openings, deadlines, and the schedule fingerprint."
               >
                 <input
                   id="announcement-channel"
@@ -234,7 +218,7 @@ export function SettingsView({
                 <h2 id="schedule-title">Schedule and storage</h2>
                 <p className="card__subtitle">
                   Defaults for new events. Each event can change its own
-                  schedule before the commit.
+                  schedule before the event starts.
                 </p>
               </div>
             </div>
@@ -264,7 +248,7 @@ export function SettingsView({
                 label="Keep files for"
                 htmlFor="retention"
                 helpId="retention-help"
-                help="Days after the event. Backups follow the same window."
+                help="Days after the reveal. Backups follow the same window."
               >
                 <div className="number-control">
                   <input
@@ -347,8 +331,7 @@ export function SettingsView({
               <div>
                 <h2 id="appearance-title">Appearance</h2>
                 <p className="card__subtitle">
-                  The dark theme is the default. Both themes meet WCAG AA
-                  contrast.
+                  Choose how the app looks.
                 </p>
               </div>
             </div>
@@ -415,18 +398,22 @@ export function SettingsView({
             </div>
             <div className="danger-zone__row">
               <div>
-                <span className="field-label">Delete local event data</span>
+                <span className="field-label">
+                  Delete {eventName} from this computer
+                </span>
                 <span className="field-help">
-                  Removes the database, file library, and local backups for this
-                  event. Exported albums are not touched.
+                  Removes the local database, every track version, and every local
+                  backup for {eventName}. Other events are not touched. Discord
+                  messages and exported albums stay.
                 </span>
               </div>
               <Button variant="danger" icon="trash" onClick={onDelete}>
-                Delete data
+                Delete event data
               </Button>
             </div>
           </section>
         </div>
+
       </form>
 
     </div>

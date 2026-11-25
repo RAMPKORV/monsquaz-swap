@@ -44,7 +44,14 @@ pub fn run() {
             host::host_mission_control,
             host::host_audit_log,
             host::host_settings,
-            host::save_host_settings
+            host::save_host_settings,
+            host::host_event_setup,
+            host::host_people,
+            host::host_set_participant_paused,
+            host::host_plan,
+            host::host_generate_plan,
+            host::host_start_event,
+            host::host_create_event
         ])
         .run(tauri::generate_context!())
         .expect("error while running Monsquaz Swap");

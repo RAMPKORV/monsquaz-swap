@@ -1,11 +1,12 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
 use swap_db::{AssignmentRepo, Db, FileRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo};
 use swap_engine::{
-    Effect, EngineError, EventSettings, JoinRequest, SubmitRequest, claim, create_event, dispatch,
-    event_status, expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal,
-    signup, skip, start_event, submit,
+    DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
+    PreparedBytes, SubmitRequest, claim, create_event, dispatch, event_status, expire_offer,
+    generate_schedule, join_with_seed, lock_roster, open_round, reveal, signup, skip, start_event,
+    submit,
 };
-use swap_files::{BlobStore, FileError};
+use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
 const EVENT: &str = "evt-1";
 const T0: i64 = 1_000;
@@ -92,6 +93,7 @@ fn join(db: &Db, store: &BlobStore, index: usize) {
     let outcome = join_with_seed(
         db,
         store,
+        &PassthroughPreparer,
         &JoinRequest {
             event_id: EVENT,
             user_id: &user_id,
@@ -120,6 +122,139 @@ fn offers(effects: &[Effect]) -> Vec<(String, String, String)> {
             other => panic!("expected an offer, got {other:?}"),
         })
         .collect()
+}
+
+struct ScrubbingPreparer;
+
+impl DeliveryPreparer for ScrubbingPreparer {
+    fn prepare(
+        &self,
+        bytes: &[u8],
+        _kind: FileKind,
+        _extension: &str,
+    ) -> Result<PreparedBytes, PrepareError> {
+        let delivery = b"scrubbed module".to_vec();
+        Ok(PreparedBytes {
+            delivery_sha256: sha256_hex(&delivery),
+            original_sha256: sha256_hex(bytes),
+            delivery,
+            audio_verified: true,
+            scrub_summary_json: "{\"song_name\":true}".to_string(),
+        })
+    }
+}
+
+struct RejectingPreparer;
+
+impl DeliveryPreparer for RejectingPreparer {
+    fn prepare(
+        &self,
+        _bytes: &[u8],
+        _kind: FileKind,
+        _extension: &str,
+    ) -> Result<PreparedBytes, PrepareError> {
+        Err(PrepareError::AudioChanged)
+    }
+}
+
+#[test]
+fn a_prepared_seed_keeps_the_original_and_delivers_the_scrub() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event(
+        &db,
+        EVENT,
+        "Prepared Swap",
+        42,
+        &EventSettings::default(),
+        T0,
+    )
+    .unwrap();
+    for index in 0..2 {
+        let user_id = user(index);
+        let bytes = seed_bytes(index as u8);
+        join_with_seed(
+            &db,
+            &store,
+            &ScrubbingPreparer,
+            &JoinRequest {
+                event_id: EVENT,
+                user_id: &user_id,
+                display_name: &format!("User {index}"),
+                timezone: "Europe/Stockholm",
+                max_handoffs: 3,
+                filename: "seed.it",
+                bytes: &bytes,
+            },
+            T0,
+        )
+        .unwrap();
+    }
+    lock_roster(&db, EVENT, T1).unwrap();
+    generate_schedule(&db, EVENT, T2).unwrap();
+    start_event(&db, EVENT, T3).unwrap();
+    let round = open_round(&db, EVENT, 0, T4).unwrap();
+    let offers = offers(&round.effects);
+    let (user_id, assignment_id, track_code) = &offers[0];
+    let claimed = claim(&db, &store, EVENT, assignment_id, user_id, T5).unwrap();
+    let file_bytes = match &claimed.effects[0] {
+        Effect::TrackFile { bytes, .. } => bytes.clone(),
+        other => panic!("expected a file, got {other:?}"),
+    };
+    assert_eq!(file_bytes, b"scrubbed module");
+
+    let files = FileRepo::list_for_track(db.conn(), EVENT, track_code).unwrap();
+    assert_eq!(files.len(), 1);
+    let file = &files[0];
+    assert_eq!(file.sha256, sha256_hex(b"scrubbed module"));
+    assert!(file.audio_verified);
+    assert!(file.original_sha256.is_some());
+    let original_sha = file.original_sha256.clone().unwrap();
+    assert_ne!(original_sha, file.sha256);
+    let original = store.read(&original_sha).unwrap();
+    assert_eq!(
+        original,
+        seed_bytes(if user_id == &user(0) { 1 } else { 0 })
+    );
+}
+
+#[test]
+fn a_failed_preparation_does_not_store_a_seed() {
+    let fixture = Fixture::new(1, 0);
+    let user_id = user(1);
+    let bytes = seed_bytes(9);
+    let error = join_with_seed(
+        &fixture.db,
+        &fixture.store,
+        &RejectingPreparer,
+        &JoinRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            display_name: "User 1",
+            timezone: "Europe/Stockholm",
+            max_handoffs: 3,
+            filename: "seed.it",
+            bytes: &bytes,
+        },
+        T0,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::Prepare(PrepareError::AudioChanged)
+    ));
+    assert!(
+        ParticipantRepo::get(fixture.db.conn(), EVENT, &user_id)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -170,6 +305,7 @@ fn the_classic_loop_reaches_a_reveal() {
         let outcome = submit(
             &fixture.db,
             &fixture.store,
+            &PassthroughPreparer,
             &SubmitRequest {
                 event_id: EVENT,
                 user_id,
@@ -287,6 +423,7 @@ fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let first = submit(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &SubmitRequest {
             event_id: EVENT,
             user_id,
@@ -300,6 +437,7 @@ fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let second = submit(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &SubmitRequest {
             event_id: EVENT,
             user_id,
@@ -319,6 +457,7 @@ fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let change = submit(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &SubmitRequest {
             event_id: EVENT,
             user_id,
@@ -337,6 +476,7 @@ fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let rejected = submit(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &SubmitRequest {
             event_id: EVENT,
             user_id,
@@ -355,6 +495,7 @@ fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let none = submit(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &SubmitRequest {
             event_id: EVENT,
             user_id: other_user,
@@ -398,6 +539,7 @@ fn a_second_seed_is_refused() {
     let error = join_with_seed(
         &fixture.db,
         &fixture.store,
+        &PassthroughPreparer,
         &JoinRequest {
             event_id: EVENT,
             user_id: &user_id,

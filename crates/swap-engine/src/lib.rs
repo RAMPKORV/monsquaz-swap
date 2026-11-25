@@ -8,6 +8,7 @@
 pub mod effects;
 pub mod engine;
 pub mod ids;
+pub mod prepare;
 pub mod settings;
 
 pub use effects::{Effect, dispatch};
@@ -19,4 +20,7 @@ pub use engine::{
     submit,
 };
 pub use ids::{assignment_id, plan_commitment, track_code};
+pub use prepare::{
+    AB_SECONDS, DeliveryPreparer, OpenMptPreparer, PassthroughPreparer, PreparedBytes,
+};
 pub use settings::{EventSettings, Mode, SettingsError};

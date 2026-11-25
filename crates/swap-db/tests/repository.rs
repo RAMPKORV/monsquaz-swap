@@ -216,6 +216,10 @@ fn files_round_trip() {
         size: 1_024,
         extension: "it".to_string(),
         storage_path: "Round1/R1.T01.alice.it".to_string(),
+        original_sha256: Some("def456".to_string()),
+        original_storage_path: Some("vault/def456".to_string()),
+        audio_verified: true,
+        scrub_summary_json: "{\"song_name\":true}".to_string(),
         created_at: 1_000,
     };
     FileRepo::insert(db.conn(), &file).unwrap();

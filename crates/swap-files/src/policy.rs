@@ -8,7 +8,7 @@ use thiserror::Error;
 pub const DEFAULT_MAX_SIZE: u64 = 20 * 1024 * 1024;
 
 pub const DEFAULT_EXTENSIONS: &[&str] = &[
-    "it", "mptm", "xm", "mod", "s3m", "mtm", "669", "far", "wav", "flac", "mp3", "ogg", "zip",
+    "it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

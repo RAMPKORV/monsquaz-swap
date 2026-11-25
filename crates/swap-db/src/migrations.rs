@@ -153,6 +153,13 @@ CREATE TABLE plan_assignments (
 CREATE INDEX plan_assignments_by_round
     ON plan_assignments(event_id, plan_version, round);
 "#,
+    r#"
+-- Migration 003: keep the untouched original and the delivery blob.
+ALTER TABLE files ADD COLUMN original_sha256 TEXT;
+ALTER TABLE files ADD COLUMN original_storage_path TEXT;
+ALTER TABLE files ADD COLUMN audio_verified INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE files ADD COLUMN scrub_summary_json TEXT NOT NULL DEFAULT '{}';
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

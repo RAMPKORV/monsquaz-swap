@@ -122,7 +122,7 @@ Rules:
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
 | Allowlist | Modules, audio, zip | Any list of extensions | Yes |
-| Module extensions | `.it`, `.mptm`, `.xm`, `.mod`, `.s3m`, `.mtm`, `.669`, `.far` | Per-event | Yes |
+| Module extensions | `.it`, `.mptm`, `.xm`, `.mod`, `.s3m`, `.mtm`, `.669` | Per-event | Yes |
 | Audio extensions | `.wav`, `.flac`, `.mp3`, `.ogg` | Per-event | Yes |
 | Archive extensions | `.zip` | Per-event | Yes |
 | Format change | Forbidden | Forbidden; allowed with warning | Yes |

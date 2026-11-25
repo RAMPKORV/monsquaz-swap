@@ -119,7 +119,7 @@ attachment → download (cap + hash) → quarantine → magic/extension check
 ```
 
 - Never trust the client filename; generate the stored name.
-- Default allowlist: modules (.it/.mptm/.xm/.mod/.s3m/.mtm/.669/.far), audio
+- Default allowlist: modules (.it/.mptm/.xm/.mod/.s3m/.mtm/.669), audio
   (.wav/.flac/.mp3/.ogg), .zip. Per-event override.
 - Format changes are forbidden by default.
 - 20 MiB cap for bot redistribution; external-link/host-import fallback.

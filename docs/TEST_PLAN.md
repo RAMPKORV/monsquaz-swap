@@ -26,7 +26,9 @@ No live bot in pull-request CI. Use fake adapters and recorded payloads.
 - [ ] Every participant passes the DM handshake or gets a host-approved
       fallback.
 - [ ] The seen ledger and own-track invariants pass 10k seeds.
-- [ ] Outbound filenames are opaque; metadata scrub passes A/B render.
+- [x] Outbound filenames are opaque; metadata scrub passes A/B render.
+  `cargo test -p swap-files` covers MOD/XM/IT/S3M scrub and A/B when
+  `openmpt123` is installed; the fake-renderer tests run everywhere.
 - [ ] Delivery is batched; upload time is not a trigger.
 - [ ] Public progress has no per-person counts before deadline.
 - [ ] Reveal is atomic and HMAC-ordered.

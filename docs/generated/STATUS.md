@@ -16,9 +16,9 @@
 | Specification | 0 |
 | Ready for implementation | 8 |
 | Implementation | 1 |
-| Reviewing | 1 |
+| Reviewing | 0 |
 | Testing | 0 |
-| Merging | 0 |
+| Merging | 1 |
 | Done | 11 |
 | Cancelled | 0 |
 | Duplicate | 0 |
@@ -27,7 +27,7 @@
 
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
-| 2 | `MSW-030` | Twilight gateway runtime | ready | 3 |
+| 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 
 ## Last session
 

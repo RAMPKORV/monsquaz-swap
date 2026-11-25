@@ -5,7 +5,7 @@
 **PRD:** draft v1  
 **Blocked issues:** 12 · **Ready leaves:** 1  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 20
+**Stale scores:** 19
 
 ## Issues by status
 
@@ -16,10 +16,10 @@
 | Specification | 0 |
 | Ready for implementation | 8 |
 | Implementation | 1 |
-| Reviewing | 1 |
+| Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 11 |
+| Done | 12 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -27,7 +27,7 @@
 
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
-| 2 | `MSW-030` | Twilight gateway runtime | ready | 3 |
+| 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 
 ## Last session
 

@@ -1,4 +1,5 @@
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
 
 use swap_core::{AssignmentStatus, EventState, Membership, Readiness, Role, TrackState};
 
@@ -228,6 +229,14 @@ impl ParticipantRepo {
             .map(ParticipantRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
     }
+
+    pub fn delete(conn: &Connection, event_id: &str, user_id: &str) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "DELETE FROM participants WHERE event_id = ?1 AND user_id = ?2",
+            params![event_id, user_id],
+        )?;
+        Ok(changed > 0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -351,6 +360,29 @@ impl SeenRepo {
             params![event_id, track_code, participant_id, reason, at],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn list_for_participant(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: &str,
+    ) -> Result<Vec<SeenPairRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT track_code, participant_id, reason, first_seen_at
+             FROM seen_pairs WHERE event_id = ?1 AND participant_id = ?2
+             ORDER BY first_seen_at, track_code",
+        )?;
+        let rows = statement
+            .query_map(params![event_id, participant_id], |row| {
+                Ok(SeenPairRecord {
+                    track_code: row.get(0)?,
+                    participant_id: row.get(1)?,
+                    reason: row.get(2)?,
+                    first_seen_at: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn has(
@@ -904,5 +936,171 @@ impl FileRepo {
         rows.into_iter()
             .map(FileRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub fn list_for_holder(
+        conn: &Connection,
+        event_id: &str,
+        holder_id: &str,
+    ) -> Result<Vec<FileRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, track_code, version, holder_id, sha256, size,
+                    extension, storage_path, original_sha256, original_storage_path,
+                    audio_verified, scrub_summary_json, created_at
+             FROM files WHERE event_id = ?1 AND holder_id = ?2
+             ORDER BY track_code, version",
+        )?;
+        let rows = statement
+            .query_map(params![event_id, holder_id], row_to_raw_file)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(FileRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
+pub struct AuditRepo;
+
+impl AuditRepo {
+    /// Append an audit entry and return its hash. The hash covers the previous
+    /// hash, so entries cannot be reordered or edited without detection.
+    pub fn insert(
+        conn: &Connection,
+        event_id: &str,
+        at: i64,
+        actor: &str,
+        action: &str,
+        subject: Option<&str>,
+        detail_json: &str,
+    ) -> Result<String, DbError> {
+        let previous = Self::last_hash(conn, event_id)?;
+        let payload = serde_json::json!([
+            previous.as_deref().unwrap_or(""),
+            event_id,
+            at,
+            actor,
+            action,
+            subject.unwrap_or(""),
+            detail_json
+        ])
+        .to_string();
+        let hash = hex::encode(Sha256::digest(payload.as_bytes()));
+        conn.execute(
+            "INSERT INTO audit_log
+                (event_id, at, actor, action, subject, detail_json, prev_hash, hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                event_id,
+                at,
+                actor,
+                action,
+                subject,
+                detail_json,
+                &previous,
+                &hash
+            ],
+        )?;
+        Ok(hash)
+    }
+
+    pub fn last_hash(conn: &Connection, event_id: &str) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT hash FROM audit_log WHERE event_id = ?1 ORDER BY id DESC LIMIT 1",
+                params![event_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+}
+
+pub struct MetaRepo;
+
+impl MetaRepo {
+    pub fn get(conn: &Connection, key: &str) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn set(conn: &Connection, key: &str, value: &str) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+}
+
+pub struct PrivacyRepo;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IdentityCounts {
+    pub tracks: usize,
+    pub assignments: usize,
+    pub seen_pairs: usize,
+    pub files: usize,
+    pub plan_assignments: usize,
+}
+
+impl PrivacyRepo {
+    /// Rewrite every reference to one participant. The caller inserts the
+    /// replacement participant first.
+    pub fn replace_identity(
+        conn: &Connection,
+        event_id: &str,
+        old_id: &str,
+        new_id: &str,
+    ) -> Result<IdentityCounts, DbError> {
+        let tracks = conn.execute(
+            "UPDATE tracks SET owner_id = ?1 WHERE event_id = ?2 AND owner_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        let assignments = conn.execute(
+            "UPDATE assignments SET participant_id = ?1
+             WHERE event_id = ?2 AND participant_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        let seen_pairs = conn.execute(
+            "UPDATE seen_pairs SET participant_id = ?1
+             WHERE event_id = ?2 AND participant_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        let files = conn.execute(
+            "UPDATE files SET holder_id = ?1 WHERE event_id = ?2 AND holder_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        let plan_assignments = conn.execute(
+            "UPDATE plan_assignments SET participant_id = ?1
+             WHERE event_id = ?2 AND participant_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        Ok(IdentityCounts {
+            tracks,
+            assignments,
+            seen_pairs,
+            files,
+            plan_assignments,
+        })
+    }
+
+    /// Remove plan rows after the last opened round. Pass -1 to remove all.
+    pub fn delete_plan_after(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: &str,
+        round: i64,
+    ) -> Result<usize, DbError> {
+        let changed = conn.execute(
+            "DELETE FROM plan_assignments
+             WHERE event_id = ?1 AND participant_id = ?2 AND round > ?3",
+            params![event_id, participant_id, round],
+        )?;
+        Ok(changed)
     }
 }

@@ -35,9 +35,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
   is `project/ledger/current.jsonl`.
 - The host UI shell covers mission control, settings, and the audit log, with a
   tray and a reviewed screenshot matrix. `swap-sim` runs deterministic classic
-  events and checks the hard invariants. The live Twilight gateway, async
-  queue, deadline automation, event tools, reveal exports, and remaining UI
-  screens are next.
+  events and checks the hard invariants. `swap-privacy` exports participant
+  data and anonymizes deletion with a hash-only audit. The live Twilight
+  gateway, async queue, deadline automation, event tools, reveal exports, and
+  remaining UI screens are next.
 
 ## Non-negotiable invariants
 

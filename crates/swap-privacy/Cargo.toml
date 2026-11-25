@@ -1,0 +1,24 @@
+[package]
+name = "swap-privacy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Participant export, anonymizing delete, diagnostics, and retention for Monsquaz Swap"
+
+[dependencies]
+hex = "0.4"
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+swap-core = { path = "../swap-core" }
+swap-db = { path = "../swap-db" }
+swap-files = { path = "../swap-files" }
+thiserror = "2"
+zip = { version = "9.8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+swap-engine = { path = "../swap-engine" }
+tempfile = "3"

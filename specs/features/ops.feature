@@ -20,6 +20,14 @@ Feature: Host operations and recovery
     And the app does not show the token
     And the app does not show the last characters of the token
 
+  Scenario: The bot registers the guild command
+    Given a valid bot token and a guild
+    When the bot connects to Discord
+    Then the app registers the swap command in that guild
+    And the command contains the participant subcommands
+    And the command contains the host subcommands
+    And the app reports the bot as online after Discord sends ready
+
   Scenario: Closing the window keeps the bot online
     Given an app with an online bot
     When the host closes the window

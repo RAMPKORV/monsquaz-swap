@@ -15,12 +15,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.7.5", features = [] }
 
+[features]
+default = ["live"]
+live = ["swap-discord/live"]
+
 [dependencies]
+tokio = { version = "1", features = ["sync"] }
 tauri = { version = "2.12.7", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 swap-core = { path = "../crates/swap-core" }
+swap-discord = { path = "../crates/swap-discord", default-features = false }
 swap-db = { path = "../crates/swap-db" }
 swap-engine = { path = "../crates/swap-engine" }
 swap-files = { path = "../crates/swap-files" }

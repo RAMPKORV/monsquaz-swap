@@ -13,7 +13,7 @@ serde_json = "1"
 sha2 = "0.10"
 swap-core = { path = "../swap-core" }
 swap-db = { path = "../swap-db" }
-swap-discord = { path = "../swap-discord" }
+swap-discord = { path = "../swap-discord", default-features = false }
 swap-files = { path = "../swap-files" }
 thiserror = "2"
 

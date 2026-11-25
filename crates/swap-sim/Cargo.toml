@@ -16,5 +16,5 @@ tempfile = "3"
 thiserror = "2"
 
 [dev-dependencies]
-swap-discord = { path = "../swap-discord" }
+swap-discord = { path = "../swap-discord", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

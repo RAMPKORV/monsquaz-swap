@@ -32,8 +32,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
 - Product spec and Gherkin live in `docs/` and `specs/features/`.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.
-- The live Twilight gateway, async queue, deadline automation, reveal exports,
-  and UI screens are next.
+- The host UI shell covers mission control, settings, and the audit log, with a
+  tray and a reviewed screenshot matrix. The live Twilight gateway, async
+  queue, deadline automation, event tools, reveal exports, and remaining UI
+  screens are next.
 
 ## Non-negotiable invariants
 

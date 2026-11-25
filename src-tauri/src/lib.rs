@@ -1,5 +1,8 @@
+mod host;
+
 use serde::Serialize;
 use swap_core::CORE_VERSION;
+use tauri::WindowEvent;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +24,28 @@ fn health() -> Health {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![health])
+        .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            if let Err(error) = host::setup_tray(app) {
+                eprintln!("tray unavailable: {error}");
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && host::tray_ready()
+            {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            health,
+            host::host_mission_control,
+            host::host_audit_log,
+            host::host_settings,
+            host::save_host_settings
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Monsquaz Swap");
 }

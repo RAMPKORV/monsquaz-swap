@@ -115,6 +115,16 @@ deadline reaches
 - Map Discord errors to human actions. Stagger DMs and respect 429s.
 - No prefix commands, no self-bot, no user token.
 
+## Host UI
+
+- React 19 + TypeScript in one shell: Mission control, Audit log, and Settings.
+- Tauri commands return typed snapshots. No file bytes, absolute paths, or
+  secrets cross IPC.
+- The shell shows one primary action per view and names the next host decision.
+- The window hides to the tray when a tray is available. Quit is explicit.
+- `VITE_DEMO=1` builds deterministic preview data for the screenshot gate.
+- Screenshots live in `docs/ui/screens/`; `docs/ui/capture.sh` regenerates them.
+
 ## Files
 
 - Allowlist by extension and magic bytes. Default: modules, audio, zip.
@@ -143,8 +153,8 @@ deadline reaches
 ## Security
 
 - Token in the OS keychain. Never in the UI, logs, SQLite, or git.
-- Tauri capabilities limited to `core:default` plus explicit needs. No `fs`,
-  `shell`, `http`, or `sql` plugins.
+- Tauri capabilities limited to `core:default`, `notification:default`, and
+  explicit needs. No `fs`, `shell`, `http`, or `sql` plugins.
 - File bytes and absolute paths never cross IPC.
 - Validate every command argument. Return typed errors with no paths/secrets.
 - CSP hardening is a pre-release task; the scaffold uses `null`.

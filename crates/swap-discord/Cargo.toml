@@ -11,6 +11,24 @@ description = "Discord adapter contract for Monsquaz Swap"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "sync", "time"] }
+twilight-gateway = { version = "0.18", optional = true, default-features = false, features = ["rustls-platform-verifier", "zstd"] }
+twilight-http = { version = "0.18", optional = true, default-features = false, features = ["rustls-platform-verifier"] }
+twilight-model = { version = "0.18", optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+default = ["live"]
+live = [
+    "dep:twilight-gateway",
+    "dep:twilight-http",
+    "dep:twilight-model",
+    "dep:serde_json",
+]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+
+[[example]]
+name = "gateway_smoke"
+required-features = ["live"]

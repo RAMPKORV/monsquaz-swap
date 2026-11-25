@@ -1,3 +1,7 @@
+// The setup service starts this host after it reads the keychain token.
+#[cfg(feature = "live")]
+#[allow(dead_code)]
+mod gateway_host;
 mod host;
 
 use serde::Serialize;

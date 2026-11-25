@@ -39,7 +39,7 @@ location.
 |---|---|
 | Active event data | until the event is archived or deleted |
 | Archived event | until the host deletes it |
-| Backups | 90 days, then deleted by the app |
+| Backups | 90 days, then deleted by the app; pruning is implemented |
 | Local logs | 30 days, then rotated |
 | Transient DM payloads | dropped after ingest |
 | Public reveal package | controlled by the host |
@@ -50,9 +50,14 @@ retention and the backup age.
 ## Export and delete
 
 - A participant can request an export of their records and submitted files.
-- A participant can request deletion. The app removes direct identifiers from
-  the active event and keeps a hash-only audit record where needed.
-- The host can delete an archived event.
+  The export is a ZIP with `participant.json`, a README, and the original files
+  that participant submitted. It does not contain another participant's rows
+  or files.
+- A participant can request deletion. The app replaces the Discord user ID and
+  display name with a per-event salted tombstone, removes future plan rows,
+  keeps past credits and event files, and appends a hash-only audit entry.
+  An active assignment blocks deletion until the host resolves it.
+- The host can delete an archived event. That flow is not implemented yet.
 - The app reports what it removed and what it kept.
 
 ## Telemetry

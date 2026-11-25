@@ -167,6 +167,20 @@ next.
 - Stream-safe mode hides the mapping during a stream.
 - The host can see the mapping. The rules say so.
 
+## Data control
+
+- `swap-privacy` exports one participant ZIP: `participant.json`, a README, and
+  the original files that participant submitted. It never includes another
+  participant's rows or files.
+- Deletion replaces the Discord user ID and display name with a per-event
+  salted tombstone, removes future plan rows, keeps past credits and event
+  files, and appends a hash-chained audit entry. An active assignment blocks
+  deletion until the host resolves it.
+- Diagnostics redaction takes the token, known paths, and known user IDs and
+  replaces them with typed placeholders.
+- Backup pruning removes regular files older than a cutoff. The backup
+  scheduler and the host UI for these operations are follow-ups.
+
 ## Security
 
 - Token in the OS keychain. Never in the UI, logs, SQLite, or git.

@@ -10,6 +10,10 @@ project/ledger/*.tmp
 .env
 .env.*
 !.env.example
+# local agent config (contains machine-specific paths)
+.opencode/
+opencode.json
+opencode.jsonc
 
 # OS / editor
 .DS_Store

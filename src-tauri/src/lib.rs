@@ -3,10 +3,11 @@
 #[allow(dead_code)]
 mod gateway_host;
 mod host;
+mod setup_host;
 
 use serde::Serialize;
 use swap_core::CORE_VERSION;
-use tauri::WindowEvent;
+use tauri::{Manager, WindowEvent};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,8 +29,17 @@ fn health() -> Health {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .manage(setup_host::BotRuntime::new())
         .setup(|app| {
+            setup_host::normalize_stale_session(app.handle());
             if let Err(error) = host::setup_tray(app) {
                 eprintln!("tray unavailable: {error}");
             }
@@ -55,7 +65,14 @@ pub fn run() {
             host::host_plan,
             host::host_generate_plan,
             host::host_start_event,
-            host::host_create_event
+            host::host_create_event,
+            setup_host::host_bot_validate,
+            setup_host::host_bot_guilds,
+            setup_host::host_bot_channels,
+            setup_host::host_bot_save,
+            setup_host::host_bot_test_dm,
+            setup_host::host_bot_status,
+            setup_host::host_bot_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running Monsquaz Swap");

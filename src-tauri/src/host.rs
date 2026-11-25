@@ -7,7 +7,7 @@ use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use swap_core::{EventState, Membership, Role};
 use swap_db::{
@@ -113,21 +113,35 @@ pub struct AuditEntryDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct NotificationsDto {
     deadlines: bool,
     bot_offline: bool,
     releases: bool,
 }
 
+impl Default for NotificationsDto {
+    fn default() -> Self {
+        Self {
+            deadlines: true,
+            bot_offline: true,
+            releases: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct SettingsDto {
-    bot_configured: bool,
-    bot_identity: String,
-    guild_name: String,
-    announcement_channel: String,
-    reveal_channel: String,
+    pub(crate) bot_configured: bool,
+    pub(crate) bot_identity: String,
+    pub(crate) token_storage: String,
+    pub(crate) guild_id: String,
+    pub(crate) guild_name: String,
+    pub(crate) announcement_channel_id: String,
+    pub(crate) announcement_channel_name: String,
+    pub(crate) reveal_channel_id: String,
+    pub(crate) reveal_channel_name: String,
     dm_fallback: bool,
     timezone: String,
     retention_days: u32,
@@ -140,9 +154,13 @@ impl Default for SettingsDto {
         Self {
             bot_configured: false,
             bot_identity: String::new(),
+            token_storage: "none".to_string(),
+            guild_id: String::new(),
             guild_name: String::new(),
-            announcement_channel: String::new(),
-            reveal_channel: String::new(),
+            announcement_channel_id: String::new(),
+            announcement_channel_name: String::new(),
+            reveal_channel_id: String::new(),
+            reveal_channel_name: String::new(),
             dm_fallback: true,
             timezone: "Europe/Stockholm".to_string(),
             retention_days: 90,
@@ -922,9 +940,18 @@ fn start_host_event(db: &Db) -> Result<PlanDataDto, String> {
 }
 
 #[tauri::command]
-pub fn host_mission_control(app: AppHandle) -> Result<MissionControlDto, String> {
+pub async fn host_mission_control(
+    app: AppHandle,
+    runtime: State<'_, crate::setup_host::BotRuntime>,
+) -> Result<MissionControlDto, String> {
     let db = open_db(&app)?;
-    let settings = host_settings(app).unwrap_or_default();
+    let mut settings = host_settings(app).unwrap_or_default();
+    if let Ok(status) = crate::setup_host::status(&runtime, &settings.token_storage).await
+        && !status.keychain_error
+    {
+        settings.bot_configured = status.configured;
+        settings.token_storage = status.token_storage;
+    }
     mission_control(&db, &settings)
 }
 
@@ -1178,9 +1205,8 @@ fn audit_log(db: &Db, settings: &SettingsDto) -> Result<Vec<AuditEntryDto>, Stri
         .collect())
 }
 
-#[tauri::command]
-pub fn host_settings(app: AppHandle) -> Result<SettingsDto, String> {
-    let path = settings_path(&app)?;
+pub(crate) fn read_settings(app: &AppHandle) -> Result<SettingsDto, String> {
+    let path = settings_path(app)?;
     match fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str(&contents).map_err(|error| error.to_string()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(SettingsDto::default()),
@@ -1188,13 +1214,41 @@ pub fn host_settings(app: AppHandle) -> Result<SettingsDto, String> {
     }
 }
 
+pub(crate) fn write_settings(app: &AppHandle, settings: &SettingsDto) -> Result<(), String> {
+    validate_settings(settings)?;
+    let path = settings_path(app)?;
+    let contents = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
-pub fn save_host_settings(app: AppHandle, settings: SettingsDto) -> Result<SettingsDto, String> {
-    validate_settings(&settings)?;
-    let path = settings_path(&app)?;
-    let contents = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
-    fs::write(path, contents).map_err(|error| error.to_string())?;
+pub fn host_settings(app: AppHandle) -> Result<SettingsDto, String> {
+    read_settings(&app)
+}
+
+#[tauri::command]
+pub fn save_host_settings(
+    app: AppHandle,
+    mut settings: SettingsDto,
+) -> Result<SettingsDto, String> {
+    let current = read_settings(&app)?;
+    settings.copy_bot_fields_from(&current);
+    write_settings(&app, &settings)?;
     Ok(settings)
+}
+
+impl SettingsDto {
+    pub(crate) fn copy_bot_fields_from(&mut self, other: &Self) {
+        self.bot_configured = other.bot_configured;
+        self.bot_identity = other.bot_identity.clone();
+        self.token_storage = other.token_storage.clone();
+        self.guild_id = other.guild_id.clone();
+        self.guild_name = other.guild_name.clone();
+        self.announcement_channel_id = other.announcement_channel_id.clone();
+        self.announcement_channel_name = other.announcement_channel_name.clone();
+        self.reveal_channel_id = other.reveal_channel_id.clone();
+        self.reveal_channel_name = other.reveal_channel_name.clone();
+    }
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1216,10 +1270,22 @@ fn validate_settings(settings: &SettingsDto) -> Result<(), String> {
     if settings.timezone.trim().is_empty() || settings.timezone.chars().count() > 64 {
         return Err("timezone must be between 1 and 64 characters".to_string());
     }
+    if !matches!(
+        settings.token_storage.as_str(),
+        "keychain" | "session" | "none"
+    ) {
+        return Err("token_storage must be keychain, session, or none".to_string());
+    }
     for (label, value) in [
+        ("guild id", &settings.guild_id),
         ("guild name", &settings.guild_name),
-        ("announcement channel", &settings.announcement_channel),
-        ("reveal channel", &settings.reveal_channel),
+        ("announcement channel id", &settings.announcement_channel_id),
+        (
+            "announcement channel name",
+            &settings.announcement_channel_name,
+        ),
+        ("reveal channel id", &settings.reveal_channel_id),
+        ("reveal channel name", &settings.reveal_channel_name),
         ("bot identity", &settings.bot_identity),
     ] {
         if value.chars().count() > 200 {
@@ -1271,11 +1337,42 @@ mod tests {
     }
 
     #[test]
+    fn ui_settings_cannot_change_bot_owned_fields() {
+        let stored = SettingsDto {
+            bot_configured: true,
+            bot_identity: "Monsquaz Bot (900)".to_string(),
+            token_storage: "keychain".to_string(),
+            guild_id: "10".to_string(),
+            guild_name: "Night Shift".to_string(),
+            announcement_channel_id: "11".to_string(),
+            reveal_channel_id: "12".to_string(),
+            ..SettingsDto::default()
+        };
+        let mut proposed = SettingsDto {
+            bot_configured: false,
+            bot_identity: "forged".to_string(),
+            token_storage: "none".to_string(),
+            guild_id: "99".to_string(),
+            ..SettingsDto::default()
+        };
+
+        proposed.copy_bot_fields_from(&stored);
+
+        assert!(proposed.bot_configured);
+        assert_eq!(proposed.bot_identity, "Monsquaz Bot (900)");
+        assert_eq!(proposed.token_storage, "keychain");
+        assert_eq!(proposed.guild_id, "10");
+        assert_eq!(proposed.announcement_channel_id, "11");
+        assert_eq!(proposed.reveal_channel_id, "12");
+    }
+
+    #[test]
     fn the_settings_payload_has_no_secret_field() {
         let json = serde_json::to_string(&SettingsDto::default()).unwrap();
         assert!(json.contains("\"botConfigured\""));
         assert!(json.contains("\"retentionDays\""));
-        assert!(!json.contains("token"));
+        assert!(json.contains("\"tokenStorage\""));
+        assert!(!json.contains("\"token\""));
         assert!(!json.contains("secret"));
     }
 

@@ -47,6 +47,7 @@ import {
   MissionControlView,
 } from "./views/MissionControl";
 import { SettingsSkeleton, SettingsView } from "./views/Settings";
+import { BotSetupDialog } from "./views/BotSetup";
 import { AuditLogSkeleton, AuditLogView } from "./views/AuditLog";
 import { SetupSkeleton, SetupView } from "./views/Setup";
 import { PeopleSkeleton, PeopleView } from "./views/People";
@@ -110,6 +111,9 @@ export default function App() {
   const [systemTheme, setSystemTheme] = useState<Theme>("dark");
   const [toast, setToast] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(() => initialDialog() === "delete");
+  const [botDialogOpen, setBotDialogOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("dialog") === "bot",
+  );
   const [confirmText, setConfirmText] = useState("");
   const [redactionPreview, setRedactionPreview] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(
@@ -121,6 +125,10 @@ export default function App() {
   const resolvedTheme: Theme =
     themeChoice === "system" ? systemTheme : themeChoice;
   const firstView = useRef(true);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: light)");
@@ -217,9 +225,12 @@ export default function App() {
   }, [view]);
 
   useEffect(() => {
-    document.body.classList.toggle("no-scroll", dialogOpen || paletteOpen);
+    document.body.classList.toggle(
+      "no-scroll",
+      dialogOpen || botDialogOpen || paletteOpen,
+    );
     return () => document.body.classList.remove("no-scroll");
-  }, [dialogOpen, paletteOpen]);
+  }, [dialogOpen, botDialogOpen, paletteOpen]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -468,7 +479,8 @@ export default function App() {
           setDialogOpen(true);
         }}
         onTheme={changeTheme}
-        onAction={notify}
+        onConfigureBot={() => setBotDialogOpen(true)}
+        onDiscard={resetSettings}
         onTestNotification={async () => {
           try {
             setToast(await sendTestNotification());
@@ -561,29 +573,6 @@ export default function App() {
           <main id="main" className="content" tabIndex={-1}>
             {content}
           </main>
-          {view === "settings" && dirty && settings ? (
-            <div
-              className="settings-savebar"
-              role="region"
-              aria-label="Unsaved settings"
-            >
-              <span className="settings-savebar__copy" role="status">
-                <Icon name="alert" size={16} />
-                Unsaved changes
-              </span>
-              <Button variant="secondary" onClick={resetSettings}>
-                Discard changes
-              </Button>
-              <Button
-                variant="primary"
-                icon="check"
-                ariaLabel={saving ? "Saving settings" : "Save changes"}
-                onClick={persistSettings}
-              >
-                {saving ? "Saving…" : "Save changes"}
-              </Button>
-            </div>
-          ) : null}
           <footer className="statusbar">
             <span className="statusbar__item">SQLite, local</span>
             <span className="statusbar__spacer" />
@@ -629,6 +618,27 @@ export default function App() {
             <Icon name="x" size={16} />
           </button>
         </div>
+      ) : null}
+
+      {botDialogOpen && settings ? (
+        <BotSetupDialog
+          settings={settings}
+          onSaved={(next) => {
+            setSettings((current) =>
+              current ? mergeBotSettings(current, next) : next,
+            );
+            setOriginalSettings((current) =>
+              current ? mergeBotSettings(current, next) : next,
+            );
+            setToast("Discord connection saved.");
+          }}
+          onClose={() => {
+            setBotDialogOpen(false);
+            if (!demo) {
+              reloadView();
+            }
+          }}
+        />
       ) : null}
 
       {dialogOpen ? (
@@ -680,6 +690,25 @@ export default function App() {
       ) : null}
     </>
   );
+}
+
+function mergeBotSettings(
+  current: HostSettings,
+  next: HostSettings,
+): HostSettings {
+  return {
+    ...current,
+    botConfigured: next.botConfigured,
+    botIdentity: next.botIdentity,
+    tokenStorage: next.tokenStorage,
+    keychainError: false,
+    guildId: next.guildId,
+    guildName: next.guildName,
+    announcementChannelId: next.announcementChannelId,
+    announcementChannelName: next.announcementChannelName,
+    revealChannelId: next.revealChannelId,
+    revealChannelName: next.revealChannelName,
+  };
 }
 
 function Sidebar({

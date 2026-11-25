@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
   requestPermission: vi.fn().mockResolvedValue("granted"),
   sendNotification: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
 function setUrl(search: string) {
@@ -154,7 +158,9 @@ describe("App", () => {
     });
     const retention = screen.getByLabelText("Keep files for");
     fireEvent.change(retention, { target: { value: "30" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Save changes" })[0],
+    );
     expect(
       await screen.findByText("Settings saved on this computer."),
     ).toBeInTheDocument();
@@ -260,6 +266,190 @@ describe("App", () => {
     expect(
       await screen.findByText(/a draft schedule is generated/i),
     ).toBeInTheDocument();
+  });
+
+  it("validates a bot token and maps channels", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    expect(
+      screen.getByRole("dialog", { name: "Connect the Discord bot" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save connection" }),
+    ).not.toBeInTheDocument();
+
+    const token = screen.getByLabelText("Bot token");
+    expect(token).toHaveAttribute("type", "password");
+    fireEvent.change(token, {
+      target: {
+        value:
+          "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    expect(
+      await screen.findByText(/token accepted/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Server")).toBeInTheDocument();
+    expect(screen.getByLabelText("Announcement channel")).toHaveValue(
+      "8142276040001",
+    );
+    expect(screen.getByLabelText("Reveal channel")).toHaveValue(
+      "8142276040002",
+    );
+  });
+
+  it("rejects a malformed token before any Discord request", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    fireEvent.change(screen.getByLabelText("Bot token"), {
+      target: { value: "short" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    expect(
+      await screen.findByText(/discord rejected this token/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save connection" }),
+    ).toBeDisabled();
+  });
+
+  it("invalidates the validated identity when the token changes", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    const dialog = screen.getByRole("dialog", { name: "Connect the Discord bot" });
+    const token = screen.getByLabelText("Bot token");
+    fireEvent.change(token, {
+      target: {
+        value:
+          "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    await screen.findByText(/token accepted/i);
+    fireEvent.change(token, {
+      target: {
+        value:
+          "dddddddddddddddddddddddd.eeeeee.fffffffffffffffffffffffffff",
+      },
+    });
+    expect(
+      within(dialog).queryByText(/Monsquaz Bot \(1184\)/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save connection" }),
+    ).toBeDisabled();
+  });
+
+  it("saves the bot connection and clears the token from the form", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    const token = screen.getByLabelText("Bot token");
+    fireEvent.change(token, {
+      target: {
+        value:
+          "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    await screen.findByText(/token accepted/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+    expect(
+      await screen.findByText(/connection saved\. send a test direct message/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Bot token")).toHaveValue("");
+    expect(
+      screen.queryByDisplayValue(
+        "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("sends a test direct message after saving", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    fireEvent.change(screen.getByLabelText("Bot token"), {
+      target: {
+        value:
+          "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    await screen.findByText(/token accepted/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+    await screen.findByText(/connection saved\. send a test direct message/i);
+    fireEvent.change(screen.getByLabelText("Send a test direct message"), {
+      target: { value: "11840000000000000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(
+      await screen.findByText(/test preview: this build does not send a message/i),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a session-only fallback when the keychain is unavailable", async () => {
+    setUrl("?demo=1&view=settings&dialog=bot&botKeychain=down");
+    render(<App />);
+    expect(
+      await screen.findByRole("dialog", { name: "Connect the Discord bot" }),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Bot token"), {
+      target: {
+        value:
+          "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate token" }));
+    await screen.findByText(/token accepted/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+    expect(
+      await screen.findByText(/does not provide a keychain/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /use this session only/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save for this session" }),
+    );
+    expect(
+      await screen.findByText(/connection saved for this session only/i),
+    ).toBeInTheDocument();
+  });
+
+  it("removes the stored connection after confirmation", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    expect(screen.getByText("Configured")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove connection" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm remove connection" }),
+    );
+    expect(
+      await screen.findByText(/connection removed/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      await screen.findByRole("button", { name: "Add bot token" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not configured")).toBeInTheDocument();
   });
 
   it("offers a notification test in settings", async () => {

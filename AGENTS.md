@@ -34,11 +34,13 @@ This file is a router. Detailed rules live in `ai-rules/`.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.
 - The host UI shell covers mission control, settings, and the audit log, with a
-  tray and a reviewed screenshot matrix. `swap-sim` runs deterministic classic
+  tray and a reviewed screenshot matrix. The setup service stores the bot token
+  in the OS keychain, maps channels, and sends a test DM. The live Twilight
+  gateway runs behind a supervisor. `swap-sim` runs deterministic classic
   events and checks the hard invariants. `swap-privacy` exports participant
-  data and anonymizes deletion with a hash-only audit. The live Twilight
-  gateway, async queue, deadline automation, event tools, reveal exports, and
-  remaining UI screens are next.
+  data and anonymizes deletion with a hash-only audit. The delivery loop, async
+  queue, deadline automation, event tools, reveal exports, and remaining UI
+  screens are next.
 
 ## Non-negotiable invariants
 
@@ -145,6 +147,7 @@ pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
 | `docs/PRD.md` | hand-written product contract |
 | `docs/EVENT_SETTINGS.md` | every event knob, its default and lock behaviour |
 | `docs/ARCHITECTURE.md` | public system design |
+| `docs/SETUP.md` | bot token, keychain, channel mapping, test DM |
 | `docs/RESEARCH.md` | evidence and sources behind the design |
 | `docs/ROADMAP.md` | milestones and exit criteria |
 | `specs/features/` | hand-written Gherkin, executable later with cucumber-rs |

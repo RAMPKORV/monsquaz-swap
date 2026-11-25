@@ -31,6 +31,8 @@ pub enum DiscordError {
     DmClosed,
     #[error("the user shares no guild with the bot")]
     NoMutualGuild,
+    #[error("the Discord user does not exist")]
+    UnknownUser,
     #[error("Discord rate-limited the request")]
     RateLimited,
     #[error("transport error: {0}")]

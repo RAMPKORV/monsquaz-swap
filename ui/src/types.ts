@@ -92,9 +92,14 @@ export type AuditEntry = {
 export type HostSettings = {
   botConfigured: boolean;
   botIdentity: string;
+  tokenStorage: "keychain" | "session" | "none";
+  keychainError?: boolean;
+  guildId: string;
   guildName: string;
-  announcementChannel: string;
-  revealChannel: string;
+  announcementChannelId: string;
+  announcementChannelName: string;
+  revealChannelId: string;
+  revealChannelName: string;
   dmFallback: boolean;
   timezone: string;
   retentionDays: number;
@@ -104,6 +109,36 @@ export type HostSettings = {
     botOffline: boolean;
     releases: boolean;
   };
+};
+
+export type BotPreview = {
+  botId: string;
+  identity: string;
+  inviteUrl: string;
+};
+
+export type GuildOption = {
+  id: string;
+  name: string;
+};
+
+export type ChannelOption = {
+  id: string;
+  name: string;
+};
+
+export type BotStatus = {
+  configured: boolean;
+  tokenStorage: "keychain" | "session" | "none";
+  keychainError: boolean;
+};
+
+export type BotSetupInput = {
+  token: string;
+  guildId: string;
+  announcementChannelId: string;
+  revealChannelId: string;
+  allowSessionOnly: boolean;
 };
 
 export type EventMode = "Classic" | "Async";

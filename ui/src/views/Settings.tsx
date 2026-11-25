@@ -33,7 +33,8 @@ export function SettingsView({
   onSave,
   onDelete,
   onTheme,
-  onAction,
+  onConfigureBot,
+  onDiscard,
   onTestNotification,
 }: {
   settings: HostSettings;
@@ -43,7 +44,8 @@ export function SettingsView({
   onSave: () => void;
   onDelete: () => void;
   onTheme: (theme: HostSettings["theme"]) => void;
-  onAction: (label: string) => void;
+  onConfigureBot: () => void;
+  onDiscard: () => void;
   onTestNotification: () => void;
 }) {
   function update<K extends keyof HostSettings>(
@@ -63,38 +65,47 @@ export function SettingsView({
       >
         <PageHeader
           title="Settings"
-          description="Connection, channels, schedule defaults, and retention. Secrets stay on this computer and never appear in the window."
+          description="Connection, channels, schedule defaults, and retention. The app never shows the bot token again after you save it."
           actions={
             dirty ? (
-              <span className="saved-state saved-state--dirty">
-                <Icon name="alert" size={16} />
-                Unsaved changes
-              </span>
-            ) : settings.botConfigured ? (
-              <span className="saved-state">
-                <Icon name="check" size={16} />
-                Saved
-              </span>
+              <div className="settings-header-actions">
+                <Button variant="secondary" onClick={onDiscard}>
+                  Discard changes
+                </Button>
+                <Button variant="primary" type="submit" icon="check">
+                  Save changes
+                </Button>
+              </div>
             ) : (
               <Button
-                variant="primary"
+                variant={settings.botConfigured ? "secondary" : "primary"}
                 icon="bot"
-                onClick={() => onAction("Add bot token")}
+                onClick={onConfigureBot}
               >
-                Add bot token
+                {settings.botConfigured ? "Reconnect bot" : "Add bot token"}
               </Button>
             )
           }
         />
 
-        {dirty ? null : (
-          <p className="save-state" role="status">
-            <Icon name="check" size={16} />
-            {!settings.botConfigured
-              ? "No bot token is stored. Add one to connect Discord."
-              : "All changes are saved on this computer."}
-          </p>
-        )}
+        <p
+          className={`save-state ${
+            dirty || !settings.botConfigured ? "save-state--warn" : ""
+          }`}
+          role="status"
+        >
+          <Icon
+            name={dirty || !settings.botConfigured ? "alert" : "check"}
+            size={16}
+          />
+          {dirty
+            ? "Unsaved changes. Save before you leave this page."
+            : !settings.botConfigured
+              ? "No bot token is stored."
+              : settings.tokenStorage === "session"
+                ? "Settings are saved. The bot token lasts for this session only."
+                : "All changes are saved on this computer."}
+        </p>
 
         <div className="settings-grid">
           <section className="card" aria-labelledby="connection-title">
@@ -120,45 +131,45 @@ export function SettingsView({
                 <span className="field-help">
                   {settings.botConfigured
                     ? settings.botIdentity
-                    : "No token is stored. Add one to invite the bot and send a test direct message."}
+                    : "Not connected."}
                 </span>
               </div>
-              {settings.botConfigured ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => onAction("Replace token")}
-                >
-                  Replace token
-                </Button>
-              ) : null}
             </div>
 
-            <div className="form-grid">
-              <Field
-                label="Server"
-                htmlFor="guild-name"
-                helpId="guild-name-help"
-                help="The one server this event belongs to."
-              >
-                <input
-                  id="guild-name"
-                  className="input"
-                  value={settings.guildName}
-                  title={settings.guildName}
-                  placeholder="Choose a server"
-                  aria-describedby="guild-name-help"
-                  onChange={(event) => update("guildName", event.target.value)}
-                />
-              </Field>
-              <div className="field">
-                <span className="field-label">When direct messages fail</span>
-                <Toggle
-                  checked={settings.dmFallback}
-                  onChange={(next) => update("dmFallback", next)}
-                  label="Private-thread fallback"
-                  description="If a direct message fails, the bot opens a private thread with the participant and writes an audit entry. You and server moderators can open the thread. The bot never sends a track through a public channel."
-                />
+            <div className="bot-storage">
+              <div>
+                <span className="field-label">Token storage</span>
+                <span className="field-help">
+                  {settings.tokenStorage === "keychain"
+                    ? "Saved in the operating system keychain. The app never shows it again."
+                    : settings.tokenStorage === "session"
+                      ? "The token is stored only until you quit the app. The bot stops then. Add the token again after a restart."
+                      : "Not stored."}
+                </span>
               </div>
+              {settings.keychainError ? (
+                <span className="field-error" role="alert">
+                  The OS keychain is locked. Unlock it before you send messages
+                  or remove the connection.
+                </span>
+              ) : null}
+              <div>
+                <span className="field-label">Server</span>
+                <span className="field-help">
+                  {settings.guildName
+                    ? `${settings.guildName} (${settings.guildId})`
+                    : "No server selected yet."}
+                </span>
+              </div>
+            </div>
+
+            <div className="connection-fallback">
+              <Toggle
+                checked={settings.dmFallback}
+                onChange={(next) => update("dmFallback", next)}
+                label="Private-thread fallback"
+                description="If a direct message fails, the bot opens a private thread with the participant and writes an audit entry. You and server moderators can open the thread. The bot never sends a track through a public channel."
+              />
             </div>
           </section>
 
@@ -171,44 +182,46 @@ export function SettingsView({
                   through a public channel.
                 </p>
               </div>
+              {settings.botConfigured ? (
+                <Button variant="secondary" onClick={onConfigureBot}>
+                  Map channels
+                </Button>
+              ) : null}
             </div>
-            <div className="form-grid">
-              <Field
-                label="Announcement channel"
-                htmlFor="announcement-channel"
-                helpId="announcement-channel-help"
-                help="Round openings, deadlines, and the schedule fingerprint."
-              >
-                <input
-                  id="announcement-channel"
-                  className="input"
-                  value={settings.announcementChannel}
-                  title={settings.announcementChannel}
-                  placeholder="#swap-announcements"
-                  aria-describedby="announcement-channel-help"
-                  onChange={(event) =>
-                    update("announcementChannel", event.target.value)
-                  }
-                />
-              </Field>
-              <Field
-                label="Reveal channel"
-                htmlFor="reveal-channel"
-                helpId="reveal-channel-help"
-                help="The album, credits, comments, and keepsakes."
-              >
-                <input
-                  id="reveal-channel"
-                  className="input"
-                  value={settings.revealChannel}
-                  title={settings.revealChannel}
-                  placeholder="#swap-reveal"
-                  aria-describedby="reveal-channel-help"
-                  onChange={(event) =>
-                    update("revealChannel", event.target.value)
-                  }
-                />
-              </Field>
+            <div className="channel-map">
+              <div className="channel-map__row">
+                <div>
+                  <span className="field-label">Announcement channel</span>
+                  <span className="field-help">
+                    Round openings, deadlines, and a record that the schedule
+                    did not change.
+                  </span>
+                </div>
+                <span className="channel-map__value">
+                  {settings.announcementChannelName
+                    ? `#${settings.announcementChannelName}`
+                    : "Not selected"}
+                  {settings.announcementChannelId ? (
+                    <small>{settings.announcementChannelId}</small>
+                  ) : null}
+                </span>
+              </div>
+              <div className="channel-map__row">
+                <div>
+                  <span className="field-label">Reveal channel</span>
+                  <span className="field-help">
+                    The album, credits, comments, and keepsakes.
+                  </span>
+                </div>
+                <span className="channel-map__value">
+                  {settings.revealChannelName
+                    ? `#${settings.revealChannelName}`
+                    : "Not selected"}
+                  {settings.revealChannelId ? (
+                    <small>{settings.revealChannelId}</small>
+                  ) : null}
+                </span>
+              </div>
             </div>
           </section>
 

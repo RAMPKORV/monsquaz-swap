@@ -265,6 +265,8 @@ pub struct EventDraftDto {
     rounds: Option<u32>,
     claim_window_hours: i64,
     round_window_hours: i64,
+    quiet_hours_start: u8,
+    quiet_hours_end: u8,
     allowlist: Vec<String>,
     pack_type: String,
     pack_required: bool,
@@ -395,6 +397,8 @@ fn default_draft() -> EventDraftDto {
         rounds: None,
         claim_window_hours: 24,
         round_window_hours: 24,
+        quiet_hours_start: 22,
+        quiet_hours_end: 8,
         allowlist: swap_files::DEFAULT_EXTENSIONS
             .iter()
             .map(|extension| (*extension).to_string())
@@ -420,6 +424,8 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
         rounds: settings.rounds,
         claim_window_hours: settings.claim_window_secs / 3600,
         round_window_hours: settings.round_window_secs / 3600,
+        quiet_hours_start: settings.quiet_hours_start,
+        quiet_hours_end: settings.quiet_hours_end,
         allowlist: settings.allowed_extensions.clone(),
         pack_type: settings
             .pack_type
@@ -900,6 +906,8 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         scheduler: None,
         swap_cadence: Some(draft.swap_cadence),
         schedule_visibility: Some(draft.schedule_visibility),
+        quiet_hours_start: draft.quiet_hours_start,
+        quiet_hours_end: draft.quiet_hours_end,
     };
     settings.validate().map_err(|error| error.to_string())?;
     let now = now_secs();

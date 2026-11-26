@@ -1261,7 +1261,7 @@ pub fn request_extension(
     hours: i64,
     now: i64,
 ) -> Result<ExtensionOutcome, EngineError> {
-    if !(1..=12).contains(&hours) {
+    if !matches!(hours, 1 | 6 | 12) {
         return Err(EngineError::InvalidExtensionHours);
     }
     let event = load_event(db, event_id)?;
@@ -1591,7 +1591,7 @@ pub fn decide_deadline(
     let decision = HostDecisionRepo::open_for_assignment(&transaction, assignment_id, "overdue")?;
     match action {
         "extend" => {
-            if !(1..=12).contains(&hours) {
+            if !matches!(hours, 1 | 6 | 12) {
                 return Err(EngineError::InvalidExtensionHours);
             }
             DeadlineRepo::ensure(&transaction, assignment_id)?;
@@ -1720,6 +1720,7 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
         if current.state != EventState::Active {
             continue;
         }
+        let settings = parse_settings(&current)?;
         let participants = ParticipantRepo::list_for_event(&transaction, &event.id)?;
         let assignments = AssignmentRepo::list_active(&transaction, &event.id)?;
         for assignment in assignments {
@@ -1805,30 +1806,46 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
             }
             let percent = ((now - claimed_at) * 100) / total;
             let quiet = participant_timezone(&participants, &assignment.participant_id)
-                .is_some_and(|tz| quiet_hours(now, tz));
+                .is_some_and(|tz| {
+                    quiet_hours(
+                        now,
+                        tz,
+                        settings.quiet_hours_start,
+                        settings.quiet_hours_end,
+                    )
+                });
+            if quiet {
+                continue;
+            }
+            let mut pending = Vec::new();
             for (step, column) in [
                 (50_i64, "reminded_50"),
                 (80, "reminded_80"),
                 (95, "reminded_95"),
             ] {
-                if percent < step || quiet {
-                    continue;
+                if percent >= step {
+                    pending.push((step, column));
                 }
-                if DeadlineRepo::mark_reminder(&transaction, &assignment.id, column)? {
-                    enqueue_effect(
-                        &transaction,
-                        &event.id,
-                        &Effect::Dm {
-                            user_id: assignment.participant_id.clone(),
-                            content: format!(
-                                "Track {}: {step} percent of the edit window has passed. Send your edit before the deadline.",
-                                assignment.track_code
-                            ),
-                        },
-                        now,
-                    )?;
-                    report.reminders += 1;
-                }
+            }
+            let highest = pending.last().map(|(step, _)| *step);
+            let mut marked = false;
+            for (_, column) in &pending {
+                marked |= DeadlineRepo::mark_reminder(&transaction, &assignment.id, column)?;
+            }
+            if marked && let Some(step) = highest {
+                enqueue_effect(
+                    &transaction,
+                    &event.id,
+                    &Effect::Dm {
+                        user_id: assignment.participant_id.clone(),
+                        content: format!(
+                            "Track {}: {step} percent of the edit window has passed. Send your edit before the deadline.",
+                            assignment.track_code
+                        ),
+                    },
+                    now,
+                )?;
+                report.reminders += 1;
             }
         }
         commit(transaction)?;
@@ -1843,11 +1860,20 @@ fn participant_timezone(participants: &[ParticipantRecord], user_id: &str) -> Op
         .and_then(|participant| participant.timezone.parse().ok())
 }
 
-fn quiet_hours(now: i64, timezone: Tz) -> bool {
+fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {
+    if start == end {
+        return false;
+    }
     Utc.timestamp_opt(now, 0)
         .single()
-        .map(|time| time.with_timezone(&timezone).hour())
-        .is_some_and(|hour| !(8..22).contains(&hour))
+        .map(|time| u8::try_from(time.with_timezone(&timezone).hour()).unwrap_or(0))
+        .is_some_and(|hour| {
+            if start < end {
+                (start..end).contains(&hour)
+            } else {
+                hour >= start || hour < end
+            }
+        })
 }
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {

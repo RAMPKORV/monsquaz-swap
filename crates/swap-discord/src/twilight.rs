@@ -634,7 +634,7 @@ fn subcommand_options(name: &str) -> Option<Vec<CommandOption>> {
         )],
         "extend" => vec![option(
             "hours",
-            "How many extra hours you need, 1 to 12.",
+            "How many extra hours you need: 1, 6, or 12.",
             CommandOptionType::Integer,
             false,
         )],

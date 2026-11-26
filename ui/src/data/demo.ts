@@ -790,6 +790,8 @@ function defaultDraft(): EventDraft {
     rounds: 8,
     claimWindowHours: 12,
     roundWindowHours: 24,
+    quietHoursStart: 22,
+    quietHoursEnd: 8,
     allowlist: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
     packType: "Module template + samples",
     packRequired: true,

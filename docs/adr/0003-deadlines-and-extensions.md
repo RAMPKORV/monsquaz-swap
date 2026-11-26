@@ -28,9 +28,11 @@ not move a track.
    reminder row makes the step idempotent. The deadline prompt is a
    separate step at 100 percent.
 
-4. **Quiet hours delay non-urgent reminders.** A reminder at 22:00–08:00 in the
-   participant timezone waits. The next tick after 08:00 sends it. Quiet hours
-   never move `due_at`. The deadline prompt is exempt.
+4. **Quiet hours delay non-urgent reminders.** A reminder inside the quiet
+   window in the participant timezone waits. The next tick after the window
+   sends it. The window is a per-event setting with a 22:00–08:00 default. The
+   same start and end hour turns quiet hours off. Quiet hours never move
+   `due_at`. The deadline prompt is exempt.
 
 5. **The first small extension is automatic.** A participant can request 1, 6,
    or 12 hours. The first request of 6 hours or less moves `due_at` and records

@@ -1488,6 +1488,63 @@ fn quiet_hours_delay_a_reminder_without_moving_the_deadline() {
 }
 
 #[test]
+fn quiet_hours_can_be_turned_off() {
+    use swap_engine::tick_deadlines;
+
+    let base = 25_130_i64;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        quiet_hours_start: 8,
+        quiet_hours_end: 8,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 1);
+}
+
+#[test]
+fn reminders_do_not_burst_after_quiet_hours() {
+    use swap_engine::tick_deadlines;
+
+    let base = 25_130_i64;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    assert_eq!(tick_deadlines(&fixture.db, base + 20).unwrap().reminders, 0);
+    assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 0);
+    assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 1);
+    assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 0);
+}
+
+#[test]
 fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
     use swap_engine::{ExtensionStatus, decide_extension, open_decisions, request_extension};
 
@@ -1515,6 +1572,10 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
         .due_at
         .unwrap();
 
+    assert!(matches!(
+        request_extension(&fixture.db, EVENT, &user_id, 2, T4 + 5),
+        Err(EngineError::InvalidExtensionHours)
+    ));
     let first = request_extension(&fixture.db, EVENT, &user_id, 6, T4 + 10).unwrap();
     assert_eq!(first.status, ExtensionStatus::Approved);
     assert_eq!(first.due_at, Some(original_due + 6 * 3_600));

@@ -274,6 +274,50 @@ function BasicsStep({
             <span>hours</span>
           </div>
         </Field>
+        <Field
+          label="Quiet hours start"
+          htmlFor="quiet-start"
+          helpId="quiet-start-help"
+          help="Reminders wait during local quiet hours. Use the same start and end hour to turn quiet hours off."
+        >
+          <div className="number-control">
+            <input
+              id="quiet-start"
+              aria-describedby="quiet-start-help"
+              className="input"
+              type="number"
+              min={0}
+              max={23}
+              value={draft.quietHoursStart}
+              onChange={(event) =>
+                update("quietHoursStart", Number(event.target.value) || 0)
+              }
+            />
+            <span>hours</span>
+          </div>
+        </Field>
+        <Field
+          label="Quiet hours end"
+          htmlFor="quiet-end"
+          helpId="quiet-end-help"
+          help="The first local hour when reminders can arrive."
+        >
+          <div className="number-control">
+            <input
+              id="quiet-end"
+              aria-describedby="quiet-end-help"
+              className="input"
+              type="number"
+              min={0}
+              max={23}
+              value={draft.quietHoursEnd}
+              onChange={(event) =>
+                update("quietHoursEnd", Number(event.target.value) || 0)
+              }
+            />
+            <span>hours</span>
+          </div>
+        </Field>
       </div>
     </div>
   );

@@ -1802,6 +1802,24 @@ impl HostDecisionRepo {
             .optional()?)
     }
 
+    pub fn open_for_key(
+        conn: &Connection,
+        event_id: &str,
+        key: &str,
+    ) -> Result<Option<HostDecisionRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, assignment_id, kind, status, requested_hours,
+                        created_at, decided_at, reason
+                 FROM host_decisions
+                 WHERE event_id = ?1 AND (id = ?2 OR assignment_id = ?2) AND status = 'open'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![event_id, key],
+                row_to_host_decision,
+            )
+            .optional()?)
+    }
+
     pub fn list_open(
         conn: &Connection,
         event_id: &str,

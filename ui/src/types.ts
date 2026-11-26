@@ -184,6 +184,8 @@ export type EventDraft = {
   rounds: number | null;
   claimWindowHours: number;
   roundWindowHours: number;
+  quietHoursStart: number;
+  quietHoursEnd: number;
   allowlist: string[];
   packType: "Module template + samples" | "Samples only" | "Reference track" | "None";
   packRequired: boolean;

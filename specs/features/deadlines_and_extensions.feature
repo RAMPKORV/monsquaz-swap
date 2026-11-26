@@ -44,13 +44,6 @@ Feature: Deadlines, reminders, and extensions
     Then the app refuses the request
     And the app offers Skip or a host decision
 
-  Scenario: The host pauses the event
-    Given an active event
-    When the host pauses the event for 24 hours
-    Then every active deadline moves by 24 hours
-    And the bot tells the participants the new dates
-    And the app records the pause
-
   Scenario: A claimed deadline miss counts as seen
     Given a participant who claimed a track and did not submit
     When the deadline passes and the host marks the turn missed
@@ -60,8 +53,15 @@ Feature: Deadlines, reminders, and extensions
 
   Scenario: The deadline decision card offers clear actions
     Given a deadline decision card for a participant
-    Then the host can extend the assignment
-    And the host can skip the assignment
-    And the host can reassign the assignment
-    And the host can pause the event
+    Then the host can extend the assignment by 1, 6, or 12 hours
+    And the host can mark the turn missed
+    And the host can keep waiting
+    And every action records an audit entry
+    And marking the turn missed records the pair as seen
+
+  Scenario: The extension decision card offers clear actions
+    Given an extension request decision card for a participant
+    Then the host can approve the request
+    And the host can refuse the request
+    And an approval moves the deadline
     And every action records an audit entry

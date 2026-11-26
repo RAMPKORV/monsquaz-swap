@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use swap_db::{
-    AuditRepo, Connection, Db, DbError, DeliveryRecord, DeliveryRepo, DmCursorRepo, Transaction,
-    TransactionBehavior,
+    AuditRepo, Connection, Db, DbError, DeliveryRecord, DeliveryRepo, DmCursorRepo,
+    HostDecisionRepo, MetaRepo, Transaction, TransactionBehavior,
 };
 use swap_discord::{
     DiscordChannelId, DiscordError, DiscordPort, DiscordUserId, MessageId, OutboundFile,
@@ -357,7 +357,29 @@ impl DeliveryWorker {
                 }
             };
             let result = match &delivery {
-                PendingDelivery::HostAlert { content, .. } => {
+                PendingDelivery::HostAlert { key, content } => {
+                    let open = {
+                        let db = db_guard(self);
+                        HostDecisionRepo::open_for_key(db.conn(), &row.event_id, key)?
+                    };
+                    if open.is_none() {
+                        let db = db_guard(self);
+                        AuditRepo::insert(
+                            db.conn(),
+                            &row.event_id,
+                            now,
+                            "worker",
+                            "host_alert.stale",
+                            None,
+                            &format!(
+                                "{{\"key\":{}}}",
+                                serde_json::to_string(key).unwrap_or_default()
+                            ),
+                        )?;
+                        DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
+                        report.sent += 1;
+                        continue;
+                    }
                     self.send_host_alert(discord, content).await.map(|()| None)
                 }
                 _ => deliver(&self.store, discord, &delivery).await,
@@ -527,12 +549,27 @@ impl DeliveryWorker {
         let Some(channel) = &self.alert_channel else {
             return Ok(());
         };
-        let thread = discord
-            .create_private_thread(
-                &DiscordChannelId::new(channel.clone()),
-                "Monsquaz Swap host alert",
-            )
-            .await?;
+        let meta_key = format!("host_alert_thread:{channel}");
+        let existing = {
+            let db = db_guard(self);
+            MetaRepo::get(db.conn(), &meta_key)
+                .map_err(|error| DiscordError::Other(error.to_string()))?
+        };
+        let thread = match existing {
+            Some(thread) => DiscordChannelId::new(thread),
+            None => {
+                let thread = discord
+                    .create_private_thread(
+                        &DiscordChannelId::new(channel.clone()),
+                        "Monsquaz Swap host alert",
+                    )
+                    .await?;
+                let db = db_guard(self);
+                MetaRepo::set(db.conn(), &meta_key, &thread.0)
+                    .map_err(|error| DiscordError::Other(error.to_string()))?;
+                thread
+            }
+        };
         discord
             .send_channel_message(
                 &thread,
@@ -904,11 +941,26 @@ mod worker_alerts {
         let directory = tempdir().unwrap();
         let store = BlobStore::new(directory.path().join("blobs"));
         let db = database();
+        HostDecisionRepo::insert(
+            db.conn(),
+            &swap_db::HostDecisionRecord {
+                id: "decision-1".to_string(),
+                event_id: "evt-1".to_string(),
+                assignment_id: None,
+                kind: "deadline".to_string(),
+                status: "open".to_string(),
+                requested_hours: None,
+                created_at: 1,
+                decided_at: None,
+                reason: None,
+            },
+        )
+        .unwrap();
         enqueue_pending(
             db.conn(),
             "evt-1",
             &PendingDelivery::HostAlert {
-                key: "assignment-1".to_string(),
+                key: "decision-1".to_string(),
                 content: "A track deadline needs a host decision.".to_string(),
             },
             10,
@@ -931,6 +983,74 @@ mod worker_alerts {
             DeliveryRepo::count_pending(db.lock().unwrap().conn()).unwrap(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn a_stale_host_alert_is_dropped() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = database();
+        enqueue_pending(
+            db.conn(),
+            "evt-1",
+            &PendingDelivery::HostAlert {
+                key: "assignment-1".to_string(),
+                content: "A track deadline needs a host decision.".to_string(),
+            },
+            10,
+        )
+        .unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let discord = FakeDiscord::new();
+        let worker = DeliveryWorker::new(db.clone(), store).with_alert_channel("alerts");
+        let report = worker.drain(&discord, 20, 10).await.unwrap();
+        assert_eq!(report.sent, 1);
+        assert!(discord.created_threads().is_empty());
+        assert_eq!(
+            DeliveryRepo::count_pending(db.lock().unwrap().conn()).unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn host_alerts_reuse_one_private_thread() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = database();
+        for id in ["decision-1", "decision-2"] {
+            HostDecisionRepo::insert(
+                db.conn(),
+                &swap_db::HostDecisionRecord {
+                    id: id.to_string(),
+                    event_id: "evt-1".to_string(),
+                    assignment_id: None,
+                    kind: "deadline".to_string(),
+                    status: "open".to_string(),
+                    requested_hours: None,
+                    created_at: 1,
+                    decided_at: None,
+                    reason: None,
+                },
+            )
+            .unwrap();
+            enqueue_pending(
+                db.conn(),
+                "evt-1",
+                &PendingDelivery::HostAlert {
+                    key: id.to_string(),
+                    content: format!("Decision {id} needs the host."),
+                },
+                10,
+            )
+            .unwrap();
+        }
+        let db = Arc::new(Mutex::new(db));
+        let discord = FakeDiscord::new();
+        let worker = DeliveryWorker::new(db, store).with_alert_channel("alerts");
+        let report = worker.drain(&discord, 20, 10).await.unwrap();
+        assert_eq!(report.sent, 2);
+        assert_eq!(discord.created_threads().len(), 1);
+        assert_eq!(discord.channel_messages().len(), 2);
     }
 
     #[tokio::test]

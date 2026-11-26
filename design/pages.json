@@ -1,0 +1,103 @@
+{
+  "viewports": ["1280x800", "1024x700", "640x400"],
+  "contrastViewports": ["1280x800", "1024x700"],
+  "focusViewports": ["1280x800"],
+  "pages": [
+    {
+      "id": "mission",
+      "query": "demo=1&static=1&view=mission",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "mission-dense",
+      "query": "demo=1&static=1&view=mission&state=dense"
+    },
+    {
+      "id": "mission-decision",
+      "query": "demo=1&static=1&view=mission&dialog=decision"
+    },
+    {
+      "id": "mission-light",
+      "query": "demo=1&static=1&view=mission&theme=light",
+      "contrast": true
+    },
+    {
+      "id": "setup",
+      "query": "demo=1&static=1&view=setup",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "people",
+      "query": "demo=1&static=1&view=people",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "plan-dense",
+      "query": "demo=1&static=1&view=plan&state=dense",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "plan-light",
+      "query": "demo=1&static=1&view=plan&state=dense&theme=light",
+      "contrast": true
+    },
+    {
+      "id": "reveal",
+      "query": "demo=1&static=1&view=reveal&stream=0",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "reveal-dense",
+      "query": "demo=1&static=1&view=reveal&state=dense&stream=0"
+    },
+    {
+      "id": "reveal-long",
+      "query": "demo=1&static=1&view=reveal&state=long&stream=0"
+    },
+    {
+      "id": "reveal-safe",
+      "query": "demo=1&static=1&view=reveal"
+    },
+    {
+      "id": "reveal-publish",
+      "query": "demo=1&static=1&view=reveal&dialog=publish&stream=0"
+    },
+    {
+      "id": "reveal-redact",
+      "query": "demo=1&static=1&view=reveal&dialog=redact&stream=0"
+    },
+    {
+      "id": "reveal-published",
+      "query": "demo=1&static=1&view=reveal&published=1&stream=0"
+    },
+    {
+      "id": "reveal-light",
+      "query": "demo=1&static=1&view=reveal&theme=light&stream=0",
+      "contrast": true
+    },
+    {
+      "id": "audit-dense",
+      "query": "demo=1&static=1&view=audit&state=dense"
+    },
+    {
+      "id": "settings",
+      "query": "demo=1&static=1&view=settings",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "settings-bot",
+      "query": "demo=1&static=1&view=settings&dialog=bot"
+    },
+    {
+      "id": "settings-bot-light",
+      "query": "demo=1&static=1&view=settings&dialog=bot&theme=light",
+      "contrast": true
+    }
+  ]
+}

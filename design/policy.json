@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "updated": "2026-11-26",
+  "intent": "Machine-readable design policy. The design gate reads this file. Changing a locked rule requires a tracker decision or ADR because it changes the contract.",
+  "rules": {
+    "raw-color": {
+      "status": "locked",
+      "description": "Use a design token. Raw hex, rgb, or hsl values are allowed only inside a :root or [data-theme] token block.",
+      "allowedTokenSelectors": [":root", "[data-theme=\"light\"]", "[data-theme=\"dark\"]"]
+    },
+    "important": {
+      "status": "locked",
+      "description": "Do not use !important for layout or color. Motion overrides for reduced motion and static capture may use it.",
+      "allowedProperties": ["animation", "transition", "scroll-behavior"]
+    },
+    "color-contrast": {
+      "status": "locked",
+      "description": "Visible text must meet WCAG AA against its effective background.",
+      "normalRatio": 4.5,
+      "largeRatio": 3.0,
+      "largePx": 24,
+      "largeBoldPx": 18.66
+    },
+    "focus-visible": {
+      "status": "locked",
+      "description": "Every keyboard-focusable control must show a visible focus indicator."
+    },
+    "horizontal-overflow": {
+      "status": "locked",
+      "description": "A page must not scroll horizontally at any enforced viewport."
+    },
+    "element-clipped": {
+      "status": "locked",
+      "description": "An element must not extend past the viewport edge."
+    },
+    "text-overflow": {
+      "status": "locked",
+      "description": "Text must not be hard-clipped without an ellipsis."
+    },
+    "viewport-meta": {
+      "status": "locked",
+      "description": "A rendered page must declare width=device-width."
+    },
+    "spacing-scale": {
+      "status": "advisory",
+      "description": "Padding, margin, and gap values should use the spacing scale.",
+      "scale": [0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
+    },
+    "type-scale": {
+      "status": "advisory",
+      "description": "Font sizes should use the type scale.",
+      "scale": [10, 10.5, 11, 11.5, 12, 13, 14, 16, 18, 20, 24, 30, 44]
+    },
+    "radius-scale": {
+      "status": "advisory",
+      "description": "Border radii should use the radius scale.",
+      "scale": [0, 4, 6, 8, 12, 16, 999]
+    },
+    "shadow-token": {
+      "status": "advisory",
+      "description": "Use a shadow token instead of a raw box-shadow value."
+    },
+    "reduced-motion": {
+      "status": "advisory",
+      "description": "Animations and transitions must respect prefers-reduced-motion."
+    }
+  }
+}

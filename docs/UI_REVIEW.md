@@ -18,7 +18,7 @@ Capture each view in the required states. Use realistic sample data.
 | Round board | yes | yes | yes | yes | yes | yes |
 | File browser | yes | yes | yes | yes | yes | yes |
 | Audit log | yes | yes | yes | yes | yes | yes |
-| Reveal presenter | n/a | yes | yes | yes | yes | yes |
+| Reveal presenter | yes | yes | yes | yes | yes | yes |
 | Export/reveal package | yes | yes | yes | yes | n/a | yes |
 | Settings | yes | n/a | yes | yes | yes | yes |
 | Logs | n/a | yes | yes | yes | yes | yes |
@@ -32,6 +32,19 @@ Also capture:
 - a destructive confirmation;
 - a blocked/infeasible schedule;
 - a bot-offline state.
+
+## Deterministic gate
+
+Run `scripts/design-check.sh` before the review waves. It renders the page
+matrix at 1280×800, 1024×700, and 640×400, checks overflow and clipping with
+Refract, checks text contrast and keyboard focus with Playwright, and checks
+the CSS policy in `design/policy.json`. Existing accepted debt lives in
+`design/baseline.json`. The rules and the change process are in
+`ai-rules/DESIGN.md`.
+
+The review waves do not replace the gate. The gate does not replace the review
+waves. A screenshot can show a beautiful layout with a clipped control; the
+gate can pass a layout with a weak hierarchy.
 
 ## Review waves
 

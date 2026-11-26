@@ -17,10 +17,12 @@ This file is a router. Detailed rules live in `ai-rules/`.
 5. `ai-rules/ARCHITECTURE.md` — process model, crates, ports/adapters.
 6. `ai-rules/TESTING.md`, `ai-rules/GHERKIN.md`, and `ai-rules/CLI.md` — how to
    prove behaviour and where the commands live.
-7. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
-8. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
+7. `ai-rules/DESIGN.md` — the deterministic design policy, the Refract gate,
+   and how to change a locked rule.
+8. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
+9. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
    and append-only ledger. It is not the PRD; the PRD is hand-written.
-9. The issue you are working on, its notes, and linked docs.
+10. The issue you are working on, its notes, and linked docs.
 
 ## Current state
 
@@ -86,6 +88,7 @@ pnpm --dir ui test
 pnpm --dir ui build   # before cargo test on a clean checkout
 cargo test --workspace
 scripts/check.sh
+scripts/design-check.sh   # Refract + contrast + focus + token policy
 ```
 
 Batch 3–6 related issues into one branch, one PR, and one CI run. Claim every
@@ -150,6 +153,7 @@ pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
 |---|---|
 | `ai-rules/` | project rules for humans and agents |
 | `ai-rules/CLI.md` | command map, worktree, release, troubleshooting |
+| `design/` | design policy, page matrix, baseline, Refract lock |
 | `ai-rules/RELEASES.md` | versioning, tags, unsigned Windows, no updater |
 | `docs/PRD.md` | hand-written product contract |
 | `docs/EVENT_SETTINGS.md` | every event knob, its default and lock behaviour |

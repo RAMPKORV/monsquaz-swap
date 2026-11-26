@@ -626,12 +626,20 @@ fn subcommand_options(name: &str) -> Option<Vec<CommandOption>> {
                 false,
             ),
         ],
-        "title" => vec![option(
-            "title",
-            "The anonymous title for the track you hold.",
-            CommandOptionType::String,
-            true,
-        )],
+        "title" => vec![
+            option(
+                "title",
+                "The anonymous title for the track you hold.",
+                CommandOptionType::String,
+                true,
+            ),
+            option(
+                "track",
+                "Optional track code when you name a track from an earlier round.",
+                CommandOptionType::String,
+                false,
+            ),
+        ],
         "extend" => vec![option(
             "hours",
             "How many extra hours you need: 1, 6, or 12.",
@@ -813,6 +821,10 @@ mod tests {
         let title_option = &title.options.as_ref().unwrap()[0];
         assert_eq!(title_option.kind, CommandOptionType::String);
         assert_eq!(title_option.required, Some(true));
+        let track_option = &title.options.as_ref().unwrap()[1];
+        assert_eq!(track_option.name, "track");
+        assert_eq!(track_option.kind, CommandOptionType::String);
+        assert_eq!(track_option.required, Some(false));
     }
 
     #[test]

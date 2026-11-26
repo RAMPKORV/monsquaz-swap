@@ -929,10 +929,23 @@ impl InboundService {
         }
     }
 
-    async fn handle_title(&self, event_id: &str, user_id: &str, title: &str) -> Result<(), String> {
+    async fn handle_title(
+        &self,
+        event_id: &str,
+        user_id: &str,
+        track_code: Option<&str>,
+        title: &str,
+    ) -> Result<(), String> {
         let outcome = {
             let db = self.lock();
-            crate::engine::set_track_title_for_user(&db, event_id, user_id, title, self.now())
+            crate::engine::set_track_title_for_user_on_track(
+                &db,
+                event_id,
+                user_id,
+                track_code,
+                title,
+                self.now(),
+            )
         };
         match outcome {
             Ok(_) => Ok(()),
@@ -1094,7 +1107,9 @@ impl InboundService {
                             .await;
                         return Ok(());
                     };
-                    self.handle_title(&event_id, &user_id.0, title).await
+                    let track_code = options.get("track").map(String::as_str);
+                    self.handle_title(&event_id, &user_id.0, track_code, title)
+                        .await
                 }
                 swap_discord::SlashCommand::Join => self.handle_join(&user_id.0, &options).await,
                 swap_discord::SlashCommand::Status => {
@@ -1105,7 +1120,7 @@ impl InboundService {
                 swap_discord::SlashCommand::Help => {
                     self.notify(
                         &user_id.0,
-                        "Send a file to submit your claimed track. Use /swap claim or /swap skip. The final holder names the track with /swap title.",
+                        "Send a file to submit your claimed track. Use /swap claim or /swap skip. The final holder names the track with /swap title. A previous submitter can name it with the track code.",
                     )
                     .await;
                     Ok(())
@@ -1200,10 +1215,11 @@ fn title_message(error: &EngineError) -> String {
             "Use a title between 1 and 80 characters.".to_string()
         }
         EngineError::NotTitleHolder => {
-            "Only the latest holder of the track or the host can name it.".to_string()
+            "Only the final holder, the previous submitter, or the host can name the track."
+                .to_string()
         }
         EngineError::TitleAlreadySet => {
-            "The host has already named this track. Ask the host to change it.".to_string()
+            "The track already has a title. Ask the host to change it.".to_string()
         }
         EngineError::WrongEventState { .. } => "Titles are closed for this event now.".to_string(),
         _ => "The title was not saved. Try again or ask the host.".to_string(),

@@ -220,8 +220,10 @@ are in `docs/SETUP.md`.
   Submission time never affects the order.
 - Migration 008 adds `track_titles` and `track_comments`. A redacted comment is
   excluded from the package. The host adds comments before the reveal.
-- The final holder names the track with `/swap title`. The host can set or
-  correct the title before the reveal.
+- The final holder names the track with `/swap title`. If the final holder
+  does not, the bot asks the previous submitter. That person uses `/swap title`
+  with the track code. The final holder keeps priority until a title exists.
+  The host can set or correct the title before the reveal.
 - The presenter plays audio through the `swap-preview` protocol. The URL
   contains an opaque file id. Module files render to cached WAV through
   openmpt123. Byte ranges are supported.

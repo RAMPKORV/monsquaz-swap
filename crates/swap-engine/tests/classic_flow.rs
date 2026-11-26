@@ -10,8 +10,8 @@ use swap_engine::{
     PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
     dispatch_pending, edit_plan_assignment, event_status, expire_offer, generate_schedule,
     join_with_seed, lock_roster, open_round, plan_edit_candidates, redact_track_comment, reveal,
-    reveal_package, reveal_with_channel, set_track_title, set_track_title_for_user, signup, skip,
-    start_event, start_event_with_channel, submit,
+    reveal_package, reveal_with_channel, set_track_title, set_track_title_for_user,
+    set_track_title_for_user_on_track, signup, skip, start_event, start_event_with_channel, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -2298,13 +2298,26 @@ fn the_final_holder_is_asked_for_a_title_once() {
         T6,
     )
     .unwrap();
-    assert_eq!(first.effects.len(), 2);
+    assert_eq!(first.effects.len(), 3);
     assert!(first.effects.iter().any(|effect| {
         matches!(effect, Effect::Dm { content, .. } if content.contains("/swap title"))
     }));
     assert!(first.effects.iter().any(|effect| {
         matches!(effect, Effect::Dm { content, .. } if content.contains(&track_code))
     }));
+    let fallback = first
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Dm { user_id, content } if content.contains("If the final holder") => {
+                Some((user_id, content))
+            }
+            _ => None,
+        })
+        .expect("the previous submitter gets the fallback prompt");
+    assert_ne!(fallback.0, &user_id);
+    assert!(fallback.1.contains(&track_code));
+    assert!(fallback.1.contains("track:"));
     assert!(set_track_title_for_user(&fixture.db, EVENT, &user_id, "Final Name", T7).is_ok());
     let early_user = &first_round[0].0;
     assert!(matches!(
@@ -2327,6 +2340,122 @@ fn the_final_holder_is_asked_for_a_title_once() {
     )
     .unwrap();
     assert_eq!(second.effects.len(), 1);
+}
+
+#[test]
+fn the_previous_submitter_can_name_the_final_track() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let first_round = fixture.open(0);
+    for (index, (user_id, assignment_id, _)) in first_round.iter().enumerate() {
+        claim(
+            &fixture.db,
+            &fixture.store,
+            EVENT,
+            assignment_id,
+            user_id,
+            T5,
+        )
+        .unwrap();
+        let bytes = seed_bytes(120 + index as u8);
+        submit(
+            &fixture.db,
+            &fixture.store,
+            &PassthroughPreparer,
+            &SubmitRequest {
+                event_id: EVENT,
+                user_id,
+                filename: "edit.it",
+                bytes: &bytes,
+            },
+            T6,
+        )
+        .unwrap();
+    }
+    let final_offers = fixture.open(1);
+    let (final_user, final_assignment, final_track) = final_offers[0].clone();
+    let previous = first_round
+        .iter()
+        .find(|(_, _, track_code)| track_code == &final_track)
+        .map(|(user_id, _, _)| user_id.clone())
+        .unwrap();
+    assert_ne!(previous, final_user);
+
+    assert!(matches!(
+        set_track_title_for_user_on_track(
+            &fixture.db,
+            EVENT,
+            &previous,
+            Some(&final_track),
+            "Too Early",
+            T7
+        ),
+        Err(EngineError::NotTitleHolder)
+    ));
+
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &final_assignment,
+        &final_user,
+        T5,
+    )
+    .unwrap();
+    submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &final_user,
+            filename: "edit.it",
+            bytes: &seed_bytes(220),
+        },
+        T6,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        set_track_title_for_user_on_track(
+            &fixture.db,
+            EVENT,
+            "stranger",
+            Some(&final_track),
+            "Stolen",
+            T7
+        ),
+        Err(EngineError::NotTitleHolder)
+    ));
+
+    let record = set_track_title_for_user_on_track(
+        &fixture.db,
+        EVENT,
+        &previous,
+        Some(&final_track),
+        "Fallback Name",
+        T7,
+    )
+    .unwrap();
+    assert_eq!(record.title, "Fallback Name");
+    assert_eq!(record.set_by, previous);
+
+    let entries = AuditRepo::list_for_event(fixture.db.conn(), EVENT).unwrap();
+    let entry = entries
+        .iter()
+        .find(|entry| entry.action == "Track title fallback")
+        .expect("the fallback is in the audit log");
+    let detail: serde_json::Value = serde_json::from_str(&entry.detail_json).unwrap();
+    assert_eq!(detail["trackCode"], final_track);
+    assert_eq!(detail["actor"], previous);
+    assert_eq!(detail["finalHolder"], final_user);
+    assert_eq!(detail["fallback"], true);
+
+    assert!(matches!(
+        set_track_title_for_user(&fixture.db, EVENT, &final_user, "Late Name", T7),
+        Err(EngineError::TitleAlreadySet)
+    ));
 }
 
 #[test]

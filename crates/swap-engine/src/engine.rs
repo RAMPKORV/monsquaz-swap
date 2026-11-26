@@ -1448,22 +1448,39 @@ fn submit_inner(
         return Err(EngineError::AttachmentAlreadyProcessed);
     }
     enqueue_effect(&transaction, request.event_id, &receipt, now)?;
-    let title_request = if assignment.status != AssignmentStatus::Submitted
+    let (title_request, fallback_request) = if assignment.status != AssignmentStatus::Submitted
         && let Some(plan) = PlanRepo::latest(&transaction, request.event_id)?
         && assignment.round + 1 == plan.rounds
         && TrackTitleRepo::get(&transaction, request.event_id, &assignment.track_code)?.is_none()
     {
-        Some(Effect::Dm {
+        let final_request = Effect::Dm {
             user_id: request.user_id.to_string(),
             content: format!(
                 "Your edit closes track {}. Name the final track with /swap title in the server.",
                 assignment.track_code
             ),
-        })
+        };
+        let fallback = title_fallback_holder(
+            &transaction,
+            request.event_id,
+            &assignment.track_code,
+            assignment.round,
+        )?
+        .map(|user_id| Effect::Dm {
+            user_id,
+            content: format!(
+                "Track {} has no title yet. If the final holder does not name it, name it with /swap title title:<name> track:{}.",
+                assignment.track_code, assignment.track_code
+            ),
+        });
+        (Some(final_request), fallback)
     } else {
-        None
+        (None, None)
     };
     if let Some(effect) = &title_request {
+        enqueue_effect(&transaction, request.event_id, effect, now)?;
+    }
+    if let Some(effect) = &fallback_request {
         enqueue_effect(&transaction, request.event_id, effect, now)?;
     }
     commit(transaction)?;
@@ -1472,12 +1489,36 @@ fn submit_inner(
     if let Some(effect) = title_request {
         effects.push(effect);
     }
+    if let Some(effect) = fallback_request {
+        effects.push(effect);
+    }
     Ok(SubmitOutcome {
         version,
         sha256: delivery_blob.sha256,
         original_sha256: original_blob.sha256,
         effects,
     })
+}
+
+/// Return the participant who submitted the same track in the round before
+/// the final round. That person can name the track when the final holder
+/// does not.
+fn title_fallback_holder(
+    conn: &Connection,
+    event_id: &str,
+    track_code: &str,
+    final_round: u32,
+) -> Result<Option<String>, EngineError> {
+    let assignments = AssignmentRepo::list_for_event(conn, event_id)?;
+    Ok(assignments
+        .into_iter()
+        .filter(|assignment| {
+            assignment.track_code == track_code
+                && assignment.status == AssignmentStatus::Submitted
+                && assignment.round < final_round
+        })
+        .max_by_key(|assignment| assignment.round)
+        .map(|assignment| assignment.participant_id))
 }
 
 pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutcome, EngineError> {
@@ -1986,24 +2027,38 @@ pub fn set_track_title(
     open_event_in(&transaction, event_id, "title")?;
     let track = TrackRepo::get(&transaction, event_id, track_code)?
         .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
+    let mut fallback = false;
+    let mut final_holder: Option<String> = None;
     if actor_id != "host" {
         if TrackTitleRepo::get(&transaction, event_id, track_code)?.is_some() {
             return Err(EngineError::TitleAlreadySet);
         }
         let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
-        let latest = assignments
+        let final_round = PlanRepo::latest(&transaction, event_id)?
+            .map(|plan| plan.rounds.saturating_sub(1))
+            .ok_or(EngineError::NoPlan)?;
+        final_holder = assignments
             .iter()
             .filter(|assignment| {
                 assignment.track_code == track_code
                     && assignment.status == AssignmentStatus::Submitted
+                    && assignment.round == final_round
             })
-            .max_by_key(|assignment| assignment.round);
-        let final_round =
-            PlanRepo::latest(&transaction, event_id)?.map(|plan| plan.rounds.saturating_sub(1));
-        if latest.map(|assignment| assignment.participant_id.as_str()) != Some(actor_id)
-            || latest.map(|assignment| assignment.round) != final_round
-        {
-            return Err(EngineError::NotTitleHolder);
+            .max_by_key(|assignment| assignment.round)
+            .map(|assignment| assignment.participant_id.clone());
+        let previous = assignments
+            .iter()
+            .filter(|assignment| {
+                assignment.track_code == track_code
+                    && assignment.status == AssignmentStatus::Submitted
+                    && assignment.round < final_round
+            })
+            .max_by_key(|assignment| assignment.round)
+            .map(|assignment| assignment.participant_id.as_str());
+        match final_holder.as_deref() {
+            Some(holder) if holder == actor_id => {}
+            Some(_) if previous == Some(actor_id) => fallback = true,
+            _ => return Err(EngineError::NotTitleHolder),
         }
     }
     let record = TrackTitleRecord {
@@ -2014,14 +2069,34 @@ pub fn set_track_title(
         created_at: now,
     };
     TrackTitleRepo::upsert(&transaction, &record)?;
+    let (action, detail) = if fallback {
+        (
+            "Track title fallback",
+            serde_json::json!({
+                "trackCode": track_code,
+                "actor": actor_id,
+                "finalHolder": final_holder,
+                "fallback": true
+            }),
+        )
+    } else {
+        (
+            "Track title set",
+            serde_json::json!({
+                "trackCode": track_code,
+                "actor": actor_id,
+                "fallback": false
+            }),
+        )
+    };
     AuditRepo::insert(
         &transaction,
         event_id,
         now,
         if actor_id == "host" { "Host" } else { actor_id },
-        "Track title set",
+        action,
         None,
-        &serde_json::json!({ "trackCode": track_code, "actor": actor_id }).to_string(),
+        &detail.to_string(),
     )?;
     commit(transaction)?;
     Ok(record)
@@ -2034,6 +2109,22 @@ pub fn set_track_title_for_user(
     title: &str,
     now: i64,
 ) -> Result<TrackTitleRecord, EngineError> {
+    set_track_title_for_user_on_track(db, event_id, user_id, None, title, now)
+}
+
+/// Set a title for a track from an earlier round. The optional track code
+/// lets a previous submitter name the track without a new plan version.
+pub fn set_track_title_for_user_on_track(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+    track_code: Option<&str>,
+    title: &str,
+    now: i64,
+) -> Result<TrackTitleRecord, EngineError> {
+    if let Some(track_code) = track_code {
+        return set_track_title(db, event_id, track_code, title, user_id, now);
+    }
     let assignment = AssignmentRepo::latest_for_participant(db.conn(), event_id, user_id)?
         .filter(|assignment| assignment.status == AssignmentStatus::Submitted)
         .ok_or(EngineError::NotTitleHolder)?;

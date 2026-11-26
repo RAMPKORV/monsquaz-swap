@@ -28,8 +28,9 @@ pub use engine::{
     create_event, decide_deadline, decide_extension, edit_plan_assignment, event_status,
     expire_offer, generate_schedule, join_with_seed, lock_roster, open_decisions, open_round,
     plan_edit_candidates, redact_track_comment, request_extension, reveal, reveal_package,
-    reveal_with_channel, set_track_title, set_track_title_for_user, signup, skip, start_event,
-    start_event_with_channel, submit, submit_attachment, tick_deadlines,
+    reveal_with_channel, set_track_title, set_track_title_for_user,
+    set_track_title_for_user_on_track, signup, skip, start_event, start_event_with_channel, submit,
+    submit_attachment, tick_deadlines,
 };
 pub use ids::{assignment_id, plan_commitment, track_code};
 pub use inbound::InboundService;

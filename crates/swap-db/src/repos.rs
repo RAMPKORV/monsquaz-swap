@@ -1562,3 +1562,28 @@ impl ProcessedAttachmentRepo {
         Ok(count > 0)
     }
 }
+
+#[cfg(test)]
+mod dm_cursor_tests {
+    use super::*;
+    use crate::db::Db;
+
+    #[test]
+    fn an_offer_seeds_the_inbound_cursor_and_later_sends_do_not() {
+        let db = Db::open_in_memory().unwrap();
+        DmCursorRepo::set_sent(db.conn(), "u1", "dm", "100", true, 10).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u1").unwrap().unwrap();
+        assert_eq!(cursor.last_seen_message_id.as_deref(), Some("100"));
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("100"));
+
+        DmCursorRepo::set_sent(db.conn(), "u1", "dm", "200", false, 20).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u1").unwrap().unwrap();
+        assert_eq!(cursor.last_seen_message_id.as_deref(), Some("100"));
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("200"));
+
+        DmCursorRepo::set_sent(db.conn(), "u2", "dm", "300", false, 30).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u2").unwrap().unwrap();
+        assert!(cursor.last_seen_message_id.is_none());
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("300"));
+    }
+}

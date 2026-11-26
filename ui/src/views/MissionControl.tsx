@@ -304,10 +304,10 @@ export function MissionControlView({
             {data.bot.status === "Online" ? (
               <Button
                 variant="secondary"
-                icon="refresh"
-                onClick={() => onAction("Test connection")}
+                icon="settings"
+                onClick={() => onAction("Connection settings")}
               >
-                Test connection
+                Connection settings
               </Button>
             ) : null}
           </section>

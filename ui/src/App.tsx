@@ -271,7 +271,12 @@ export default function App() {
       setView("people");
       return;
     }
-    if (label === "Open settings" || label === "Test connection" || label === "Reconnect now") {
+    if (
+      label === "Open settings" ||
+      label === "Connection settings" ||
+      label === "Test connection" ||
+      label === "Reconnect now"
+    ) {
       setView("settings");
       return;
     }

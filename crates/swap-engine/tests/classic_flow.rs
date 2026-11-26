@@ -8,7 +8,7 @@ use swap_engine::{
     PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
     dispatch_pending, event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
     open_round, redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
-    signup, skip, start_event, submit,
+    set_track_title_for_user, signup, skip, start_event, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -1667,7 +1667,7 @@ fn the_reveal_package_carries_titles_comments_and_credits() {
         EVENT,
         &track_code,
         "  Midnight Draft  ",
-        &user_id,
+        "host",
         T6,
     )
     .unwrap();
@@ -1823,6 +1823,12 @@ fn the_final_holder_is_asked_for_a_title_once() {
     assert!(first.effects.iter().any(|effect| {
         matches!(effect, Effect::Dm { content, .. } if content.contains(&track_code))
     }));
+    assert!(set_track_title_for_user(&fixture.db, EVENT, &user_id, "Final Name", T7).is_ok());
+    let early_user = &first_round[0].0;
+    assert!(matches!(
+        set_track_title_for_user(&fixture.db, EVENT, early_user, "Too Early", T7),
+        Err(EngineError::NotTitleHolder)
+    ));
 
     let second_bytes = seed_bytes(201);
     let second = submit(

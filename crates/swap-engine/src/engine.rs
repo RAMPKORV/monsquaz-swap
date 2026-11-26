@@ -1601,7 +1601,11 @@ pub fn set_track_title(
                     && assignment.status == AssignmentStatus::Submitted
             })
             .max_by_key(|assignment| assignment.round);
-        if latest.map(|assignment| assignment.participant_id.as_str()) != Some(actor_id) {
+        let final_round =
+            PlanRepo::latest(&transaction, event_id)?.map(|plan| plan.rounds.saturating_sub(1));
+        if latest.map(|assignment| assignment.participant_id.as_str()) != Some(actor_id)
+            || latest.map(|assignment| assignment.round) != final_round
+        {
             return Err(EngineError::NotTitleHolder);
         }
     }
@@ -1617,7 +1621,7 @@ pub fn set_track_title(
         &transaction,
         event_id,
         now,
-        "Host",
+        if actor_id == "host" { "Host" } else { actor_id },
         "Track title set",
         None,
         &serde_json::json!({ "trackCode": track_code, "actor": actor_id }).to_string(),
@@ -1636,6 +1640,12 @@ pub fn set_track_title_for_user(
     let assignment = AssignmentRepo::latest_for_participant(db.conn(), event_id, user_id)?
         .filter(|assignment| assignment.status == AssignmentStatus::Submitted)
         .ok_or(EngineError::NotTitleHolder)?;
+    let final_round = PlanRepo::latest(db.conn(), event_id)?
+        .map(|plan| plan.rounds.saturating_sub(1))
+        .ok_or(EngineError::NoPlan)?;
+    if assignment.round != final_round {
+        return Err(EngineError::NotTitleHolder);
+    }
     set_track_title(db, event_id, &assignment.track_code, title, user_id, now)
 }
 

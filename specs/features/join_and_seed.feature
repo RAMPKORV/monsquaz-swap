@@ -36,19 +36,52 @@ Feature: Joining and seeding
     And the app records optional away dates
     And the app records notification preferences
 
+  Scenario: The host opens Round 1 with the pack
+    Given an event draft with a required host pack
+    When the host opens Round 1 and sets the seed deadline
+    Then the app enters the seed round
+    And the bot sends the pack to every pre-signup
+    And the bot posts the seed instructions in the channel
+    And a seed sent before the deadline becomes one track for that participant
+
   Scenario: The host locks the roster
     Given an event with 8 seeded participants and 2 unseeded signups
-    When the host locks the roster
+    When the host closes Round 1 and locks the roster
     Then the 8 seeded participants become active
     And the 2 unseeded signups become fill-ins
-    And no new seeds are accepted
+    And Round 1 is closed
+    And no new seeds are accepted until the host reopens Round 1
 
-  Scenario: Late seeds are closed after Round 1 by default
-    Given an event whose Round 1 has started
-    When a new guild member tries to join by submitting a seed
-    Then the bot refuses the seed
-    And the bot offers the fill-in path
-    And the host can open a late-seed window
+  Scenario: The host cannot lock fewer than two seeds
+    Given an event with one seeded participant
+    When the host closes Round 1
+    Then the app refuses the close
+    And Round 1 stays open
+    And the host can invite another seed or cancel the event
+
+  Scenario: A late seed waits for host approval
+    Given an event whose seed deadline has passed
+    And Round 1 is still open
+    When a new guild member submits a seed
+    Then the app holds the seed
+    And the bot tells the member that the host must approve it
+    And the host can accept or decline the seed before the host closes Round 1
+
+  Scenario: A second seed replaces the first before the deadline
+    Given a seeded participant
+    And an open Round 1 before the seed deadline
+    When the participant submits another seed
+    Then the app keeps the same track code and owner
+    And the app replaces version 1
+    And the app keeps the old file in the host vault
+    And the app records the replacement in the audit log
+
+  Scenario: A participant replaces a seed after the deadline
+    Given a seeded participant
+    And an open Round 1 after the seed deadline
+    When the participant submits another seed
+    Then the app refuses the replacement
+    And the bot explains that the seed deadline has passed
 
   Scenario: A participant leaves while holding a track
     Given a participant who claimed a track

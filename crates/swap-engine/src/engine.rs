@@ -4,21 +4,27 @@ use chrono::{TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use swap_core::{
     AssignmentStatus, AsyncCandidate, EventState, Membership, ParticipantId, Readiness, Role,
-    Schedule, StateError, TrackCode, TrackSpec, TrackState, album_order, choose_async_offers,
+    RoundKind, RoundStatus, Schedule, StateError, TrackCode, TrackSpec, TrackState, album_order,
+    choose_async_offers,
 };
 use swap_db::{
     AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, DbError, DeadlineRepo,
-    EventRecord, EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo, MetaRepo,
+    EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo, HostDecisionRecord,
+    HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord, PackRepo,
     ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    ProcessedAttachmentRepo, SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord,
-    TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction, TransactionBehavior,
+    ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
+    TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction,
+    TransactionBehavior,
 };
 use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
 use thiserror::Error;
 
 use crate::delivery::{DeliveryError, PendingDelivery, enqueue_effect, enqueue_pending};
 use crate::effects::Effect;
-use crate::ids::{assignment_id, plan_commitment, track_code};
+use crate::ids::{
+    CommitmentInputs, assignment_id, plan_commitment, plan_commitment_v2, random_hex_128,
+    track_code, track_code_from_secret,
+};
 use crate::prepare::{DeliveryPreparer, PreparedBytes};
 use crate::settings::{EventSettings, Mode, SettingsError};
 
@@ -70,10 +76,30 @@ pub enum EngineError {
     NoParticipants,
     #[error("the event has no seeded tracks")]
     NoSeededTracks,
+    #[error("the seed round is not open")]
+    SeedRoundNotOpen,
+    #[error("the seed round is closed")]
+    SeedRoundClosed,
+    #[error("the event needs at least {minimum} seeds; it has {seeds}")]
+    SeedMinimum { seeds: usize, minimum: u32 },
+    #[error("the host did not upload the required pack")]
+    PackRequired,
+    #[error("the pack is locked and cannot be replaced")]
+    PackLocked,
+    #[error("round {round} is not open")]
+    RoundNotOpen { round: u32 },
+    #[error("round {round} has no deadline")]
+    RoundDeadlineMissing { round: u32 },
+    #[error("the late seed was not found: {0}")]
+    LateSeedNotFound(String),
+    #[error("the late seed is not pending")]
+    LateSeedNotPending,
     #[error("the event needs at least two active participants to schedule a round")]
     NoRounds,
     #[error("the event has no committed plan")]
     NoPlan,
+    #[error("the plan commitment does not match the stored plan")]
+    CommitmentMismatch,
     #[error("round {round} is outside the plan (0..{rounds})")]
     RoundOutOfRange { round: u32, rounds: u32 },
     #[error("round {round} still has active assignments")]
@@ -96,6 +122,8 @@ pub enum EngineError {
     WrongAssignmentState(AssignmentStatus),
     #[error("the offer has expired")]
     OfferExpired,
+    #[error("the edit deadline has passed")]
+    DeadlinePassed,
     #[error("the offer is not due yet")]
     OfferNotDue,
     #[error("the participant has no active assignment")]
@@ -193,6 +221,9 @@ pub struct JoinOutcome {
     pub sha256: String,
     pub original_sha256: String,
     pub effects: Vec<Effect>,
+    pub held: bool,
+    pub late_seed_id: Option<String>,
+    pub replaced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,6 +421,8 @@ pub struct EventStatus {
     pub event_id: String,
     pub state: EventState,
     pub rounds: u32,
+    pub total_rounds: u32,
+    pub seed_round_open: bool,
     pub committed: bool,
     pub active_assignments: usize,
     pub submitted_assignments: usize,
@@ -401,6 +434,20 @@ pub fn create_event(
     name: &str,
     seed: u64,
     settings: &EventSettings,
+    now: i64,
+) -> Result<(), EngineError> {
+    create_event_with_secret(db, id, name, seed, settings, None, now)
+}
+
+/// Create an event with a caller-supplied 128-bit secret. Tests use a fixed
+/// secret to keep a plan reproducible. Production uses a random secret.
+pub fn create_event_with_secret(
+    db: &Db,
+    id: &str,
+    name: &str,
+    seed: u64,
+    settings: &EventSettings,
+    secret_hex: Option<&str>,
     now: i64,
 ) -> Result<(), EngineError> {
     if !is_safe_id(id) {
@@ -418,13 +465,15 @@ pub fn create_event(
         &EventRecord {
             id: id.to_string(),
             name: name.trim().to_string(),
-            state: EventState::Signup,
+            state: EventState::Draft,
             seed,
             settings_json: serde_json::to_string(settings)?,
             created_at: now,
             updated_at: now,
         },
     )?;
+    EventRepo::set_secret_hex(db.conn(), id, secret_hex.unwrap_or(&random_hex_128()))?;
+    EventRepo::set_round_model(db.conn(), id, 1)?;
     Ok(())
 }
 
@@ -438,17 +487,11 @@ pub fn signup(
     now: i64,
 ) -> Result<(), EngineError> {
     let event = load_event(db, event_id)?;
-    require_state(&event, EventState::Signup, "signup", "signup")?;
+    require_seed_state(&event, "signup")?;
     let transaction = begin(db)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
-    if current.state != EventState::Signup {
-        return Err(EngineError::WrongEventState {
-            action: "signup",
-            state: current.state,
-            expected: "signup",
-        });
-    }
+    require_seed_state(&current, "signup")?;
     if let Some(mut existing) = ParticipantRepo::get(&transaction, event_id, user_id)? {
         match existing.membership {
             Membership::SignedUp => {
@@ -483,6 +526,294 @@ pub fn signup(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackOutcome {
+    pub id: String,
+    pub sha256: String,
+    pub size: u64,
+}
+
+/// Upload or replace the host pack before Round 1 opens. The bytes stay in the
+/// local content store. The UI receives the opaque pack id and the hash, never
+/// the bytes or an absolute path.
+pub fn upload_pack(
+    db: &Db,
+    store: &BlobStore,
+    event_id: &str,
+    filename: &str,
+    bytes: &[u8],
+    now: i64,
+) -> Result<PackOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Draft, "pack upload", "draft")?;
+    if bytes.is_empty() {
+        return Err(EngineError::PackRequired);
+    }
+    if bytes.len() as u64 > swap_files::DEFAULT_MAX_SIZE {
+        return Err(EngineError::File(FileError::TooLarge {
+            size: bytes.len() as u64,
+            max: swap_files::DEFAULT_MAX_SIZE,
+        }));
+    }
+    if PackRepo::get_for_event(db.conn(), event_id)?.is_some_and(|pack| pack.locked_at.is_some()) {
+        return Err(EngineError::PackLocked);
+    }
+    let blob = store.store(bytes)?;
+    let id = format!("p{}", &blob.sha256[..16]);
+    let transaction = begin(db)?;
+    PackRepo::delete_for_event(&transaction, event_id)?;
+    PackRepo::insert(
+        &transaction,
+        &PackRecord {
+            id: id.clone(),
+            event_id: event_id.to_string(),
+            filename: filename.to_string(),
+            sha256: blob.sha256.clone(),
+            size: blob.size,
+            storage_path: blob.relative_path.clone(),
+            created_at: now,
+            locked_at: None,
+        },
+    )?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Pack uploaded",
+        Some(&id),
+        &serde_json::json!({ "filename": filename, "sha256": blob.sha256, "size": blob.size })
+            .to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(PackOutcome {
+        id,
+        sha256: blob.sha256,
+        size: blob.size,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeedOpenOutcome {
+    pub deadline_at: i64,
+    pub pack_id: Option<String>,
+    pub effects: Vec<Effect>,
+}
+
+/// Open Round 1, the seed round. The host must upload the required pack and
+/// set the seed deadline before this action. The event moves from Draft to
+/// Signup.
+pub fn open_seed_round(
+    db: &Db,
+    event_id: &str,
+    deadline_at: i64,
+    channel_id: Option<&str>,
+    now: i64,
+) -> Result<SeedOpenOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Draft, "seed round open", "draft")?;
+    let settings = parse_settings(&event)?;
+    if deadline_at <= now {
+        return Err(EngineError::SeedRoundNotOpen);
+    }
+    let pack = PackRepo::get_for_event(db.conn(), event_id)?;
+    if settings.pack_required.unwrap_or(true) && pack.is_none() {
+        return Err(EngineError::PackRequired);
+    }
+
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::Draft {
+        return Err(EngineError::WrongEventState {
+            action: "seed round open",
+            state: current.state,
+            expected: "draft",
+        });
+    }
+    if let Some(existing) = RoundRepo::get(&transaction, event_id, 1)?
+        && existing.status == RoundStatus::Open
+    {
+        return Err(EngineError::SeedRoundNotOpen);
+    }
+    RoundRepo::insert(
+        &transaction,
+        &EventRoundRecord {
+            event_id: event_id.to_string(),
+            round_no: 1,
+            kind: RoundKind::Seed,
+            status: RoundStatus::Open,
+            opened_at: Some(now),
+            closed_at: None,
+            deadline_at: Some(deadline_at),
+            original_deadline_at: Some(deadline_at),
+            final_round: false,
+            deadline_moves: 0,
+        },
+    )?;
+    if let Some(pack) = &pack {
+        PackRepo::lock(&transaction, event_id, now)?;
+        let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
+        for participant in participants.iter().filter(|participant| {
+            matches!(
+                participant.membership,
+                Membership::SignedUp | Membership::Seeded
+            )
+        }) {
+            enqueue_pending(
+                &transaction,
+                event_id,
+                &PendingDelivery::Pack {
+                    user_id: participant.user_id.clone(),
+                    filename: pack.filename.clone(),
+                    sha256: pack.sha256.clone(),
+                    caption: format!(
+                        "Monsquaz Swap pack {}. Round 1 seed deadline: {deadline_at} UTC.",
+                        pack.id
+                    ),
+                },
+                now,
+            )?;
+        }
+    }
+    EventRepo::set_state(&transaction, event_id, EventState::Signup, now)?;
+    EventRepo::set_seed_round_closed_at(&transaction, event_id, None)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Seed round opened",
+        None,
+        &serde_json::json!({
+            "round": 1,
+            "deadlineAt": deadline_at,
+            "packId": pack.as_ref().map(|pack| pack.id.clone()),
+        })
+        .to_string(),
+    )?;
+    let mut effects = Vec::new();
+    if let Some(channel_id) = channel_id.filter(|channel| !channel.trim().is_empty()) {
+        let pack_line = pack
+            .as_ref()
+            .map(|pack| format!(" Pack: {}.", pack.id))
+            .unwrap_or_default();
+        effects.push(Effect::Channel {
+            channel_id: channel_id.to_string(),
+            content: format!(
+                "Round 1 is open. Create one track from the host pack and send it to the bot before {deadline_at} UTC.{pack_line}"
+            ),
+        });
+        for effect in &effects {
+            enqueue_effect(&transaction, event_id, effect, now)?;
+        }
+    }
+    commit(transaction)?;
+    Ok(SeedOpenOutcome {
+        deadline_at,
+        pack_id: pack.map(|pack| pack.id),
+        effects,
+    })
+}
+
+/// Extend the seed deadline while Round 1 is open.
+pub fn extend_seed_deadline(
+    db: &Db,
+    event_id: &str,
+    deadline_at: i64,
+    now: i64,
+) -> Result<i64, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Signup, "seed deadline move", "signup")?;
+    if deadline_at <= now {
+        return Err(EngineError::SeedRoundNotOpen);
+    }
+    let transaction = begin(db)?;
+    let round = RoundRepo::get(&transaction, event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+    if round.status != RoundStatus::Open || round.kind != RoundKind::Seed {
+        return Err(EngineError::SeedRoundClosed);
+    }
+    RoundRepo::set_deadline(&transaction, event_id, 1, deadline_at)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Seed deadline moved",
+        None,
+        &serde_json::json!({ "deadlineAt": deadline_at }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(deadline_at)
+}
+
+/// Reopen Round 1 before the schedule starts. Draft plans are void. Existing
+/// seeds stay. The host sets a new deadline.
+pub fn reopen_seed_round(
+    db: &Db,
+    event_id: &str,
+    deadline_at: i64,
+    now: i64,
+) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "seed round reopen",
+        "schedule review",
+    )?;
+    if deadline_at <= now {
+        return Err(EngineError::SeedRoundNotOpen);
+    }
+    if !AssignmentRepo::list_active(db.conn(), event_id)?.is_empty() {
+        return Err(EngineError::RoundNotResolved { round: 1 });
+    }
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::ScheduleReview {
+        return Err(EngineError::WrongEventState {
+            action: "seed round reopen",
+            state: current.state,
+            expected: "schedule review",
+        });
+    }
+    if let Some(plan) = PlanRepo::latest(&transaction, event_id)? {
+        PlanRepo::void(&transaction, event_id, plan.version, now)?;
+    }
+    let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
+    for mut participant in participants {
+        if participant.membership != Membership::Active {
+            continue;
+        }
+        participant.membership = if participant.role == Role::FillIn {
+            Membership::SignedUp
+        } else {
+            Membership::Seeded
+        };
+        participant.updated_at = now;
+        ParticipantRepo::upsert(&transaction, &participant)?;
+    }
+    let round = RoundRepo::get(&transaction, event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+    if round.status == RoundStatus::Closed {
+        RoundRepo::set_status(&transaction, event_id, 1, RoundStatus::Open, now)?;
+    }
+    RoundRepo::set_deadline(&transaction, event_id, 1, deadline_at)?;
+    EventRepo::set_state(&transaction, event_id, EventState::Signup, now)?;
+    EventRepo::set_seed_round_closed_at(&transaction, event_id, None)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Seed round reopened",
+        None,
+        &serde_json::json!({ "deadlineAt": deadline_at }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(())
+}
+
 pub fn join_with_seed(
     db: &Db,
     store: &BlobStore,
@@ -496,20 +827,30 @@ pub fn join_with_seed(
     let validated = settings
         .file_policy()
         .validate(request.filename, request.bytes)?;
+    let round =
+        RoundRepo::get(db.conn(), request.event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+    if round.status != RoundStatus::Open {
+        return Err(EngineError::SeedRoundClosed);
+    }
+    let deadline_at = round.deadline_at.ok_or(EngineError::SeedRoundNotOpen)?;
+    let late = now > deadline_at;
+    let secret_hex = EventRepo::secret_hex(db.conn(), request.event_id)?;
 
-    if let Some(existing) = ParticipantRepo::get(db.conn(), request.event_id, request.user_id)? {
-        match existing.membership {
-            Membership::Seeded | Membership::Active => return Err(EngineError::AlreadySeeded),
-            Membership::Left | Membership::Removed => return Err(EngineError::ParticipantLeft),
-            Membership::SignedUp => {}
-        }
+    let existing = ParticipantRepo::get(db.conn(), request.event_id, request.user_id)?;
+    if let Some(existing) = &existing
+        && matches!(existing.membership, Membership::Left | Membership::Removed)
+    {
+        return Err(EngineError::ParticipantLeft);
     }
 
     let tracks = TrackRepo::list_for_event(db.conn(), request.event_id)?;
-    if tracks.iter().any(|track| track.owner_id == request.user_id) {
-        return Err(EngineError::AlreadySeeded);
+    let owned = tracks
+        .iter()
+        .find(|track| track.owner_id == request.user_id)
+        .cloned();
+    if owned.is_some() && late {
+        return Err(EngineError::SeedRoundClosed);
     }
-    let code = unique_track_code(&tracks, event.seed);
 
     let prepared = preparer.prepare(request.bytes, validated.kind, &validated.extension)?;
     let original_blob = store.store(request.bytes)?;
@@ -518,6 +859,161 @@ pub fn join_with_seed(
     } else {
         store.store(&prepared.delivery)?
     };
+
+    if let Some(track) = owned {
+        let file = file_record(
+            request.event_id,
+            &track.code,
+            1,
+            request.user_id,
+            &validated,
+            StoredVersion {
+                delivery: &delivery_blob,
+                original: &original_blob,
+                prepared: &prepared,
+            },
+            now,
+        );
+        let receipt = Effect::Dm {
+            user_id: request.user_id.to_string(),
+            content: format!(
+                "Seed replaced for track {}. SHA-256: {}. Size: {} bytes.",
+                track.code, original_blob.sha256, original_blob.size
+            ),
+        };
+        let transaction = begin(db)?;
+        let current = EventRepo::get(&transaction, request.event_id)?
+            .ok_or_else(|| EngineError::EventNotFound(request.event_id.to_string()))?;
+        if current.state != EventState::Signup {
+            return Err(EngineError::WrongEventState {
+                action: "seed replacement",
+                state: current.state,
+                expected: "signup",
+            });
+        }
+        let current_round = RoundRepo::get(&transaction, request.event_id, 1)?
+            .ok_or(EngineError::SeedRoundNotOpen)?;
+        if current_round.status != RoundStatus::Open
+            || current_round
+                .deadline_at
+                .is_some_and(|deadline| now > deadline)
+        {
+            return Err(EngineError::SeedRoundClosed);
+        }
+        if !FileRepo::replace_v1(&transaction, request.event_id, &track.code, &file)? {
+            return Err(EngineError::NoFile(track.code.clone()));
+        }
+        AuditRepo::insert(
+            &transaction,
+            request.event_id,
+            now,
+            "Participant",
+            "Seed replaced",
+            Some(&track.code),
+            &serde_json::json!({ "userId": request.user_id, "sha256": original_blob.sha256 })
+                .to_string(),
+        )?;
+        enqueue_effect(&transaction, request.event_id, &receipt, now)?;
+        commit(transaction)?;
+        return Ok(JoinOutcome {
+            track_code: track.code,
+            sha256: delivery_blob.sha256,
+            original_sha256: original_blob.sha256,
+            effects: vec![receipt],
+            held: false,
+            late_seed_id: None,
+            replaced: true,
+        });
+    }
+
+    let code = unique_track_code(&tracks, event.seed, secret_hex.as_deref());
+    let file = file_record(
+        request.event_id,
+        &code,
+        1,
+        request.user_id,
+        &validated,
+        StoredVersion {
+            delivery: &delivery_blob,
+            original: &original_blob,
+            prepared: &prepared,
+        },
+        now,
+    );
+
+    if late {
+        let late_id = format!(
+            "l{}",
+            &swap_files::sha256_hex(format!("msw-late-seed:{now}:{}", request.user_id).as_bytes())
+                [..16]
+        );
+        let receipt = Effect::Dm {
+            user_id: request.user_id.to_string(),
+            content: format!(
+                "Your seed for track {code} arrived after the deadline. The host must approve it. You will get a message when the host decides."
+            ),
+        };
+        let transaction = begin(db)?;
+        let current = EventRepo::get(&transaction, request.event_id)?
+            .ok_or_else(|| EngineError::EventNotFound(request.event_id.to_string()))?;
+        if current.state != EventState::Signup {
+            return Err(EngineError::WrongEventState {
+                action: "late seed",
+                state: current.state,
+                expected: "signup",
+            });
+        }
+        let current_round = RoundRepo::get(&transaction, request.event_id, 1)?
+            .ok_or(EngineError::SeedRoundNotOpen)?;
+        if current_round.status != RoundStatus::Open {
+            return Err(EngineError::SeedRoundClosed);
+        }
+        LateSeedRepo::insert(
+            &transaction,
+            &LateSeedRecord {
+                id: late_id.clone(),
+                event_id: request.event_id.to_string(),
+                user_id: request.user_id.to_string(),
+                display_name: request.display_name.to_string(),
+                timezone: request.timezone.to_string(),
+                max_handoffs: request.max_handoffs,
+                track_code: code.clone(),
+                filename: request.filename.to_string(),
+                sha256: delivery_blob.sha256.clone(),
+                original_sha256: original_blob.sha256.clone(),
+                size: delivery_blob.size,
+                extension: validated.extension.clone(),
+                storage_path: delivery_blob.relative_path.clone(),
+                original_storage_path: Some(original_blob.relative_path.clone()),
+                audio_verified: prepared.audio_verified,
+                scrub_summary_json: prepared.scrub_summary_json.clone(),
+                status: "pending".to_string(),
+                created_at: now,
+                decided_at: None,
+            },
+        )?;
+        AuditRepo::insert(
+            &transaction,
+            request.event_id,
+            now,
+            "Participant",
+            "Late seed held",
+            Some(&code),
+            &serde_json::json!({ "userId": request.user_id, "lateSeedId": late_id }).to_string(),
+        )?;
+        enqueue_effect(&transaction, request.event_id, &receipt, now)?;
+        commit(transaction)?;
+        return Ok(JoinOutcome {
+            track_code: code,
+            sha256: delivery_blob.sha256,
+            original_sha256: original_blob.sha256,
+            effects: vec![receipt],
+            held: true,
+            late_seed_id: Some(late_id),
+            replaced: false,
+        });
+    }
+
     let participant = ParticipantRecord {
         event_id: request.event_id.to_string(),
         user_id: request.user_id.to_string(),
@@ -537,20 +1033,6 @@ pub fn join_with_seed(
         state: TrackState::Seeded,
         created_at: now,
     };
-    let file = file_record(
-        request.event_id,
-        &code,
-        1,
-        request.user_id,
-        &validated,
-        StoredVersion {
-            delivery: &delivery_blob,
-            original: &original_blob,
-            prepared: &prepared,
-        },
-        now,
-    );
-
     let receipt = Effect::Dm {
         user_id: request.user_id.to_string(),
         content: format!(
@@ -568,18 +1050,29 @@ pub fn join_with_seed(
             expected: "signup",
         });
     }
+    let current_round =
+        RoundRepo::get(&transaction, request.event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+    if current_round.status != RoundStatus::Open
+        || current_round
+            .deadline_at
+            .is_some_and(|deadline| now > deadline)
+    {
+        return Err(EngineError::SeedRoundClosed);
+    }
     ParticipantRepo::upsert(&transaction, &participant)?;
     TrackRepo::insert(&transaction, &track)?;
     FileRepo::insert(&transaction, &file)?;
     enqueue_effect(&transaction, request.event_id, &receipt, now)?;
     commit(transaction)?;
 
-    let effects = vec![receipt];
     Ok(JoinOutcome {
         track_code: code,
         sha256: delivery_blob.sha256,
         original_sha256: original_blob.sha256,
-        effects,
+        effects: vec![receipt],
+        held: false,
+        late_seed_id: None,
+        replaced: false,
     })
 }
 
@@ -633,10 +1126,169 @@ pub fn lock_roster(db: &Db, event_id: &str, now: i64) -> Result<LockOutcome, Eng
     if active == 0 {
         return Err(EngineError::NoSeededTracks);
     }
-
+    let settings = parse_settings(&current)?;
+    let minimum = settings.seed_min.max(2);
+    if (active as u32) < minimum {
+        return Err(EngineError::SeedMinimum {
+            seeds: active,
+            minimum,
+        });
+    }
+    if let Some(round) = RoundRepo::get(&transaction, event_id, 1)?
+        && round.status == RoundStatus::Open
+    {
+        RoundRepo::set_status(&transaction, event_id, 1, RoundStatus::Closed, now)?;
+    }
+    EventRepo::set_seed_round_closed_at(&transaction, event_id, Some(now))?;
     EventRepo::set_state(&transaction, event_id, EventState::ScheduleReview, now)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Seed round closed and roster locked",
+        None,
+        &serde_json::json!({ "active": active, "fillIns": fill_ins }).to_string(),
+    )?;
     commit(transaction)?;
     Ok(LockOutcome { active, fill_ins })
+}
+
+pub fn pending_late_seeds(db: &Db, event_id: &str) -> Result<Vec<LateSeedRecord>, EngineError> {
+    Ok(LateSeedRepo::list_pending(db.conn(), event_id)?)
+}
+
+/// Accept a held seed while Round 1 is open. The seed becomes a normal v1 seed.
+pub fn accept_late_seed(
+    db: &Db,
+    event_id: &str,
+    late_seed_id: &str,
+    now: i64,
+) -> Result<LateSeedRecord, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Signup, "late seed accept", "signup")?;
+    let transaction = begin(db)?;
+    let round = RoundRepo::get(&transaction, event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+    if round.status != RoundStatus::Open {
+        return Err(EngineError::SeedRoundClosed);
+    }
+    let seed = LateSeedRepo::get(&transaction, event_id, late_seed_id)?
+        .ok_or_else(|| EngineError::LateSeedNotFound(late_seed_id.to_string()))?;
+    if seed.status != "pending" {
+        return Err(EngineError::LateSeedNotPending);
+    }
+    let tracks = TrackRepo::list_for_event(&transaction, event_id)?;
+    if tracks.iter().any(|track| track.owner_id == seed.user_id)
+        || tracks.iter().any(|track| track.code == seed.track_code)
+    {
+        return Err(EngineError::AlreadySeeded);
+    }
+    ParticipantRepo::upsert(
+        &transaction,
+        &ParticipantRecord {
+            event_id: event_id.to_string(),
+            user_id: seed.user_id.clone(),
+            display_name: seed.display_name.clone(),
+            role: Role::Participant,
+            membership: Membership::Seeded,
+            readiness: Readiness::Ready,
+            timezone: seed.timezone.clone(),
+            max_handoffs: seed.max_handoffs,
+            created_at: now,
+            updated_at: now,
+        },
+    )?;
+    TrackRepo::insert(
+        &transaction,
+        &TrackRecord {
+            event_id: event_id.to_string(),
+            code: seed.track_code.clone(),
+            owner_id: seed.user_id.clone(),
+            state: TrackState::Seeded,
+            created_at: now,
+        },
+    )?;
+    FileRepo::insert(
+        &transaction,
+        &FileRecord {
+            id: format!("{event_id}:{}:1", seed.track_code),
+            event_id: event_id.to_string(),
+            track_code: seed.track_code.clone(),
+            version: 1,
+            holder_id: seed.user_id.clone(),
+            sha256: seed.sha256.clone(),
+            size: seed.size,
+            extension: seed.extension.clone(),
+            storage_path: seed.storage_path.clone(),
+            original_sha256: Some(seed.original_sha256.clone()),
+            original_storage_path: seed.original_storage_path.clone(),
+            audio_verified: seed.audio_verified,
+            scrub_summary_json: seed.scrub_summary_json.clone(),
+            created_at: now,
+        },
+    )?;
+    LateSeedRepo::set_status(&transaction, event_id, late_seed_id, "accepted", now)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Late seed accepted",
+        Some(&seed.track_code),
+        &serde_json::json!({ "lateSeedId": late_seed_id, "userId": seed.user_id }).to_string(),
+    )?;
+    enqueue_effect(
+        &transaction,
+        event_id,
+        &Effect::Dm {
+            user_id: seed.user_id.clone(),
+            content: format!(
+                "The host approved your late seed for track {}. The seed deadline was extended for you. Send a new file before the host closes Round 1 if you want to replace it.",
+                seed.track_code
+            ),
+        },
+        now,
+    )?;
+    commit(transaction)?;
+    Ok(seed)
+}
+
+pub fn reject_late_seed(
+    db: &Db,
+    event_id: &str,
+    late_seed_id: &str,
+    reason: &str,
+    now: i64,
+) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Signup, "late seed reject", "signup")?;
+    let transaction = begin(db)?;
+    let seed = LateSeedRepo::get(&transaction, event_id, late_seed_id)?
+        .ok_or_else(|| EngineError::LateSeedNotFound(late_seed_id.to_string()))?;
+    if seed.status != "pending" {
+        return Err(EngineError::LateSeedNotPending);
+    }
+    LateSeedRepo::set_status(&transaction, event_id, late_seed_id, "rejected", now)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Late seed rejected",
+        Some(&seed.track_code),
+        &serde_json::json!({ "lateSeedId": late_seed_id, "reason": reason }).to_string(),
+    )?;
+    enqueue_effect(
+        &transaction,
+        event_id,
+        &Effect::Dm {
+            user_id: seed.user_id.clone(),
+            content: "The host did not accept your late seed. You can join as a fill-in if the host needs one.".to_string(),
+        },
+        now,
+    )?;
+    commit(transaction)?;
+    Ok(())
 }
 
 pub fn generate_schedule(
@@ -817,7 +1469,13 @@ fn generate_schedule_internal(
     };
     let previous = PlanRepo::latest(db.conn(), event_id)?;
     let version = previous.map(|plan| plan.version + 1).unwrap_or(1);
-    let plan_seed = event.seed.wrapping_add(u64::from(version - 1));
+    let round_model = EventRepo::round_model(db.conn(), event_id)?;
+    let secret_hex = EventRepo::secret_hex(db.conn(), event_id)?;
+    let plan_seed = if round_model == 1 {
+        seed_from_secret(secret_hex.as_deref(), version)
+    } else {
+        event.seed.wrapping_add(u64::from(version - 1))
+    };
     let (assignments, fallback) =
         if settings.mode == Mode::Classic && settings.group_count.unwrap_or(1) > 1 {
             let mut grouped: Vec<&ParticipantRecord> = active.clone();
@@ -874,20 +1532,51 @@ fn generate_schedule_internal(
             participant_id: assignment.participant.0.clone(),
         })
         .collect();
+    let pack = PackRepo::get_for_event(db.conn(), event_id)?;
+    let nonce = random_hex_128();
+    let seed_owners: Vec<(String, String)> = tracks
+        .iter()
+        .map(|track| (track.code.clone(), track.owner_id.clone()))
+        .collect();
+    let (commitment, recipe) = if round_model == 1 {
+        let secret = secret_hex.as_deref().unwrap_or("legacy");
+        (
+            plan_commitment_v2(&CommitmentInputs {
+                event_id,
+                plan_version: version,
+                total_rounds: rounds + 1,
+                exchange_rounds: rounds,
+                secret_hex: secret,
+                nonce: &nonce,
+                pack_id: pack.as_ref().map(|pack| pack.id.as_str()),
+                settings_json: &settings_json,
+                seed_owners: &seed_owners,
+                assignments: &planned,
+            }),
+            "v2",
+        )
+    } else {
+        let plan = PlanRecord {
+            event_id: event_id.to_string(),
+            version,
+            seed: plan_seed,
+            rounds,
+            settings_json: settings_json.clone(),
+            commitment: String::new(),
+            committed_at: now,
+            reason: plan_reason.map(str::to_string),
+        };
+        (plan_commitment(&plan, &planned), "v1")
+    };
     let plan = PlanRecord {
         event_id: event_id.to_string(),
         version,
         seed: plan_seed,
         rounds,
         settings_json,
-        commitment: String::new(),
+        commitment: commitment.clone(),
         committed_at: now,
         reason: plan_reason.map(str::to_string),
-    };
-    let commitment = plan_commitment(&plan, &planned);
-    let plan = PlanRecord {
-        commitment: commitment.clone(),
-        ..plan
     };
 
     let transaction = begin(db)?;
@@ -901,6 +1590,19 @@ fn generate_schedule_internal(
         });
     }
     PlanRepo::insert(&transaction, &plan)?;
+    PlanRepo::set_commitment_meta(
+        &transaction,
+        event_id,
+        version,
+        &nonce,
+        pack.as_ref().map(|pack| pack.id.as_str()),
+        recipe,
+    )?;
+    if round_model == 1 {
+        for (track_code, owner_id) in &seed_owners {
+            SeedOwnerRepo::insert(&transaction, event_id, version, track_code, owner_id)?;
+        }
+    }
     for assignment in &planned {
         PlanRepo::insert_assignment(&transaction, assignment)?;
     }
@@ -1166,17 +1868,54 @@ pub fn edit_plan_assignment(
     for assignment in &mut assignments {
         assignment.plan_version = version;
     }
+    let round_model = EventRepo::round_model(db.conn(), event_id)?;
+    let secret_hex = EventRepo::secret_hex(db.conn(), event_id)?;
+    let pack = PackRepo::get_for_event(db.conn(), event_id)?;
+    let nonce = random_hex_128();
+    let seed_owners = if round_model == 1 {
+        SeedOwnerRepo::list(db.conn(), event_id, plan.version)?
+    } else {
+        Vec::new()
+    };
+    let (commitment, recipe) = if round_model == 1 {
+        (
+            plan_commitment_v2(&CommitmentInputs {
+                event_id,
+                plan_version: version,
+                total_rounds: plan.rounds + 1,
+                exchange_rounds: plan.rounds,
+                secret_hex: secret_hex.as_deref().unwrap_or("legacy"),
+                nonce: &nonce,
+                pack_id: pack.as_ref().map(|pack| pack.id.as_str()),
+                settings_json: &plan.settings_json,
+                seed_owners: &seed_owners,
+                assignments: &assignments,
+            }),
+            "v2",
+        )
+    } else {
+        let next = PlanRecord {
+            event_id: event_id.to_string(),
+            version,
+            seed: plan.seed,
+            rounds: plan.rounds,
+            settings_json: plan.settings_json.clone(),
+            commitment: String::new(),
+            committed_at: now,
+            reason: Some("manual edit".to_string()),
+        };
+        (plan_commitment(&next, &assignments), "v1")
+    };
     let mut next = PlanRecord {
         event_id: event_id.to_string(),
         version,
         seed: plan.seed,
         rounds: plan.rounds,
-        settings_json: plan.settings_json,
-        commitment: String::new(),
+        settings_json: plan.settings_json.clone(),
+        commitment: commitment.clone(),
         committed_at: now,
         reason: Some("manual edit".to_string()),
     };
-    let commitment = plan_commitment(&next, &assignments);
     next.commitment = commitment.clone();
 
     let transaction = begin(db)?;
@@ -1194,6 +1933,19 @@ pub fn edit_plan_assignment(
         return Err(EngineError::PlanChanged);
     }
     PlanRepo::insert(&transaction, &next)?;
+    PlanRepo::set_commitment_meta(
+        &transaction,
+        event_id,
+        version,
+        &nonce,
+        pack.as_ref().map(|pack| pack.id.as_str()),
+        recipe,
+    )?;
+    if round_model == 1 {
+        for (track_code, owner_id) in &seed_owners {
+            SeedOwnerRepo::insert(&transaction, event_id, version, track_code, owner_id)?;
+        }
+    }
     for assignment in &assignments {
         PlanRepo::insert_assignment(&transaction, assignment)?;
     }
@@ -1221,6 +1973,60 @@ pub fn edit_plan_assignment(
         commitment,
         fallback: false,
         assignments,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyOutcome {
+    pub recipe: String,
+    pub commitment: String,
+    pub verified: bool,
+}
+
+fn verify_plan_commitment(
+    conn: &Connection,
+    event_id: &str,
+    plan: &PlanRecord,
+    assignments: &[PlanAssignmentRecord],
+) -> Result<(), EngineError> {
+    let meta =
+        PlanRepo::commitment_meta(conn, event_id, plan.version)?.ok_or(EngineError::NoPlan)?;
+    let expected = if meta.recipe == "v2" {
+        let secret = EventRepo::secret_hex(conn, event_id)?.unwrap_or_default();
+        let owners = SeedOwnerRepo::list(conn, event_id, plan.version)?;
+        plan_commitment_v2(&CommitmentInputs {
+            event_id,
+            plan_version: plan.version,
+            total_rounds: plan.rounds + 1,
+            exchange_rounds: plan.rounds,
+            secret_hex: &secret,
+            nonce: meta.nonce.as_deref().unwrap_or_default(),
+            pack_id: meta.pack_id.as_deref(),
+            settings_json: &plan.settings_json,
+            seed_owners: &owners,
+            assignments,
+        })
+    } else {
+        plan_commitment(plan, assignments)
+    };
+    if expected != plan.commitment {
+        return Err(EngineError::CommitmentMismatch);
+    }
+    Ok(())
+}
+
+/// Recompute the commitment from stored rows. The host and any participant can
+/// run this after the reveal.
+pub fn verify_commitment(db: &Db, event_id: &str) -> Result<VerifyOutcome, EngineError> {
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+    let meta =
+        PlanRepo::commitment_meta(db.conn(), event_id, plan.version)?.ok_or(EngineError::NoPlan)?;
+    let verified = verify_plan_commitment(db.conn(), event_id, &plan, &assignments).is_ok();
+    Ok(VerifyOutcome {
+        recipe: meta.recipe,
+        commitment: plan.commitment,
+        verified,
     })
 }
 
@@ -1254,9 +2060,46 @@ pub fn start_event_with_channel(
         });
     }
     let plan = PlanRepo::latest(&transaction, event_id)?.ok_or(EngineError::NoPlan)?;
+    if EventRepo::round_model(&transaction, event_id)? == 1 {
+        let seed_round =
+            RoundRepo::get(&transaction, event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+        if seed_round.status != RoundStatus::Closed {
+            return Err(EngineError::SeedRoundNotOpen);
+        }
+    }
     let assignments = PlanRepo::list_assignments(&transaction, event_id, plan.version)?;
     let (active, owners, _) = plan_roster(&transaction, event_id)?;
     validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    verify_plan_commitment(&transaction, event_id, &plan, &assignments)?;
+    let settings = parse_settings(&event)?;
+    let mut cursor = now;
+    for index in 0..plan.rounds {
+        let final_round = index + 1 == plan.rounds;
+        cursor += if final_round {
+            settings.final_round_window_secs
+        } else {
+            settings.round_window_secs
+        };
+        let round_no = index + 2;
+        if RoundRepo::get(&transaction, event_id, round_no)?.is_none() {
+            RoundRepo::insert(
+                &transaction,
+                &EventRoundRecord {
+                    event_id: event_id.to_string(),
+                    round_no,
+                    kind: RoundKind::Exchange,
+                    status: RoundStatus::Planned,
+                    opened_at: None,
+                    closed_at: None,
+                    deadline_at: Some(cursor),
+                    original_deadline_at: Some(cursor),
+                    final_round,
+                    deadline_moves: 0,
+                },
+            )?;
+        }
+    }
+    EventRepo::set_reveal_at(&transaction, event_id, Some(cursor))?;
     let next = current.state.transition_to(EventState::Active)?;
     EventRepo::set_state(&transaction, event_id, next, now)?;
     let effect = channel_id
@@ -1264,9 +2107,8 @@ pub fn start_event_with_channel(
         .map(|channel_id| Effect::Channel {
             channel_id: channel_id.to_string(),
             content: format!(
-                "Schedule locked for {}. Commitment: {}. Compare this code with your plan.",
-                event.name,
-                &plan.commitment[..16.min(plan.commitment.len())]
+                "Schedule locked for {}. Commitment: {}. You can verify this after the reveal.",
+                event.name, plan.commitment
             ),
         });
     if let Some(effect) = &effect {
@@ -1481,6 +2323,7 @@ pub fn dispatch_async_wave(
                 submitted_at: None,
                 created_at: now,
                 updated_at: now,
+                extension_secs: 0,
             },
         )?;
         move_track(&transaction, event_id, &choice.track.0, TrackState::Offered)?;
@@ -1571,6 +2414,15 @@ pub fn open_round(
         });
     }
 
+    let round_no = round + 2;
+    let final_round = round + 1 == plan.rounds;
+    let deadline_at = if final_round {
+        now + settings.final_round_window_secs
+    } else {
+        now + settings.round_window_secs
+    };
+    let remaining_claim = (deadline_at - now).max(1);
+
     let mut effects = Vec::with_capacity(for_round.len());
     let transaction = begin(db)?;
     let current = EventRepo::get(&transaction, event_id)?
@@ -1587,6 +2439,31 @@ pub fn open_round(
             round: active.round,
         });
     }
+    if EventRepo::round_model(&transaction, event_id)? == 1 {
+        let seed_round =
+            RoundRepo::get(&transaction, event_id, 1)?.ok_or(EngineError::SeedRoundNotOpen)?;
+        if seed_round.status != RoundStatus::Closed {
+            return Err(EngineError::SeedRoundNotOpen);
+        }
+    }
+    RoundRepo::close_open_rounds(&transaction, event_id, now)?;
+    if !RoundRepo::plan_to_open(&transaction, event_id, round_no, now, deadline_at)? {
+        RoundRepo::insert(
+            &transaction,
+            &EventRoundRecord {
+                event_id: event_id.to_string(),
+                round_no,
+                kind: RoundKind::Exchange,
+                status: RoundStatus::Open,
+                opened_at: Some(now),
+                closed_at: None,
+                deadline_at: Some(deadline_at),
+                original_deadline_at: Some(deadline_at),
+                final_round,
+                deadline_moves: 0,
+            },
+        )?;
+    }
     let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
     for planned_assignment in &for_round {
         let participant = participants
@@ -1602,7 +2479,6 @@ pub fn open_round(
             ));
         }
         let id = assignment_id(event_id, round, &planned_assignment.track_code);
-        let due_at = now + settings.claim_window_secs;
         AssignmentRepo::insert(
             &transaction,
             &AssignmentRecord {
@@ -1614,10 +2490,11 @@ pub fn open_round(
                 status: AssignmentStatus::Offered,
                 offered_at: now,
                 claimed_at: None,
-                due_at: Some(due_at),
+                due_at: Some(deadline_at),
                 submitted_at: None,
                 created_at: now,
                 updated_at: now,
+                extension_secs: 0,
             },
         )?;
         move_track(
@@ -1631,17 +2508,147 @@ pub fn open_round(
             event_id: event_id.to_string(),
             assignment_id: id,
             track_code: planned_assignment.track_code.clone(),
-            due_at,
-            claim_window_secs: settings.claim_window_secs,
+            due_at: deadline_at,
+            claim_window_secs: remaining_claim,
         };
         enqueue_effect(&transaction, event_id, &effect, now)?;
         effects.push(effect);
     }
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Round opened",
+        Some(&format!("R{round_no}")),
+        &serde_json::json!({
+            "round": round_no,
+            "final": final_round,
+            "deadlineAt": deadline_at,
+            "offers": effects.len(),
+        })
+        .to_string(),
+    )?;
     commit(transaction)?;
 
     Ok(OpenRoundOutcome {
         round,
         offers: effects.len(),
+        effects,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveDeadlineOutcome {
+    pub round_no: u32,
+    pub new_deadline: i64,
+    pub moved: usize,
+    pub effects: Vec<Effect>,
+}
+
+/// Move the whole deadline of the open classic round. Every offered, claimed,
+/// and overdue assignment gets the new deadline plus its own extension. Overdue
+/// work returns to claimed. Submitted work keeps its final status. One audit
+/// entry records the move.
+pub fn move_round_deadline(
+    db: &Db,
+    event_id: &str,
+    round_no: u32,
+    new_deadline: i64,
+    reason: &str,
+    now: i64,
+) -> Result<MoveDeadlineOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(&event, EventState::Active, "round deadline move", "active")?;
+    if round_no < 2 {
+        return Err(EngineError::RoundNotOpen { round: round_no });
+    }
+    let transaction = begin(db)?;
+    let round = RoundRepo::get(&transaction, event_id, round_no)?
+        .ok_or(EngineError::RoundNotOpen { round: round_no })?;
+    if round.status != RoundStatus::Open {
+        return Err(EngineError::RoundNotOpen { round: round_no });
+    }
+    let old_deadline = round
+        .deadline_at
+        .ok_or(EngineError::RoundDeadlineMissing { round: round_no })?;
+    if new_deadline <= now {
+        return Err(EngineError::RoundDeadlineMissing { round: round_no });
+    }
+    if new_deadline <= old_deadline {
+        return Err(EngineError::RoundDeadlineMissing { round: round_no });
+    }
+    RoundRepo::set_deadline(&transaction, event_id, round_no, new_deadline)?;
+    let delta = new_deadline - old_deadline;
+    RoundRepo::shift_planned(&transaction, event_id, round_no, delta)?;
+    if let Some(reveal_at) = EventRepo::reveal_at(&transaction, event_id)? {
+        EventRepo::set_reveal_at(&transaction, event_id, Some(reveal_at + delta))?;
+    }
+    let index = round_no - 2;
+    let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
+    let mut moved = 0usize;
+    let mut effects = Vec::new();
+    for assignment in assignments
+        .iter()
+        .filter(|assignment| assignment.round == index)
+    {
+        if !matches!(
+            assignment.status,
+            AssignmentStatus::Offered | AssignmentStatus::Claimed | AssignmentStatus::Overdue
+        ) {
+            continue;
+        }
+        let due_at = new_deadline + assignment.extension_secs;
+        AssignmentRepo::set_due(
+            &transaction,
+            &assignment.id,
+            due_at,
+            assignment.extension_secs,
+            now,
+        )?;
+        if assignment.status == AssignmentStatus::Overdue {
+            AssignmentRepo::revert_overdue(&transaction, &assignment.id, now)?;
+            if let Some(decision) =
+                HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, "overdue")?
+            {
+                HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, reason)?;
+            }
+        }
+        DeadlineRepo::ensure(&transaction, &assignment.id)?;
+        DeadlineRepo::reset_reminders(&transaction, &assignment.id)?;
+        moved += 1;
+        effects.push(Effect::Dm {
+            user_id: assignment.participant_id.clone(),
+            content: format!(
+                "The host moved the deadline for Round {round_no} to {new_deadline} UTC. Your track {} follows the new round deadline.",
+                assignment.track_code
+            ),
+        });
+    }
+    for effect in &effects {
+        enqueue_effect(&transaction, event_id, effect, now)?;
+    }
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Round deadline moved",
+        Some(&format!("R{round_no}")),
+        &serde_json::json!({
+            "round": round_no,
+            "oldDeadlineAt": old_deadline,
+            "newDeadlineAt": new_deadline,
+            "moved": moved,
+            "reason": reason,
+        })
+        .to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(MoveDeadlineOutcome {
+        round_no,
+        new_deadline,
+        moved,
         effects,
     })
 }
@@ -1669,7 +2676,13 @@ pub fn claim(
     if now > due_at {
         return Err(EngineError::OfferExpired);
     }
-    let next_due = now + settings.round_window_secs;
+    let next_due = if EventRepo::round_model(db.conn(), event_id)? == 1 {
+        RoundRepo::get(db.conn(), event_id, assignment.round + 2)?
+            .and_then(|round| round.deadline_at)
+            .unwrap_or(now + settings.round_window_secs)
+    } else {
+        now + settings.round_window_secs
+    };
     let current = latest_file(db, event_id, &assignment.track_code)?;
     let filename = format!("{}.{}", assignment.track_code, current.extension);
     let caption = format!(
@@ -1763,6 +2776,11 @@ fn submit_inner(
         AssignmentStatus::Claimed | AssignmentStatus::Overdue | AssignmentStatus::Submitted
     ) {
         return Err(EngineError::NoActiveAssignment);
+    }
+    if EventRepo::round_model(db.conn(), request.event_id)? == 1
+        && assignment.due_at.is_some_and(|due_at| now > due_at)
+    {
+        return Err(EngineError::DeadlinePassed);
     }
     let current = latest_file(db, request.event_id, &assignment.track_code)?;
     let validated = settings
@@ -2074,6 +3092,8 @@ pub fn reveal_with_channel(
                 return Err(EngineError::PlanNotFinished { round });
             }
         }
+        let planned = PlanRepo::list_assignments(&transaction, event_id, plan.version)?;
+        verify_plan_commitment(&transaction, event_id, &plan, &planned)?;
     }
     let participant_name = |user_id: &str| {
         participants
@@ -2987,8 +4007,19 @@ pub fn decide_deadline(
             if deadline.extension_count >= 2 {
                 return Err(EngineError::ExtensionLimit);
             }
-            let new_due = due_at.max(now) + hours * 3_600;
-            if !AssignmentRepo::extend(&transaction, assignment_id, new_due, now)? {
+            let round_model = EventRepo::round_model(&transaction, &assignment.event_id)?;
+            let extra = hours * 3_600;
+            let extension_secs = assignment.extension_secs + extra;
+            let new_due = if round_model == 1 {
+                RoundRepo::get(&transaction, &assignment.event_id, assignment.round + 2)?
+                    .and_then(|round| round.deadline_at)
+                    .map(|deadline_at| deadline_at + extension_secs)
+                    .unwrap_or(due_at.max(now) + extra)
+            } else {
+                due_at.max(now) + extra
+            };
+            if !AssignmentRepo::set_due(&transaction, assignment_id, new_due, extension_secs, now)?
+            {
                 return Err(EngineError::NoActiveAssignment);
             }
             DeadlineRepo::increment_extension(&transaction, assignment_id)?;
@@ -3108,8 +4139,49 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
             continue;
         }
         let settings = parse_settings(&current)?;
+        let round_model = EventRepo::round_model(&transaction, &event.id)?;
         let participants = ParticipantRepo::list_for_event(&transaction, &event.id)?;
         let assignments = AssignmentRepo::list_active(&transaction, &event.id)?;
+        if settings.mode == Mode::Classic && round_model == 1 {
+            for assignment in assignments
+                .iter()
+                .filter(|assignment| assignment.status == AssignmentStatus::Offered)
+            {
+                let Some(due_at) = assignment.due_at else {
+                    continue;
+                };
+                if now >= due_at {
+                    AssignmentRepo::update_status(
+                        &transaction,
+                        &assignment.id,
+                        AssignmentStatus::Expired,
+                        now,
+                    )?;
+                    move_track(
+                        &transaction,
+                        &event.id,
+                        &assignment.track_code,
+                        TrackState::Pool,
+                    )?;
+                    AuditRepo::insert(
+                        &transaction,
+                        &event.id,
+                        now,
+                        "worker",
+                        "Offer expired",
+                        None,
+                        &serde_json::json!({
+                            "assignmentId": assignment.id,
+                            "trackCode": assignment.track_code,
+                            "participantId": assignment.participant_id,
+                            "round": assignment.round + 2,
+                        })
+                        .to_string(),
+                    )?;
+                    report.expired_offers += 1;
+                }
+            }
+        }
         if settings.mode == Mode::Async {
             for assignment in assignments
                 .iter()
@@ -3182,7 +4254,11 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                 continue;
             };
             DeadlineRepo::ensure(&transaction, &assignment.id)?;
-            let claimed_at = assignment.claimed_at.unwrap_or(assignment.offered_at);
+            let claimed_at = if round_model == 1 && settings.mode == Mode::Classic {
+                assignment.offered_at
+            } else {
+                assignment.claimed_at.unwrap_or(assignment.offered_at)
+            };
             if now >= due_at {
                 if assignment.status == AssignmentStatus::Claimed {
                     AssignmentRepo::update_status(
@@ -3331,10 +4407,16 @@ pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError>
     let event = load_event(db, event_id)?;
     let plan = PlanRepo::latest(db.conn(), event_id)?;
     let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    let seed_round = RoundRepo::get(db.conn(), event_id, 1)?;
+    let rounds = plan.as_ref().map(|plan| plan.rounds).unwrap_or(0);
     Ok(EventStatus {
         event_id: event.id,
         state: event.state,
-        rounds: plan.as_ref().map(|plan| plan.rounds).unwrap_or(0),
+        rounds,
+        total_rounds: if rounds > 0 { rounds + 1 } else { 0 },
+        seed_round_open: seed_round
+            .as_ref()
+            .is_some_and(|round| round.status == RoundStatus::Open),
         committed: plan.is_some(),
         active_assignments: assignments
             .iter()
@@ -3392,6 +4474,18 @@ fn require_state(
     }
 }
 
+fn require_seed_state(event: &EventRecord, action: &'static str) -> Result<(), EngineError> {
+    if matches!(event.state, EventState::Draft | EventState::Signup) {
+        Ok(())
+    } else {
+        Err(EngineError::WrongEventState {
+            action,
+            state: event.state,
+            expected: "draft or signup",
+        })
+    }
+}
+
 fn open_event_in(
     conn: &Connection,
     event_id: &str,
@@ -3420,10 +4514,19 @@ fn require_open_event(event: &EventRecord, action: &'static str) -> Result<(), E
     }
 }
 
-fn unique_track_code(tracks: &[TrackRecord], seed: u64) -> String {
+fn seed_from_secret(secret_hex: Option<&str>, version: u32) -> u64 {
+    let secret = secret_hex.unwrap_or("legacy");
+    let digest = swap_files::sha256_hex(format!("msw-plan-seed-v2:{secret}:{version}").as_bytes());
+    u64::from_str_radix(&digest[..16], 16).unwrap_or(0)
+}
+
+fn unique_track_code(tracks: &[TrackRecord], seed: u64, secret_hex: Option<&str>) -> String {
     let mut salt = 0u32;
     loop {
-        let candidate = track_code(seed, salt);
+        let candidate = match secret_hex {
+            Some(secret) => track_code_from_secret(secret, salt),
+            None => track_code(seed, salt),
+        };
         if !tracks.iter().any(|track| track.code == candidate) {
             return candidate;
         }

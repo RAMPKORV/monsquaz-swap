@@ -34,10 +34,15 @@ import {
   createEvent,
   decideDeadline,
   decideExtension,
+  decideLateSeed,
+  extendSeedDeadline,
+  uploadPack,
+  openSeedRound,
   editPlanAssignment,
   generatePlan,
   loadPlanEditCandidates,
   lockRoster,
+  moveRoundDeadline,
   openRound,
   revealEvent,
   repairGroups,
@@ -327,6 +332,12 @@ export default function App() {
   }
 
   async function notify(label: string) {
+    if (label === "Set up Round 1") {
+      const heading = document.getElementById("seed-round-title");
+      heading?.scrollIntoView({ block: "start" });
+      setToast("Choose the pack and the seed deadline, then open Round 1.");
+      return;
+    }
     if (label === "Open event setup" || label === "Start setup") {
       setView("setup");
       return;
@@ -369,11 +380,15 @@ export default function App() {
     }
     const round = /^Open Round (\d+)$/.exec(label);
     if (round) {
+      const roundNo = Number(round[1]);
+      if (roundNo < 2) {
+        setToast("Round 1 is the seed round. Open it from event setup.");
+        setView("setup");
+        return;
+      }
       try {
-        const opened = await openRound(Number(round[1]) - 1);
-        setToast(
-          `Round ${opened.round + 1} opened. ${opened.offers} offers queued.`,
-        );
+        const opened = await openRound(roundNo - 2);
+        setToast(`Round ${roundNo} opened. ${opened.offers} offers queued.`);
         reloadView();
       } catch (error) {
         setToast(`Could not open the round. ${errorDetail(error)}`);
@@ -559,10 +574,70 @@ export default function App() {
           ? `Preview: ${created.name} is ready. No Discord message was sent.`
           : `${created.name} is ready.`,
       );
-      setView("people");
+      setView("mission");
       reloadView();
     } catch {
       setToast("Could not create the event. Your draft is still here.");
+    }
+  }
+
+  async function handleUploadPack(path: string) {
+    return uploadPack(path);
+  }
+
+  async function handleOpenSeedRound(deadlineAt: number, channelId: string | null) {
+    try {
+      await openSeedRound(deadlineAt, channelId);
+      setToast("Round 1 is open. The pack is queued for delivery.");
+      reloadView();
+    } catch (error) {
+      setToast(`Could not open Round 1. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleCloseSeedRound() {
+    try {
+      const result = await lockRoster();
+      setToast(
+        `Seed round closed. ${result.active} active, ${result.fillIns} fill-in.`,
+      );
+      reloadView();
+    } catch (error) {
+      setToast(`Could not close the seed round. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleExtendSeedDeadline(deadlineAt: number) {
+    try {
+      await extendSeedDeadline(deadlineAt);
+      setToast("Seed deadline moved. The new time is in the audit log.");
+      reloadView();
+    } catch (error) {
+      setToast(`Could not move the seed deadline. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleDecideLateSeed(id: string, accept: boolean) {
+    try {
+      await decideLateSeed(id, accept, accept ? "host approved" : "host declined");
+      setToast(accept ? "Late seed accepted." : "Late seed declined.");
+      reloadView();
+    } catch (error) {
+      setToast(`Could not decide the late seed. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleMoveRoundDeadline(
+    roundNo: number,
+    deadlineAt: number,
+    reason: string,
+  ) {
+    try {
+      await moveRoundDeadline(roundNo, deadlineAt, reason);
+      setToast(`Round ${roundNo} deadline moved. Holders were notified.`);
+      reloadView();
+    } catch (error) {
+      setToast(`Could not move the deadline. ${errorDetail(error)}`);
     }
   }
 
@@ -659,6 +734,12 @@ export default function App() {
         onAction={notify}
         onDecision={handleDecision}
         onNavigate={(next) => setView(next)}
+        onUploadPack={handleUploadPack}
+        onOpenSeedRound={handleOpenSeedRound}
+        onCloseSeedRound={handleCloseSeedRound}
+        onExtendSeedDeadline={handleExtendSeedDeadline}
+        onDecideLateSeed={handleDecideLateSeed}
+        onMoveRoundDeadline={handleMoveRoundDeadline}
       />
     ) : view === "setup" && setup ? (
       <SetupView

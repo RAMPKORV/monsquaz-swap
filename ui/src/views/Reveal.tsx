@@ -163,7 +163,7 @@ export function RevealView({
         entry.participantId === participantId && entry.status === "Submitted",
     );
     if (credit) {
-      return `Editor ${credit.round + 1}`;
+      return `R${credit.round + 2} editor`;
     }
     const unknown = Array.from(
       new Set(
@@ -469,7 +469,7 @@ export function RevealView({
                       </strong>
                       <span>
                         {roleFor(version.holderId, version.holderName)}
-                        {version.round !== null ? ` · Round ${version.round + 1}` : ""}
+                        {version.round !== null ? ` · R${version.round + 2}` : ""}
                         {version.finalVersion ? " · Final" : ""}
                       </span>
                     </div>
@@ -488,7 +488,7 @@ export function RevealView({
                       />
                       <div>
                         <strong>Gap · no edit</strong>
-                        <span>Round {credit.round + 1} · the pair is anonymous</span>
+                        <span>Round {credit.round + 2} · the pair is anonymous</span>
                       </div>
                       <span className="reveal-lineage__kind">No file</span>
                     </li>
@@ -513,7 +513,7 @@ export function RevealView({
                 </li>
                 {selected.credits.map((credit, index) => (
                   <li key={`${credit.round}-${index}`}>
-                    <span>Round {credit.round + 1}</span>
+                    <span>Round {credit.round + 2}</span>
                     <strong>
                       {credit.status === "Submitted"
                         ? roleFor(credit.participantId, credit.displayName)

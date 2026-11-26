@@ -201,7 +201,7 @@ export function PlannerView({
   const phaseRanges = data.phases
     .map(
       (phase) =>
-        `R${phase.startRound + 1}–${phase.startRound + phase.rounds}`,
+        `R${phase.startRound + 2}–${phase.startRound + phase.rounds + 1}`,
     )
     .join(" · ");
 
@@ -296,7 +296,10 @@ export function PlannerView({
           viewAsParticipant ? " plan-summary--participant" : ""
         }`}
       >
-        <SummaryFact label="Rounds" value={String(data.rounds)} />
+        <SummaryFact
+          label="Rounds"
+          value={`${data.totalRounds} (1 + ${data.exchangeRounds})`}
+        />
         <SummaryFact label="Tracks" value={String(data.tracks)} />
         <SummaryFact label="People" value={String(data.participants)} />
         {!viewAsParticipant ? (
@@ -318,17 +321,22 @@ export function PlannerView({
                       ? "to review"
                       : plural(visibleWarnings.length, "note", "notes")}
                   </StatusPill>
-                  <a className="warning-jump" href="#warnings-title">
+                  <a
+                    className="warning-jump"
+                    href="#warnings-title"
+                    onClick={() => {
+                      document.getElementById("warnings-title")?.focus();
+                    }}
+                  >
                     Review warnings
                   </a>
                 </>
               ) : null}
             </div>
             <span>
-              Locking posts a short code, a fingerprint, in the announcement
-              channel. Participants compare the code to confirm the schedule
-              has not changed. They never see the schedule. If you change an
-              assignment later, you must publish a new code.
+              Locking posts a short checksum in the announcement channel.
+              Participants compare the checksum to confirm that the schedule did
+              not change. A new schedule version has a new checksum.
             </span>
           </div>
           <div className="plan-actions">
@@ -437,7 +445,7 @@ export function PlannerView({
                   <p className="card__subtitle">
                     {viewAsParticipant
                       ? "Only the sample participant's assignments are visible."
-                      : "Each cell shows who works on the track in that round. The group label marks the owner group. No one gets their own track or the same track twice."}
+                      : "Each cell shows who works on the track in that round. The group label marks the owner group. A participant never gets their own track and never gets the same track twice."}
                   </p>
                   {canEdit ? (
                     <p className="field-help matrix-edit-help">
@@ -508,6 +516,31 @@ export function PlannerView({
                 </div>
               </div>
               <div
+                className="seed-band"
+                role="group"
+                aria-labelledby="seed-band-title"
+              >
+                <div className="seed-band__header">
+                  <h3 id="seed-band-title">R1 · Seed round</h3>
+                  <span className="card__meta">Host only</span>
+                </div>
+                <p className="field-help">
+                  Each person owns one seed. Exchanges start at R2 and end at R
+                  {data.totalRounds}.
+                </p>
+                <ul className="seed-band__list" role="list">
+                  {data.seedOwners.map((seed) => (
+                    <li key={seed.trackCode}>
+                      <code>{seed.trackCode}</code>
+                      <span>
+                        <span className="visually-hidden">owned by </span>
+                        {seed.ownerName}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div
                 className="matrix-scroll"
                 tabIndex={0}
                 role="group"
@@ -546,7 +579,7 @@ export function PlannerView({
                     <tr>
                       <th scope="col">Track</th>
                       {Array.from({ length: matrixRounds }, (_, index) => (
-                        <th scope="col" key={index}>R{index + 1}</th>
+                        <th scope="col" key={index}>R{index + 2}</th>
                       ))}
                     </tr>
                   </thead>
@@ -595,7 +628,7 @@ export function PlannerView({
                                   tabIndex={
                                     trackIndex === 0 && roundIndex === 0 ? 0 : -1
                                   }
-                                  aria-label={`Edit Round ${cell.round + 1} track ${cell.trackCode}, current holder ${cell.participantName}`}
+                                  aria-label={`Edit Round ${cell.round + 2} track ${cell.trackCode}, current holder ${cell.participantName}`}
                                   onKeyDown={(event) =>
                                     moveMatrixFocus(
                                       event,
@@ -644,8 +677,8 @@ export function PlannerView({
                 <div>
                   <h2 id="graph-title">
                     {data.committed
-                      ? `Round ${data.graph.round + 1} graph`
-                      : `Preview: round ${data.graph.round + 1}`}
+                      ? `Round ${data.graph.round + 2} graph`
+                      : `Preview: round ${data.graph.round + 2}`}
                   </h2>
                   <p className="card__subtitle">
                     {viewAsParticipant
@@ -664,7 +697,7 @@ export function PlannerView({
             {visibleWarnings.length > 0 ? (
               <section className="card" aria-labelledby="warnings-title">
                 <div className="card__header">
-                  <h2 id="warnings-title">Planner warnings</h2>
+                  <h2 id="warnings-title" tabIndex={-1}>Planner warnings</h2>
                   <StatusPill tone={infeasible ? "danger" : warningNeedsAction ? "warn" : "info"}>
                     {visibleWarnings.length}{" "}
                     {warningNeedsAction
@@ -731,7 +764,7 @@ export function PlannerView({
                 <p className="field-help">
                   {infeasible
                     ? "The planner reports why this round is blocked. No score is available."
-                    : "Not a participant grade. It estimates reach, variety, fairness, and freshness."}
+                    : "A heuristic for the host. It estimates reach, variety, fairness, and freshness. It does not predict edits."}
                 </p>
               </section>
             ) : null}
@@ -749,8 +782,8 @@ export function PlannerView({
                       {data.phases.map((phase) => (
                         <li key={phase.index}>
                           <span>
-                            Phase {phase.index + 1} · rounds {phase.startRound + 1}
-                            –{phase.startRound + phase.rounds}
+                            Phase {phase.index + 1} · rounds {phase.startRound + 2}
+                            –{phase.startRound + phase.rounds + 1}
                           </span>
                           <span
                             className={
@@ -806,7 +839,7 @@ export function PlannerView({
 
       {editCell ? (
         <Dialog
-          title={`Change Round ${editCell.round + 1} assignment`}
+          title={`Change Round ${editCell.round + 2} assignment`}
           initialFocusId="edit-holder"
           onClose={() => {
             setEditCell(null);
@@ -879,7 +912,7 @@ export function PlannerView({
             <>
               <p>
                 Track <code>{editCell.trackCode}</code> in Round{" "}
-                {editCell.round + 1} is held by{" "}
+                {editCell.round + 2} is held by{" "}
                 <strong>{editTarget.participantName}</strong>. Choose a new
                 holder. The two people swap tracks in this round.
               </p>
@@ -1040,10 +1073,9 @@ export function PlannerView({
           }
         >
           <p>
-            The bot posts a fingerprint, a short code, of this schedule in the
-            announcement channel. Every offer follows it. If you change an
-            assignment later, you must publish a new version, and people can see
-            that it changed.
+            The bot posts a short checksum in the announcement channel.
+            Participants compare the checksum to confirm that the schedule did
+            not change. A new schedule version has a new checksum.
           </p>
           <p className="field-help">
             No music file is posted. Locking does not reveal an owner, a track
@@ -1107,7 +1139,7 @@ function PlanGraph({
         className="plan-graph"
         preserveAspectRatio="xMidYMid meet"
       >
-        <title id="graph-figure-title">Round {data.graph.round + 1} assignment graph</title>
+        <title id="graph-figure-title">Round {data.graph.round + 2} assignment graph</title>
         <desc id="graph-figure-desc">
           Tracks on the left connect to the people who hold them in this round.
           The graph does not show owners or group membership.{" "}
@@ -1153,7 +1185,7 @@ function PlanGraph({
           Track
         </text>
         <text x="620" y="16" className="graph-caption">
-          Person, round {data.graph.round + 1}
+          Person, round {data.graph.round + 2}
         </text>
         <line x1="154" y1="26" x2="154" y2={height - 18} className="graph-rail" />
         <line x1="516" y1="26" x2="516" y2={height - 18} className="graph-rail" />

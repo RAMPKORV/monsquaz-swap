@@ -142,14 +142,16 @@ named command. IDs are stable.
 | REQ-JOIN-004 | must | When the host locks the roster, signed-up people without a valid seed SHALL become fill-ins by default (configurable). | `join_and_seed.feature` |
 | REQ-JOIN-005 | must | A participant SHALL leave at any time; if holding a claimed track they SHALL submit or skip it first; past credits are preserved and future assignments removed. | `deadlines_and_extensions.feature` |
 | REQ-JOIN-006 | should | A leaver SHALL rejoin as a fill-in by default; rejoin-with-replan is an opt-in event setting that creates a new plan version and re-seal. | `join_and_seed.feature` |
-| REQ-JOIN-007 | should | Late seeds SHALL be accepted until the host locks the roster; the default is to disable new join-by-submission after Round 1 starts. | `join_and_seed.feature` |
+| REQ-JOIN-007 | must | A seed after the seed deadline SHALL be held for host approval while Round 1 is open. A seed after the host closes Round 1 SHALL be refused until the host reopens Round 1. | `join_and_seed.feature` |
 
 ### Scheduling (classic)
 
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-SCHED-001 | must | The scheduler SHALL never assign a participant their own track and never assign the same track to the same participant twice. | `scheduling.feature` |
-| REQ-SCHED-002 | must | By default the event SHALL run N-1 swap rounds so every participant can touch every other track; above 12 participants the planner SHALL warn about overcrowding and allow a cap. | `scheduling.feature` |
+| REQ-SCHED-002 | must | A full classic event SHALL run N total rounds for N seeded participants: R1 is the seed round and R2..RN are exchange rounds. The planner SHALL warn about overcrowding above 12 participants and allow a cap. | `scheduling.feature` |
+| REQ-SCHED-003 | must | The host SHALL open Round 1 with the pack and a seed deadline. The host SHALL close seed intake softly and lock the roster in one action. At least two seeds are required. | `join_and_seed.feature` |
+| REQ-SCHED-004 | must | One classic round SHALL have one shared deadline. An offer expires at that deadline and a claim uses the same deadline. The default is 24 hours for a normal exchange round and 48 hours for the final exchange round. | `deadlines_and_extensions.feature` |
 | REQ-SCHED-003 | must | Each round SHALL assign at most one track per participant and at most one participant per track. | `scheduling.feature` |
 | REQ-SCHED-004 | must | The host SHALL preview, regenerate with a diff, manually edit, validate, lock, and commit the schedule; hard invariants SHALL block invalid edits. | `scheduling.feature` |
 | REQ-SCHED-005 | must | When a schedule is locked, the bot SHALL publish a commit-reveal hash; replans SHALL create a new commitment and be limited to two. | `scheduling.feature` |

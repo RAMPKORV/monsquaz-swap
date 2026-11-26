@@ -46,6 +46,24 @@ impl EventState {
     }
 }
 
+/// One classic round is either the seed round or an exchange round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoundKind {
+    Seed,
+    Exchange,
+}
+
+/// Lifecycle of one classic round.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoundStatus {
+    Planned,
+    Open,
+    Closed,
+    Cancelled,
+}
+
 /// Membership is about the roster, not about readiness or a single turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -304,6 +322,16 @@ impl Assignment {
             Ok(())
         } else {
             Err(self.invalid("mark_overdue"))
+        }
+    }
+
+    /// Return an overdue turn to claimed after the host moves the round deadline.
+    pub fn restore_claimed(&mut self) -> Result<(), AssignmentError> {
+        if self.status == AssignmentStatus::Overdue {
+            self.status = AssignmentStatus::Claimed;
+            Ok(())
+        } else {
+            Err(self.invalid("restore_claimed"))
         }
     }
 

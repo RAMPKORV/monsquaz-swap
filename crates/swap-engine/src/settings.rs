@@ -17,6 +17,9 @@ pub enum Mode {
 pub struct EventSettings {
     pub mode: Mode,
     pub rounds: Option<u32>,
+    pub seed_window_secs: i64,
+    pub final_round_window_secs: i64,
+    pub seed_min: u32,
     pub claim_window_secs: i64,
     pub round_window_secs: i64,
     pub max_file_bytes: u64,
@@ -39,6 +42,9 @@ impl Default for EventSettings {
         Self {
             mode: Mode::Classic,
             rounds: None,
+            seed_window_secs: 7 * 24 * 60 * 60,
+            final_round_window_secs: 48 * 60 * 60,
+            seed_min: 2,
             claim_window_secs: 24 * 60 * 60,
             round_window_secs: 24 * 60 * 60,
             max_file_bytes: DEFAULT_MAX_SIZE,
@@ -67,6 +73,12 @@ pub enum SettingsError {
     ClaimWindow,
     #[error("the round window must be positive")]
     RoundWindow,
+    #[error("the seed window must be positive")]
+    SeedWindow,
+    #[error("the final round window must be positive")]
+    FinalRoundWindow,
+    #[error("the seed minimum must be at least 2")]
+    SeedMinimum,
     #[error("the maximum file size must be between 1 byte and 20 MiB")]
     FileSize,
     #[error("the allowlist must contain at least one extension")]
@@ -90,6 +102,15 @@ impl EventSettings {
         }
         if self.round_window_secs <= 0 {
             return Err(SettingsError::RoundWindow);
+        }
+        if self.seed_window_secs <= 0 {
+            return Err(SettingsError::SeedWindow);
+        }
+        if self.final_round_window_secs <= 0 {
+            return Err(SettingsError::FinalRoundWindow);
+        }
+        if self.seed_min < 2 {
+            return Err(SettingsError::SeedMinimum);
         }
         if self.max_file_bytes == 0 || self.max_file_bytes > DEFAULT_MAX_SIZE {
             return Err(SettingsError::FileSize);

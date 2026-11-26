@@ -12,9 +12,11 @@ pub use db::{Db, DbError};
 pub use repos::{
     AssignmentDeadlineRecord, AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo,
     DeadlineRepo, DeliveryRecord, DeliveryRepo, DmCursorRecord, DmCursorRepo, EventRecord,
-    EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo, IdentityCounts,
-    MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackCommentRecord,
-    TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo,
+    EventRepo, EventRoundRecord, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo,
+    IdentityCounts, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord, PackRepo,
+    ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanCommitmentMeta, PlanRecord,
+    PlanRepo, PrivacyRepo, ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenPairRecord,
+    SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord,
+    TrackTitleRepo,
 };
 pub use rusqlite::{Connection, Transaction, TransactionBehavior};

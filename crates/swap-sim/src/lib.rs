@@ -8,11 +8,13 @@
 use std::collections::{HashMap, HashSet};
 
 use swap_core::{AssignmentStatus, EventState};
-use swap_db::{AssignmentRepo, Db, DbError, EventRepo, FileRepo, SeenRepo, TrackRepo};
+use swap_db::{
+    AssignmentRepo, Db, DbError, EventRepo, FileRepo, PackRecord, PackRepo, SeenRepo, TrackRepo,
+};
 use swap_engine::{
     Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer, SubmitRequest, claim,
-    create_event, expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal,
-    skip, start_event, submit,
+    create_event_with_secret, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    open_round, open_seed_round, reveal, skip, start_event, submit,
 };
 use swap_files::BlobStore;
 use thiserror::Error;
@@ -76,6 +78,8 @@ pub enum SimError {
     Engine(#[from] EngineError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Store(#[from] swap_files::StoreError),
     #[error("invalid simulation config: {0}")]
     Config(String),
 }
@@ -137,16 +141,33 @@ pub fn run(config: &SimulationConfig) -> Result<SimulationReport, SimError> {
     let db = Db::open_in_memory()?;
     let settings = EventSettings {
         rounds: config.rounds,
+        final_round_window_secs: CLAIM_WINDOW,
         ..EventSettings::default()
     };
-    create_event(
+    create_event_with_secret(
         &db,
         EVENT_ID,
         "Simulation",
         config.seed,
         &settings,
+        Some(&format!("{:032x}", config.seed)),
         BASE_TIME,
     )?;
+    let pack = store.store(b"IMPMsimulation-pack")?;
+    PackRepo::insert(
+        db.conn(),
+        &PackRecord {
+            id: "sim-pack".to_string(),
+            event_id: EVENT_ID.to_string(),
+            filename: "pack.zip".to_string(),
+            sha256: pack.sha256.clone(),
+            size: pack.size,
+            storage_path: pack.relative_path.clone(),
+            created_at: BASE_TIME,
+            locked_at: None,
+        },
+    )?;
+    open_seed_round(&db, EVENT_ID, BASE_TIME + 10 * ROUND_SPAN, None, BASE_TIME)?;
 
     let mut effects = Vec::new();
     let mut user_index = HashMap::new();

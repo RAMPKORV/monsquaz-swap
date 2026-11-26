@@ -32,13 +32,29 @@ Feature: Anonymity until reveal
     And the post does not show a per-person submission count
     And the post does not name a late participant
 
-  Scenario: A visible schedule shows assignments only
-    Given an event with schedule visibility enabled
+  Scenario: The default schedule shows only the caller's assignments
+    Given an event with the default schedule visibility
     When a participant opens the schedule
-    Then the participant sees past and future assignments
-    And the participant does not see owners
-    And the participant does not see titles
-    And the participant does not see comments
+    Then the participant sees only their own past and future assignments
+    And the participant does not see the full matrix
+    And the participant does not see group membership or group names
+    And the participant does not see the R1 seed band
+
+  Scenario: An open schedule exposes the full event
+    Given a host who enabled the open schedule
+    When a participant opens the schedule
+    Then the participant sees the R2..RN matrix
+    And the participant sees the seed owners
+    And the participant sees editor names
+    And the participant sees titles and comments
+    And the join card disclosed that the event has no anonymity
+
+  Scenario: The host planner shows the R1 seed band
+    Given a locked roster with seed owners
+    When the host opens the schedule planner
+    Then the planner shows one R1 seed row per track and owner
+    And the exchange matrix starts at R2
+    And the seed band is host-only
 
   Scenario: Comments are host and reveal only
     Given a submission with a comment

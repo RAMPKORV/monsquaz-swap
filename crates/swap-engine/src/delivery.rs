@@ -46,6 +46,12 @@ pub enum PendingDelivery {
         sha256: String,
         caption: String,
     },
+    Pack {
+        user_id: String,
+        filename: String,
+        sha256: String,
+        caption: String,
+    },
     Channel {
         channel_id: String,
         content: String,
@@ -107,9 +113,10 @@ impl PendingDelivery {
 
     pub fn recipient_id(&self) -> Option<&str> {
         match self {
-            Self::Dm { user_id, .. } | Self::Offer { user_id, .. } | Self::File { user_id, .. } => {
-                Some(user_id)
-            }
+            Self::Dm { user_id, .. }
+            | Self::Offer { user_id, .. }
+            | Self::File { user_id, .. }
+            | Self::Pack { user_id, .. } => Some(user_id),
             Self::Channel { .. } | Self::HostAlert { .. } => None,
         }
     }
@@ -119,6 +126,7 @@ impl PendingDelivery {
             Self::Dm { .. } => "dm",
             Self::Offer { .. } => "offer",
             Self::File { .. } => "file",
+            Self::Pack { .. } => "pack",
             Self::Channel { .. } => "channel",
             Self::HostAlert { .. } => "host_alert",
         }
@@ -140,6 +148,9 @@ impl PendingDelivery {
                 sha256,
                 ..
             } => format!("file:{track_code}:{user_id}:{sha256}"),
+            Self::Pack {
+                user_id, sha256, ..
+            } => format!("pack:{user_id}:{sha256}"),
             Self::Channel {
                 channel_id,
                 content,
@@ -294,6 +305,26 @@ impl DeliveryWorker {
                 )
             }
             PendingDelivery::File {
+                filename,
+                sha256,
+                caption,
+                ..
+            } => {
+                let bytes = self.store.read(sha256)?;
+                discord
+                    .send_file_to_channel(
+                        &thread,
+                        OutboundFile {
+                            filename: filename.clone(),
+                            bytes,
+                            caption: caption.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|error| DeliveryError::Transport(error.to_string()))?;
+                return Ok(true);
+            }
+            PendingDelivery::Pack {
                 filename,
                 sha256,
                 caption,
@@ -705,6 +736,27 @@ async fn deliver(
                 .await
                 .map(Some)
         }
+        PendingDelivery::Pack {
+            user_id,
+            filename,
+            sha256,
+            caption,
+        } => {
+            let bytes = store
+                .read(sha256)
+                .map_err(|error| DiscordError::Other(error.to_string()))?;
+            discord
+                .send_file(
+                    &DiscordUserId::new(user_id.clone()),
+                    OutboundFile {
+                        filename: filename.clone(),
+                        bytes,
+                        caption: caption.clone(),
+                    },
+                )
+                .await
+                .map(Some)
+        }
         PendingDelivery::Channel {
             channel_id,
             content,
@@ -734,7 +786,8 @@ fn user_of(delivery: &PendingDelivery) -> Option<&str> {
     match delivery {
         PendingDelivery::Dm { user_id, .. }
         | PendingDelivery::Offer { user_id, .. }
-        | PendingDelivery::File { user_id, .. } => Some(user_id),
+        | PendingDelivery::File { user_id, .. }
+        | PendingDelivery::Pack { user_id, .. } => Some(user_id),
         PendingDelivery::Channel { .. } | PendingDelivery::HostAlert { .. } => None,
     }
 }

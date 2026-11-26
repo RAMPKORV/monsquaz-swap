@@ -133,6 +133,13 @@ shot mission-join-light-1280 "view=mission&state=join-phase&theme=light" 1280 80
 shot mission-join-light-1024 "view=mission&state=join-phase&theme=light" 1024 700
 shot mission-join-dark-zoom200 "view=mission&state=join-phase" 640 400
 shot mission-join-long-zone-dark-1280 "view=mission&state=join-phase&joinTimezone=America/Argentina/Buenos_Aires" 1280 800
+shot mission-join-late-dark-1280 "view=mission&state=join-late" 1280 800
+shot mission-join-late-dark-1024 "view=mission&state=join-late" 1024 700
+shot mission-join-late-light-1280 "view=mission&state=join-late&theme=light" 1280 800
+shot mission-seed-setup-dark-1280 "view=mission&state=seed-setup" 1280 800
+shot mission-seed-setup-dark-1024 "view=mission&state=seed-setup" 1024 700
+shot mission-seed-setup-light-1280 "view=mission&state=seed-setup&theme=light" 1280 800
+shot mission-seed-error-dark-1280 "view=mission&state=seed-setup&seedError=1" 1280 800
 
 shot people-empty-dark-1280 "view=people&state=empty" 1280 800
 shot people-loading-dark-1280 "view=people&state=loading" 1280 800

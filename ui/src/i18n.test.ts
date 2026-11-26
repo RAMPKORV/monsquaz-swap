@@ -32,7 +32,7 @@ describe("i18n", () => {
     const text = joinInstructions("Europe/Stockholm", ["it", "xm"], 20);
     expect(text).toContain("1. In the server, run /swap join.");
     expect(text).toContain("2. Choose your timezone");
-    expect(text).toContain("3. Send one seed file to the bot");
+    expect(text).toContain("3. Make one track from the host pack");
     expect(text).toContain(".it, .xm");
     expect(text).toContain("20 MiB");
   });

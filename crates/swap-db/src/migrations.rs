@@ -244,6 +244,92 @@ CREATE TABLE track_comments (
 
 CREATE INDEX track_comments_track ON track_comments(event_id, track_code, created_at);
 "#,
+    r#"
+-- Migration 008: classic round model. R1 is the seed round and exchange
+-- assignments keep their zero-based exchange index. The round table uses the
+-- display number: R1 seed, R2..RN exchanges.
+ALTER TABLE events ADD COLUMN round_model INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE events ADD COLUMN secret_hex TEXT;
+ALTER TABLE events ADD COLUMN seed_round_closed_at INTEGER;
+ALTER TABLE plan_versions ADD COLUMN voided_at INTEGER;
+ALTER TABLE plan_versions ADD COLUMN nonce TEXT;
+ALTER TABLE plan_versions ADD COLUMN pack_id TEXT;
+ALTER TABLE plan_versions ADD COLUMN commitment_recipe TEXT NOT NULL DEFAULT 'v1';
+ALTER TABLE assignments ADD COLUMN extension_secs INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE assignment_deadlines ADD COLUMN reminder_epoch INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE event_rounds (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    round_no INTEGER NOT NULL CHECK (round_no >= 1),
+    kind TEXT NOT NULL CHECK (kind IN ('seed', 'exchange')),
+    status TEXT NOT NULL CHECK (status IN ('planned', 'open', 'closed', 'cancelled')),
+    opened_at INTEGER,
+    closed_at INTEGER,
+    deadline_at INTEGER,
+    original_deadline_at INTEGER,
+    final INTEGER NOT NULL DEFAULT 0,
+    deadline_moves INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, round_no)
+) STRICT;
+
+CREATE UNIQUE INDEX one_open_round_per_event
+    ON event_rounds(event_id) WHERE status = 'open';
+CREATE INDEX event_rounds_by_status ON event_rounds(event_id, status);
+
+CREATE TABLE packs (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    storage_path TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    locked_at INTEGER
+) STRICT;
+
+CREATE UNIQUE INDEX one_pack_per_event ON packs(event_id);
+
+CREATE TABLE plan_seed_owners (
+    event_id TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    track_code TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    PRIMARY KEY (event_id, plan_version, track_code),
+    FOREIGN KEY (event_id, plan_version)
+        REFERENCES plan_versions(event_id, version) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE late_seeds (
+    id TEXT NOT NULL,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    timezone TEXT NOT NULL,
+    max_handoffs INTEGER NOT NULL,
+    track_code TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    original_sha256 TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    extension TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    original_storage_path TEXT,
+    audio_verified INTEGER NOT NULL DEFAULT 0,
+    scrub_summary_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL CHECK (status IN ('pending', 'accepted', 'rejected')),
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER,
+    PRIMARY KEY (event_id, id),
+    UNIQUE (event_id, user_id)
+) STRICT;
+
+CREATE INDEX late_seeds_pending ON late_seeds(event_id, status, created_at);
+"#,
+    r#"
+-- Migration 009: projected reveal time. Planned round rows shift with a
+-- forward deadline move.
+ALTER TABLE events ADD COLUMN reveal_at INTEGER;
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

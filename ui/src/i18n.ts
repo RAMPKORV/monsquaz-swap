@@ -13,12 +13,13 @@ export const messages = {
     commandLabel: "In the server, run /swap join.",
     command: "/swap join",
     options:
-      "Choose your timezone (for example {timezone}) and max_handoffs (the number of tracks you will edit, 1 to 20).",
-    seedLabel: "Send one seed file to the bot in a direct message.",
-    seedHelp: "A seed is a track you made.",
+      "Choose your timezone (for example {timezone}) and max_handoffs (the number of exchange tracks you will edit, 1 to 20). The seed is not an edit.",
+    seedLabel:
+      "Make one track from the host pack and send it to the bot in a direct message before the seed deadline.",
+    seedHelp: "A seed is a track you made. Round 1 is the seed round.",
     formats: "Allowed formats:",
     size: "Maximum size: {size} MiB.",
-    next: "The host starts the event after the roster locks.",
+    next: "The host closes the seed round, locks the roster, and opens the exchange rounds.",
     copy: "Copy join instructions",
     copied: "Join instructions copied.",
     copyFailed: "Could not copy. Select the text below and copy it.",

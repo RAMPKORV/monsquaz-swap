@@ -1,7 +1,9 @@
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use sha2::{Digest, Sha256};
 
-use swap_core::{AssignmentStatus, EventState, Membership, Readiness, Role, TrackState};
+use swap_core::{
+    AssignmentStatus, EventState, Membership, Readiness, Role, RoundKind, RoundStatus, TrackState,
+};
 
 use crate::codec::{from_db, to_db};
 use crate::db::DbError;
@@ -163,6 +165,83 @@ impl EventRepo {
             params![to_db(&state)?, updated_at, id],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn round_model(conn: &Connection, id: &str) -> Result<u32, DbError> {
+        Ok(conn.query_row(
+            "SELECT round_model FROM events WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, i64>(0),
+        )? as u32)
+    }
+
+    pub fn set_round_model(conn: &Connection, id: &str, model: u32) -> Result<(), DbError> {
+        conn.execute(
+            "UPDATE events SET round_model = ?2 WHERE id = ?1",
+            params![id, model as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn secret_hex(conn: &Connection, id: &str) -> Result<Option<String>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT secret_hex FROM events WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    pub fn set_secret_hex(conn: &Connection, id: &str, secret_hex: &str) -> Result<(), DbError> {
+        conn.execute(
+            "UPDATE events SET secret_hex = ?2 WHERE id = ?1",
+            params![id, secret_hex],
+        )?;
+        Ok(())
+    }
+
+    pub fn seed_round_closed_at(conn: &Connection, id: &str) -> Result<Option<i64>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT seed_round_closed_at FROM events WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    pub fn set_seed_round_closed_at(
+        conn: &Connection,
+        id: &str,
+        at: Option<i64>,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "UPDATE events SET seed_round_closed_at = ?2 WHERE id = ?1",
+            params![id, at],
+        )?;
+        Ok(())
+    }
+
+    pub fn reveal_at(conn: &Connection, id: &str) -> Result<Option<i64>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT reveal_at FROM events WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    pub fn set_reveal_at(conn: &Connection, id: &str, at: Option<i64>) -> Result<(), DbError> {
+        conn.execute(
+            "UPDATE events SET reveal_at = ?2 WHERE id = ?1",
+            params![id, at],
+        )?;
+        Ok(())
     }
 }
 
@@ -508,6 +587,7 @@ pub struct AssignmentRecord {
     pub submitted_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub extension_secs: i64,
 }
 
 struct RawAssignment {
@@ -523,6 +603,7 @@ struct RawAssignment {
     submitted_at: Option<i64>,
     created_at: i64,
     updated_at: i64,
+    extension_secs: i64,
 }
 
 impl TryFrom<RawAssignment> for AssignmentRecord {
@@ -542,6 +623,7 @@ impl TryFrom<RawAssignment> for AssignmentRecord {
             submitted_at: raw.submitted_at,
             created_at: raw.created_at,
             updated_at: raw.updated_at,
+            extension_secs: raw.extension_secs,
         })
     }
 }
@@ -560,6 +642,7 @@ fn row_to_raw_assignment(row: &Row<'_>) -> rusqlite::Result<RawAssignment> {
         submitted_at: row.get(9)?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
+        extension_secs: row.get(12)?,
     })
 }
 
@@ -570,8 +653,8 @@ impl AssignmentRepo {
         conn.execute(
             "INSERT INTO assignments
                 (id, event_id, track_code, participant_id, round, status,
-                 offered_at, claimed_at, due_at, submitted_at, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 &assignment.id,
                 &assignment.event_id,
@@ -584,7 +667,8 @@ impl AssignmentRepo {
                 assignment.due_at,
                 assignment.submitted_at,
                 assignment.created_at,
-                assignment.updated_at
+                assignment.updated_at,
+                assignment.extension_secs
             ],
         )?;
         Ok(())
@@ -594,7 +678,7 @@ impl AssignmentRepo {
         let raw = conn
             .query_row(
                 "SELECT id, event_id, track_code, participant_id, round, status,
-                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
                  FROM assignments WHERE id = ?1",
                 params![id],
                 row_to_raw_assignment,
@@ -609,7 +693,7 @@ impl AssignmentRepo {
     ) -> Result<Vec<AssignmentRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT id, event_id, track_code, participant_id, round, status,
-                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
              FROM assignments WHERE event_id = ?1 ORDER BY round, track_code",
         )?;
         let rows = statement
@@ -664,6 +748,31 @@ impl AssignmentRepo {
         Ok(changed > 0)
     }
 
+    pub fn set_due(
+        conn: &Connection,
+        id: &str,
+        due_at: i64,
+        extension_secs: i64,
+        updated_at: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments
+             SET due_at = ?1, extension_secs = ?2, updated_at = ?3
+             WHERE id = ?4 AND status IN ('offered', 'claimed', 'overdue')",
+            params![due_at, extension_secs, updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn revert_overdue(conn: &Connection, id: &str, updated_at: i64) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments SET status = 'claimed', updated_at = ?1
+             WHERE id = ?2 AND status = 'overdue'",
+            params![updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn submit(
         conn: &Connection,
         id: &str,
@@ -687,7 +796,7 @@ impl AssignmentRepo {
         let raw = conn
             .query_row(
                 "SELECT id, event_id, track_code, participant_id, round, status,
-                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
                  FROM assignments
                  WHERE event_id = ?1 AND participant_id = ?2
                  ORDER BY round DESC, created_at DESC LIMIT 1",
@@ -704,7 +813,7 @@ impl AssignmentRepo {
     ) -> Result<Vec<AssignmentRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT id, event_id, track_code, participant_id, round, status,
-                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at
+                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
              FROM assignments
              WHERE event_id = ?1 AND status IN ('offered', 'claimed', 'overdue')
              ORDER BY round, track_code",
@@ -728,6 +837,13 @@ pub struct PlanRecord {
     pub commitment: String,
     pub committed_at: i64,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanCommitmentMeta {
+    pub nonce: Option<String>,
+    pub pack_id: Option<String>,
+    pub recipe: String,
 }
 
 struct RawPlan {
@@ -840,13 +956,63 @@ impl PlanRepo {
             .query_row(
                 "SELECT event_id, version, seed, rounds, settings_json, commitment,
                         committed_at, reason
-                 FROM plan_versions WHERE event_id = ?1
+                 FROM plan_versions WHERE event_id = ?1 AND voided_at IS NULL
                  ORDER BY version DESC LIMIT 1",
                 params![event_id],
                 row_to_raw_plan,
             )
             .optional()?;
         raw.map(PlanRecord::try_from).transpose()
+    }
+
+    pub fn set_commitment_meta(
+        conn: &Connection,
+        event_id: &str,
+        version: u32,
+        nonce: &str,
+        pack_id: Option<&str>,
+        recipe: &str,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE plan_versions
+             SET nonce = ?3, pack_id = ?4, commitment_recipe = ?5
+             WHERE event_id = ?1 AND version = ?2",
+            params![event_id, version as i64, nonce, pack_id, recipe],
+        )? > 0)
+    }
+
+    pub fn commitment_meta(
+        conn: &Connection,
+        event_id: &str,
+        version: u32,
+    ) -> Result<Option<PlanCommitmentMeta>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT nonce, pack_id, commitment_recipe FROM plan_versions
+                 WHERE event_id = ?1 AND version = ?2",
+                params![event_id, version as i64],
+                |row| {
+                    Ok(PlanCommitmentMeta {
+                        nonce: row.get(0)?,
+                        pack_id: row.get(1)?,
+                        recipe: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn void(
+        conn: &Connection,
+        event_id: &str,
+        version: u32,
+        now: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE plan_versions SET voided_at = ?3
+             WHERE event_id = ?1 AND version = ?2 AND voided_at IS NULL",
+            params![event_id, version as i64, now],
+        )? > 0)
     }
 
     pub fn insert_assignment(
@@ -971,6 +1137,36 @@ fn row_to_raw_file(row: &Row<'_>) -> rusqlite::Result<RawFile> {
 pub struct FileRepo;
 
 impl FileRepo {
+    /// Replace the v1 seed blob without creating a new version. The host
+    /// retains the old blob in the content store.
+    pub fn replace_v1(
+        conn: &Connection,
+        event_id: &str,
+        track_code: &str,
+        file: &FileRecord,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE files
+             SET sha256 = ?3, size = ?4, extension = ?5, storage_path = ?6,
+                 original_sha256 = ?7, original_storage_path = ?8,
+                 audio_verified = ?9, scrub_summary_json = ?10, created_at = ?11
+             WHERE event_id = ?1 AND track_code = ?2 AND version = 1",
+            params![
+                event_id,
+                track_code,
+                &file.sha256,
+                file.size as i64,
+                &file.extension,
+                &file.storage_path,
+                &file.original_sha256,
+                &file.original_storage_path,
+                i64::from(file.audio_verified),
+                &file.scrub_summary_json,
+                file.created_at
+            ],
+        )? > 0)
+    }
+
     pub fn insert(conn: &Connection, file: &FileRecord) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO files
@@ -1910,6 +2106,16 @@ impl DeadlineRepo {
             params![assignment_id],
         )? > 0)
     }
+
+    pub fn reset_reminders(conn: &Connection, assignment_id: &str) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE assignment_deadlines
+             SET reminded_50 = 0, reminded_80 = 0, reminded_95 = 0,
+                 deadline_reminded = 0, reminder_epoch = reminder_epoch + 1
+             WHERE assignment_id = ?1",
+            params![assignment_id],
+        )? > 0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2042,4 +2248,467 @@ fn row_to_host_decision(row: &Row<'_>) -> rusqlite::Result<HostDecisionRecord> {
         decided_at: row.get(7)?,
         reason: row.get(8)?,
     })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventRoundRecord {
+    pub event_id: String,
+    pub round_no: u32,
+    pub kind: RoundKind,
+    pub status: RoundStatus,
+    pub opened_at: Option<i64>,
+    pub closed_at: Option<i64>,
+    pub deadline_at: Option<i64>,
+    pub original_deadline_at: Option<i64>,
+    pub final_round: bool,
+    pub deadline_moves: u32,
+}
+
+struct RawEventRound {
+    event_id: String,
+    round_no: i64,
+    kind: String,
+    status: String,
+    opened_at: Option<i64>,
+    closed_at: Option<i64>,
+    deadline_at: Option<i64>,
+    original_deadline_at: Option<i64>,
+    final_round: i64,
+    deadline_moves: i64,
+}
+
+impl TryFrom<RawEventRound> for EventRoundRecord {
+    type Error = DbError;
+
+    fn try_from(raw: RawEventRound) -> Result<Self, DbError> {
+        Ok(Self {
+            event_id: raw.event_id,
+            round_no: raw.round_no as u32,
+            kind: from_db(&raw.kind)?,
+            status: from_db(&raw.status)?,
+            opened_at: raw.opened_at,
+            closed_at: raw.closed_at,
+            deadline_at: raw.deadline_at,
+            original_deadline_at: raw.original_deadline_at,
+            final_round: raw.final_round != 0,
+            deadline_moves: raw.deadline_moves as u32,
+        })
+    }
+}
+
+fn row_to_raw_event_round(row: &Row<'_>) -> rusqlite::Result<RawEventRound> {
+    Ok(RawEventRound {
+        event_id: row.get(0)?,
+        round_no: row.get(1)?,
+        kind: row.get(2)?,
+        status: row.get(3)?,
+        opened_at: row.get(4)?,
+        closed_at: row.get(5)?,
+        deadline_at: row.get(6)?,
+        original_deadline_at: row.get(7)?,
+        final_round: row.get(8)?,
+        deadline_moves: row.get(9)?,
+    })
+}
+
+pub struct RoundRepo;
+
+impl RoundRepo {
+    pub fn insert(conn: &Connection, round: &EventRoundRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO event_rounds
+                (event_id, round_no, kind, status, opened_at, closed_at, deadline_at,
+                 original_deadline_at, final, deadline_moves)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                &round.event_id,
+                round.round_no as i64,
+                to_db(&round.kind)?,
+                to_db(&round.status)?,
+                round.opened_at,
+                round.closed_at,
+                round.deadline_at,
+                round.original_deadline_at,
+                i64::from(round.final_round),
+                round.deadline_moves as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        round_no: u32,
+    ) -> Result<Option<EventRoundRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT event_id, round_no, kind, status, opened_at, closed_at,
+                        deadline_at, original_deadline_at, final, deadline_moves
+                 FROM event_rounds WHERE event_id = ?1 AND round_no = ?2",
+                params![event_id, round_no as i64],
+                row_to_raw_event_round,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
+    pub fn open_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Option<EventRoundRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT event_id, round_no, kind, status, opened_at, closed_at,
+                        deadline_at, original_deadline_at, final, deadline_moves
+                 FROM event_rounds WHERE event_id = ?1 AND status = 'open'
+                 LIMIT 1",
+                params![event_id],
+                row_to_raw_event_round,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<EventRoundRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT event_id, round_no, kind, status, opened_at, closed_at,
+                    deadline_at, original_deadline_at, final, deadline_moves
+             FROM event_rounds WHERE event_id = ?1 ORDER BY round_no",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_raw_event_round)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub fn set_status(
+        conn: &Connection,
+        event_id: &str,
+        round_no: u32,
+        status: RoundStatus,
+        now: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE event_rounds SET status = ?3,
+                    closed_at = CASE WHEN ?3 = 'closed' THEN ?4 ELSE closed_at END
+             WHERE event_id = ?1 AND round_no = ?2",
+            params![event_id, round_no as i64, to_db(&status)?, now],
+        )? > 0)
+    }
+
+    pub fn set_deadline(
+        conn: &Connection,
+        event_id: &str,
+        round_no: u32,
+        deadline_at: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE event_rounds
+             SET deadline_at = ?3,
+                 original_deadline_at = COALESCE(original_deadline_at, deadline_at),
+                 deadline_moves = deadline_moves + 1
+             WHERE event_id = ?1 AND round_no = ?2 AND status = 'open'",
+            params![event_id, round_no as i64, deadline_at],
+        )? > 0)
+    }
+
+    pub fn close_open_rounds(
+        conn: &Connection,
+        event_id: &str,
+        now: i64,
+    ) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "UPDATE event_rounds SET status = 'closed', closed_at = ?2
+             WHERE event_id = ?1 AND status = 'open'",
+            params![event_id, now],
+        )?)
+    }
+
+    pub fn plan_to_open(
+        conn: &Connection,
+        event_id: &str,
+        round_no: u32,
+        now: i64,
+        deadline_at: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE event_rounds
+             SET status = 'open', opened_at = ?3, deadline_at = ?4,
+                 original_deadline_at = COALESCE(original_deadline_at, ?4)
+             WHERE event_id = ?1 AND round_no = ?2 AND status = 'planned'",
+            params![event_id, round_no as i64, now, deadline_at],
+        )? > 0)
+    }
+
+    pub fn shift_planned(
+        conn: &Connection,
+        event_id: &str,
+        after_round: u32,
+        delta: i64,
+    ) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "UPDATE event_rounds
+             SET deadline_at = deadline_at + ?3,
+                 original_deadline_at = original_deadline_at + ?3
+             WHERE event_id = ?1 AND round_no > ?2 AND status = 'planned'
+               AND deadline_at IS NOT NULL",
+            params![event_id, after_round as i64, delta],
+        )?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackRecord {
+    pub id: String,
+    pub event_id: String,
+    pub filename: String,
+    pub sha256: String,
+    pub size: u64,
+    pub storage_path: String,
+    pub created_at: i64,
+    pub locked_at: Option<i64>,
+}
+
+pub struct PackRepo;
+
+impl PackRepo {
+    pub fn insert(conn: &Connection, pack: &PackRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO packs
+                (id, event_id, filename, sha256, size, storage_path, created_at, locked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &pack.id,
+                &pack.event_id,
+                &pack.filename,
+                &pack.sha256,
+                pack.size as i64,
+                &pack.storage_path,
+                pack.created_at,
+                pack.locked_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_for_event(conn: &Connection, event_id: &str) -> Result<Option<PackRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, filename, sha256, size, storage_path, created_at, locked_at
+                 FROM packs WHERE event_id = ?1",
+                params![event_id],
+                |row| {
+                    Ok(PackRecord {
+                        id: row.get(0)?,
+                        event_id: row.get(1)?,
+                        filename: row.get(2)?,
+                        sha256: row.get(3)?,
+                        size: row.get::<_, i64>(4)? as u64,
+                        storage_path: row.get(5)?,
+                        created_at: row.get(6)?,
+                        locked_at: row.get(7)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn lock(conn: &Connection, event_id: &str, now: i64) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE packs SET locked_at = ?2 WHERE event_id = ?1 AND locked_at IS NULL",
+            params![event_id, now],
+        )? > 0)
+    }
+
+    pub fn delete_for_event(conn: &Connection, event_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute("DELETE FROM packs WHERE event_id = ?1", params![event_id])?)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LateSeedRecord {
+    pub id: String,
+    pub event_id: String,
+    pub user_id: String,
+    pub display_name: String,
+    pub timezone: String,
+    pub max_handoffs: u32,
+    pub track_code: String,
+    pub filename: String,
+    pub sha256: String,
+    pub original_sha256: String,
+    pub size: u64,
+    pub extension: String,
+    pub storage_path: String,
+    pub original_storage_path: Option<String>,
+    pub audio_verified: bool,
+    pub scrub_summary_json: String,
+    pub status: String,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+}
+
+pub struct LateSeedRepo;
+
+impl LateSeedRepo {
+    pub fn insert(conn: &Connection, seed: &LateSeedRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO late_seeds
+                (id, event_id, user_id, display_name, timezone, max_handoffs, track_code,
+                 filename, sha256, original_sha256, size, extension, storage_path,
+                 original_storage_path, audio_verified, scrub_summary_json, status,
+                 created_at, decided_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                     ?16, ?17, ?18, ?19)
+             ON CONFLICT(event_id, user_id) DO UPDATE SET
+                 id = excluded.id,
+                 display_name = excluded.display_name,
+                 timezone = excluded.timezone,
+                 max_handoffs = excluded.max_handoffs,
+                 track_code = excluded.track_code,
+                 filename = excluded.filename,
+                 sha256 = excluded.sha256,
+                 original_sha256 = excluded.original_sha256,
+                 size = excluded.size,
+                 extension = excluded.extension,
+                 storage_path = excluded.storage_path,
+                 original_storage_path = excluded.original_storage_path,
+                 audio_verified = excluded.audio_verified,
+                 scrub_summary_json = excluded.scrub_summary_json,
+                 status = 'pending',
+                 created_at = excluded.created_at,
+                 decided_at = NULL",
+            params![
+                &seed.id,
+                &seed.event_id,
+                &seed.user_id,
+                &seed.display_name,
+                &seed.timezone,
+                seed.max_handoffs as i64,
+                &seed.track_code,
+                &seed.filename,
+                &seed.sha256,
+                &seed.original_sha256,
+                seed.size as i64,
+                &seed.extension,
+                &seed.storage_path,
+                &seed.original_storage_path,
+                i64::from(seed.audio_verified),
+                &seed.scrub_summary_json,
+                &seed.status,
+                seed.created_at,
+                seed.decided_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        id: &str,
+    ) -> Result<Option<LateSeedRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, user_id, display_name, timezone, max_handoffs, track_code,
+                        filename, sha256, original_sha256, size, extension, storage_path,
+                        original_storage_path, audio_verified, scrub_summary_json, status,
+                        created_at, decided_at
+                 FROM late_seeds WHERE event_id = ?1 AND id = ?2",
+                params![event_id, id],
+                row_to_late_seed,
+            )
+            .optional()?)
+    }
+
+    pub fn list_pending(conn: &Connection, event_id: &str) -> Result<Vec<LateSeedRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, user_id, display_name, timezone, max_handoffs, track_code,
+                    filename, sha256, original_sha256, size, extension, storage_path,
+                    original_storage_path, audio_verified, scrub_summary_json, status,
+                    created_at, decided_at
+             FROM late_seeds WHERE event_id = ?1 AND status = 'pending'
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_late_seed)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn set_status(
+        conn: &Connection,
+        event_id: &str,
+        id: &str,
+        status: &str,
+        now: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE late_seeds SET status = ?3, decided_at = ?4
+             WHERE event_id = ?1 AND id = ?2 AND status = 'pending'",
+            params![event_id, id, status, now],
+        )? > 0)
+    }
+}
+
+fn row_to_late_seed(row: &Row<'_>) -> rusqlite::Result<LateSeedRecord> {
+    Ok(LateSeedRecord {
+        id: row.get(0)?,
+        event_id: row.get(1)?,
+        user_id: row.get(2)?,
+        display_name: row.get(3)?,
+        timezone: row.get(4)?,
+        max_handoffs: row.get::<_, i64>(5)? as u32,
+        track_code: row.get(6)?,
+        filename: row.get(7)?,
+        sha256: row.get(8)?,
+        original_sha256: row.get(9)?,
+        size: row.get::<_, i64>(10)? as u64,
+        extension: row.get(11)?,
+        storage_path: row.get(12)?,
+        original_storage_path: row.get(13)?,
+        audio_verified: row.get::<_, i64>(14)? != 0,
+        scrub_summary_json: row.get(15)?,
+        status: row.get(16)?,
+        created_at: row.get(17)?,
+        decided_at: row.get(18)?,
+    })
+}
+
+pub struct SeedOwnerRepo;
+
+impl SeedOwnerRepo {
+    pub fn insert(
+        conn: &Connection,
+        event_id: &str,
+        plan_version: u32,
+        track_code: &str,
+        owner_id: &str,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO plan_seed_owners (event_id, plan_version, track_code, owner_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, plan_version as i64, track_code, owner_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list(
+        conn: &Connection,
+        event_id: &str,
+        plan_version: u32,
+    ) -> Result<Vec<(String, String)>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT track_code, owner_id FROM plan_seed_owners
+             WHERE event_id = ?1 AND plan_version = ?2 ORDER BY track_code",
+        )?;
+        let rows = statement.query_map(params![event_id, plan_version as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
 }

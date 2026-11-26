@@ -206,14 +206,14 @@ function BasicsStep({
 
       <div className="form-grid">
         <Field
-          label="Rounds"
+          label="Exchange rounds (R2..RN)"
           htmlFor="rounds"
-        helpId="rounds-help"
-          help="Classic events run one fewer round than the seeded track count. Leave empty to use that default."
+          helpId="rounds-help"
+          help="Classic events have one seed round plus one exchange round for each other track. Leave empty to use the seeded track count."
         >
           <input
             id="rounds"
-          aria-describedby="rounds-help"
+            aria-describedby="rounds-help"
             className="input"
             type="number"
             min={1}
@@ -247,10 +247,20 @@ function BasicsStep({
               )
             }
           >
-            <option value="Hidden">Only the track they hold now (recommended)</option>
-            <option value="Visible assignments">Their past and future assignments</option>
+            <option value="Hidden">Own assignments only (recommended)</option>
+            <option value="Visible assignments">Own past and future assignments</option>
           </select>
         </Field>
+      </div>
+      <details className="advanced-settings">
+        <summary>
+          <Icon name="chevron-down" size={16} /> Advanced timing
+        </summary>
+        <p className="field-help">
+          Keep the defaults for a normal event. Change these only when the group
+          needs a different rhythm.
+        </p>
+        <div className="form-grid">
         <Field
           label="Claim window"
           htmlFor="claim-window"
@@ -335,7 +345,8 @@ function BasicsStep({
             <span>hours</span>
           </div>
         </Field>
-      </div>
+        </div>
+      </details>
     </div>
   );
 }
@@ -605,8 +616,8 @@ function ReviewStep({
           <dt>Rounds</dt>
           <dd>
             {draft.rounds
-              ? `${draft.rounds} rounds`
-              : "Default for the seeded track count"}
+              ? `R1 seed + ${draft.rounds} exchanges = ${draft.rounds + 1} total`
+              : "Automatic: R1 seed + N-1 exchanges = N total"}
           </dd>
         </div>
         <div>

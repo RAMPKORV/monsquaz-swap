@@ -1,13 +1,13 @@
 use std::io::{Cursor, Read};
 
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, FileRepo, ParticipantRepo, PlanRepo,
-    ProcessedAttachmentRepo, SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, FileRepo, PackRecord, PackRepo,
+    ParticipantRepo, PlanRepo, ProcessedAttachmentRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
-    Effect, EventSettings, JoinRequest, PassthroughPreparer, SubmitRequest, claim, create_event,
-    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal, start_event,
-    submit,
+    Effect, EventSettings, JoinRequest, PassthroughPreparer, SubmitRequest, claim,
+    create_event_with_secret, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    open_round, open_seed_round, reveal, start_event, submit,
 };
 use swap_files::BlobStore;
 use swap_privacy::{PrivacyError, delete_participant, export_participant};
@@ -34,15 +34,32 @@ impl Fixture {
         let directory = tempfile::tempdir().unwrap();
         let store = BlobStore::new(directory.path().join("blobs"));
         let db = Db::open_in_memory().unwrap();
-        create_event(
+        create_event_with_secret(
             &db,
             EVENT,
             "Privacy Test",
             42,
             &EventSettings::default(),
+            Some("0000000000000000000000000000002a"),
             T0,
         )
         .unwrap();
+        let pack = store.store(b"IMPMprivacy-pack").unwrap();
+        PackRepo::insert(
+            db.conn(),
+            &PackRecord {
+                id: "privacy-pack".to_string(),
+                event_id: EVENT.to_string(),
+                filename: "pack.zip".to_string(),
+                sha256: pack.sha256.clone(),
+                size: pack.size,
+                storage_path: pack.relative_path.clone(),
+                created_at: T0,
+                locked_at: None,
+            },
+        )
+        .unwrap();
+        open_seed_round(&db, EVENT, T0 + 1_000_000, None, T0).unwrap();
         for index in 0..participants {
             join(&db, &store, index);
         }
@@ -148,7 +165,7 @@ fn an_export_contains_only_the_participants_data() {
     fixture.submit_all(0, T4);
     let round_one = fixture.open(1, T7);
     for (_, assignment_id, _) in &round_one {
-        expire_offer(&fixture.db, EVENT, assignment_id, T7 + 86_401).unwrap();
+        expire_offer(&fixture.db, EVENT, assignment_id, T7 + 172_801).unwrap();
     }
     reveal(&fixture.db, EVENT, T8).unwrap();
 
@@ -195,7 +212,7 @@ fn deletion_replaces_direct_identifiers_and_keeps_a_hash_audit() {
     fixture.submit_all(0, T4);
     let round_one = fixture.open(1, T7);
     for (_, assignment_id, _) in &round_one {
-        expire_offer(&fixture.db, EVENT, assignment_id, T7 + 86_401).unwrap();
+        expire_offer(&fixture.db, EVENT, assignment_id, T7 + 172_801).unwrap();
     }
     reveal(&fixture.db, EVENT, T8).unwrap();
 
@@ -337,6 +354,7 @@ fn deletion_is_refused_while_an_assignment_is_active() {
     let fixture = Fixture::new(3);
     let round = fixture.open(0, T4);
     let target = &round[0].0;
+    let before = AuditRepo::last_hash(fixture.db.conn(), EVENT).unwrap();
     let error = delete_participant(&fixture.db, EVENT, target, T5).unwrap_err();
     assert!(matches!(error, PrivacyError::ActiveAssignment));
     assert!(
@@ -344,10 +362,9 @@ fn deletion_is_refused_while_an_assignment_is_active() {
             .unwrap()
             .is_some()
     );
-    assert!(
-        AuditRepo::last_hash(fixture.db.conn(), EVENT)
-            .unwrap()
-            .is_none()
+    assert_eq!(
+        AuditRepo::last_hash(fixture.db.conn(), EVENT).unwrap(),
+        before
     );
 }
 

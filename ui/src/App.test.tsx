@@ -17,6 +17,10 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn().mockResolvedValue(null),
+}));
+
 function setUrl(search: string) {
   window.history.pushState({}, "", `/${search}`);
 }
@@ -278,14 +282,14 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Schedule planner" });
     const firstCell = screen.getAllByRole("button", {
-      name: /Edit Round 1 track/,
+      name: /Edit Round 2 track/,
     })[0];
     firstCell.focus();
     fireEvent.keyDown(firstCell, { key: "ArrowRight" });
-    expect(document.activeElement).toHaveAccessibleName(/Edit Round 2 track/);
+    expect(document.activeElement).toHaveAccessibleName(/Edit Round 3 track/);
     fireEvent.click(firstCell);
     const dialog = await screen.findByRole("dialog", {
-      name: "Change Round 1 assignment",
+      name: "Change Round 2 assignment",
     });
     const select = await within(dialog).findByLabelText("New holder");
     expect((select as HTMLSelectElement).value).toBe("");
@@ -303,7 +307,7 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Plan v2")).toBeInTheDocument();
     expect(
-      screen.queryByRole("dialog", { name: "Change Round 1 assignment" }),
+      screen.queryByRole("dialog", { name: "Change Round 2 assignment" }),
     ).not.toBeInTheDocument();
   });
 
@@ -311,7 +315,7 @@ describe("App", () => {
     setUrl("?demo=1&view=plan&state=dense&dialog=edit&nocandidates=1");
     render(<App />);
     const dialog = await screen.findByRole("dialog", {
-      name: "Change Round 1 assignment",
+      name: "Change Round 2 assignment",
     });
     expect(
       await within(dialog).findByText(
@@ -346,7 +350,7 @@ describe("App", () => {
       expect.stringContaining("20 MiB"),
     );
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining("3. Send one seed file to the bot"),
+      expect.stringContaining("3. Make one track from the host pack"),
     );
   });
 
@@ -848,6 +852,46 @@ describe("App", () => {
     expect(alert).toHaveTextContent("MSW-UI-001");
     expect(
       screen.getByRole("button", { name: "Retry" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("classic seed round", () => {
+  it("opens Round 1 after the host uploads a pack", async () => {
+    setUrl("?demo=1&state=seed-setup&view=mission");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Round 1 · Seed round" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Upload host pack…" }));
+    expect(
+      await screen.findByText("demo-pack.zip · 11.8 MiB"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Round 1" }));
+    expect(
+      await screen.findByText("Round 1 is open. The pack is queued for delivery."),
+    ).toBeInTheDocument();
+  });
+
+  it("confirms before the seed round closes and the roster locks", async () => {
+    setUrl("?demo=1&state=join-phase&view=mission");
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Close seed round and lock roster",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close the seed round?",
+    });
+    expect(
+      within(dialog).getByText(/Seed intake stops and the roster locks/),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Close and lock roster" }),
+    );
+    expect(
+      await screen.findByText(/Seed round closed\./),
     ).toBeInTheDocument();
   });
 });

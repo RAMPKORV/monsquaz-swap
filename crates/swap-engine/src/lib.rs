@@ -24,16 +24,19 @@ pub use engine::{
     EngineError, EventStatus, ExpireOutcome, ExtensionOutcome, ExtensionStatus, GroupRepairOutcome,
     JoinOutcome, JoinRequest, LockOutcome, OpenRoundOutcome, PlanEditCandidate, RevealComment,
     RevealOutcome, RevealPackage, RevealStats, RevealTrack, RevealVersion, RevealVersionRole,
-    ScheduleOutcome, SkipOutcome, StartOutcome, SubmissionSource, SubmitOutcome, SubmitRequest,
-    TrackCredits, add_track_comment, claim, create_event, decide_deadline, decide_extension,
-    dispatch_async_wave, edit_plan_assignment, event_status, expire_offer, generate_schedule,
-    join_with_seed, lock_roster, open_decisions, open_round, plan_edit_candidates,
-    redact_track_comment, repair_group_schedule, request_extension, reveal, reveal_package,
+    ScheduleOutcome, SeedOpenOutcome, SkipOutcome, StartOutcome, SubmissionSource, SubmitOutcome,
+    SubmitRequest, TrackCredits, VerifyOutcome, accept_late_seed, add_track_comment, claim,
+    create_event, create_event_with_secret, decide_deadline, decide_extension, dispatch_async_wave,
+    edit_plan_assignment, event_status, expire_offer, extend_seed_deadline, generate_schedule,
+    join_with_seed, lock_roster, move_round_deadline, open_decisions, open_round, open_seed_round,
+    pending_late_seeds, plan_edit_candidates, redact_track_comment, reject_late_seed,
+    reopen_seed_round, repair_group_schedule, request_extension, reveal, reveal_package,
     reveal_with_channel, set_track_title, set_track_title_for_user,
     set_track_title_for_user_on_track, signup, skip, start_async_event, start_event,
-    start_event_with_channel, submit, submit_attachment, tick_deadlines,
+    start_event_with_channel, submit, submit_attachment, tick_deadlines, upload_pack,
+    verify_commitment,
 };
-pub use ids::{assignment_id, plan_commitment, track_code};
+pub use ids::{CommitmentInputs, assignment_id, plan_commitment, plan_commitment_v2, track_code};
 pub use inbound::InboundService;
 pub use prepare::{
     AB_SECONDS, DeliveryPreparer, OpenMptPreparer, PassthroughPreparer, PreparedBytes,

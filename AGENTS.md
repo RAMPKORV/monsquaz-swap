@@ -40,8 +40,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
   events and checks the hard invariants. `swap-privacy` exports participant
   data and anonymizes deletion with a hash-only audit. The durable delivery
   loop, startup and periodic dispatch, DM backfill, restart recovery, and
-  private-thread fallback are in place. The async queue, deadline automation,
-  event tools, reveal exports, and remaining UI screens are next.
+  private-thread fallback are in place. The classic production loop (join,
+  roster lock, open round, and reveal credits) and gateway health are in place.
+  Deadline automation, the reveal presenter and exports, the async queue,
+  event tools, and remaining UI screens are next.
 
 ## Non-negotiable invariants
 

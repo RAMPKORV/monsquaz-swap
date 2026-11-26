@@ -80,6 +80,9 @@ complete the main journey without help.
 
 ## M5 — Classic end-to-end
 
+**Status:** in progress. Seed-by-DM, roster lock, round opening, claim, submit,
+skip, and reveal credits are wired.
+
 - Seed phase, roster lock, schedule generation/lock/commit.
 - Claim-first delivery, deadlines, reminders, extensions.
 - Skips and fill-ins.

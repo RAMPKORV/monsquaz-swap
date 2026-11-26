@@ -460,7 +460,7 @@ export function MissionControlView({
                 participant is notified. This cannot be undone.
               </p>
               <p className="dialog__meta">
-                Keep waiting returns to the decision without a change.
+                Cancel returns to the decision without a change.
               </p>
             </>
           ) : (

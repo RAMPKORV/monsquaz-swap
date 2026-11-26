@@ -64,7 +64,7 @@ const defaultDecisions: Decision[] = [
     actionLabel: "Review",
     assignmentId: "assignment-1",
     deadline: "25 Nov, 18:00 CET",
-    newDeadline: "26 Nov, 00:00 CET",
+    newDeadline: "26 Nov, 00:42 CET",
     extensionsUsed: 0,
   },
   {

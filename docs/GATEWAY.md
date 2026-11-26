@@ -97,8 +97,8 @@ cargo check -p monsquaz-swap --no-default-features
 
 The app opens the SQLite database when it starts. It dispatches pending outbox
 rows, then repeats the dispatch every 30 seconds, and runs one DM backfill for
-each recorded inbound cursor. A command commits the event state and its outbox
-rows in one transaction. A restart or reboot keeps the event, seen ledger,
+each recorded inbound cursor. A command that produces an effect commits the
+event state and its outbox rows in one transaction. A restart or reboot keeps the event, seen ledger,
 files, and pending deliveries.
 
 The outbound DM cursor and the inbound DM cursor are separate columns. A sent DM

@@ -816,6 +816,32 @@ mod worker_alerts {
     }
 
     #[tokio::test]
+    async fn a_retried_row_moves_behind_untouched_rows() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = database();
+        let first = PendingDelivery::Dm {
+            user_id: "u1".to_string(),
+            content: "first".to_string(),
+        };
+        let second = PendingDelivery::Dm {
+            user_id: "u2".to_string(),
+            content: "second".to_string(),
+        };
+        enqueue_pending(db.conn(), "evt-1", &first, 10).unwrap();
+        enqueue_pending(db.conn(), "evt-1", &second, 15).unwrap();
+        let first_key = format!("evt-1:{}", first.dedupe_key(10));
+        DeliveryRepo::mark_retry(db.conn(), &first_key, 20, "offline").unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let discord = FakeDiscord::new();
+        let worker = DeliveryWorker::new(db.clone(), store);
+        let report = worker.drain(&discord, 21, 10).await.unwrap();
+        assert_eq!(report.sent, 2);
+        assert_eq!(discord.sent_dms()[0].message.content, "second");
+        assert_eq!(discord.sent_dms()[1].message.content, "first");
+    }
+
+    #[tokio::test]
     async fn the_retry_cap_marks_failed_and_alerts_without_identifiers() {
         let directory = tempdir().unwrap();
         let store = BlobStore::new(directory.path().join("blobs"));
@@ -833,10 +859,28 @@ mod worker_alerts {
         let db = Arc::new(Mutex::new(db));
         let discord = FakeDiscord::new();
         let worker = DeliveryWorker::new(db.clone(), store).with_alert_channel("alerts");
-        for tick in 0..MAX_DELIVERY_ATTEMPTS {
+        let key = format!(
+            "evt-1:{}",
+            PendingDelivery::Dm {
+                user_id: "u-secret".to_string(),
+                content: "Track SAAAA belongs to u-secret".to_string(),
+            }
+            .dedupe_key(10)
+        );
+        for tick in 0..MAX_DELIVERY_ATTEMPTS - 1 {
             discord.fail_next_dm(DiscordError::Transport("offline".to_string()));
             let _ = worker.drain(&discord, 20 + tick, 10).await.unwrap();
         }
+        let row = DeliveryRepo::get(db.lock().unwrap().conn(), &key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.attempts, MAX_DELIVERY_ATTEMPTS - 1);
+        discord.fail_next_dm(DiscordError::Transport("offline".to_string()));
+        let _ = worker
+            .drain(&discord, 20 + MAX_DELIVERY_ATTEMPTS, 10)
+            .await
+            .unwrap();
         let row = DeliveryRepo::pending(db.lock().unwrap().conn(), 10).unwrap();
         assert!(row.is_empty());
         assert_eq!(discord.created_threads().len(), 1);

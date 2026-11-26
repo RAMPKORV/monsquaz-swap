@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use swap_discord::{
     DiscordGuildId, GatewayError, InboundHandler, SharedHealth, Supervisor, TwilightConfig,
@@ -33,13 +34,18 @@ impl GatewayHost {
 
     pub async fn shutdown(self) -> Result<(), String> {
         let _ = self.stop.send(true);
-        match self.task.await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(error)) => {
+        let mut task = self.task;
+        match tokio::time::timeout(Duration::from_secs(5), &mut task).await {
+            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Err(error))) => {
                 eprintln!("the Discord gateway stopped with an error: {error}");
                 Ok(())
             }
-            Err(error) => Err(error.to_string()),
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(_) => {
+                task.abort();
+                Err("the Discord gateway did not stop within 5 seconds".to_string())
+            }
         }
     }
 }

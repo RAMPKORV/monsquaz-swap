@@ -1524,9 +1524,10 @@ impl ProcessedAttachmentRepo {
         now: i64,
     ) -> Result<bool, DbError> {
         let changed = conn.execute(
-            "INSERT OR IGNORE INTO processed_attachments
+            "INSERT INTO processed_attachments
                 (user_id, message_id, attachment_id, processed_at)
-             VALUES (?1, ?2, ?3, ?4)",
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(user_id, message_id, attachment_id) DO NOTHING",
             params![user_id, message_id, attachment_id, now],
         )?;
         Ok(changed > 0)

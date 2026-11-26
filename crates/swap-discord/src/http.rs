@@ -384,6 +384,12 @@ impl AttachmentFetcher for HttpAttachmentFetcher {
                 response.status()
             )));
         }
+        if !response.status().is_success() {
+            return Err(AttachmentError::Transport(format!(
+                "Discord CDN returned {}",
+                response.status()
+            )));
+        }
         if let Some(length) = response.content_length()
             && length > max_bytes
         {

@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 13 · **Ready leaves:** 3  
+**Blocked issues:** 13 · **Ready leaves:** 5  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 24
+**Stale scores:** 26
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 12 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 12 |
+| Ready for implementation | 14 |
 | Implementation | 0 |
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 34 |
+| Done | 35 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -30,6 +30,8 @@
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 11 | `MSW-022` | Async dispatcher, Ready gate, and expiry protection | ready | 2 |
 | 21 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 25 | `MSW-060` | Group rotation, phase cadence, and no-repeat scheduling | ready | 1 |
+| 26 | `MSW-061` | Infeasible phase fallback and merge repair | ready | 1 |
 
 ## Last session
 

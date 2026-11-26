@@ -67,3 +67,10 @@ Feature: Claim and submit delivery
     Then the bot sends a receipt
     And the receipt states the current version and the next expected action
     And the receipt does not name another participant
+
+  Scenario: The host opens the next round
+    Given a classic event with every assignment resolved
+    When the host opens the next round
+    Then the app creates one offer for each planned participant
+    And the app does not open another round
+    And the app records the round in the audit log

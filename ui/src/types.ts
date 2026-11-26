@@ -8,6 +8,11 @@ export type Scenario =
   | "long"
   | "dense"
   | "offline"
+  | "reconnecting"
+  | "not-started"
+  | "lock-ready"
+  | "round-ready"
+  | "reveal-ready"
   | "infeasible";
 
 export type MissionControl = {
@@ -35,7 +40,7 @@ export type EventSummary = {
 };
 
 export type BotHealth = {
-  status: "Online" | "Offline" | "Not configured";
+  status: "Online" | "Connecting" | "Reconnecting" | "Offline" | "Not configured";
   label: string;
   detail: string;
   lastSeen: string | null;
@@ -52,7 +57,7 @@ export type NextAction = {
 
 export type Decision = {
   id: string;
-  kind: "Deadline" | "Offer" | "Schedule" | "Delivery";
+  kind: "Deadline" | "Offer" | "Schedule" | "Delivery" | "Seeds";
   title: string;
   detail: string;
   due: string;
@@ -89,8 +94,17 @@ export type AuditEntry = {
   code: string;
 };
 
+export type GatewayStatus = {
+  state: "starting" | "online" | "reconnecting" | "stopped" | "failed";
+  attempt: number;
+  lastError: string | null;
+  connectedAt: number | null;
+  handlerErrors: number;
+};
+
 export type HostSettings = {
   botConfigured: boolean;
+  gateway?: GatewayStatus;
   botIdentity: string;
   tokenStorage: "keychain" | "session" | "none";
   keychainError?: boolean;
@@ -131,6 +145,7 @@ export type BotStatus = {
   configured: boolean;
   tokenStorage: "keychain" | "session" | "none";
   keychainError: boolean;
+  gateway?: GatewayStatus;
 };
 
 export type BotSetupInput = {
@@ -223,6 +238,36 @@ export type GraphEdge = {
   trackCode: string;
   participantName: string;
   isYou?: boolean;
+};
+
+export type RosterLock = {
+  active: number;
+  fillIns: number;
+};
+
+export type RoundOpen = {
+  round: number;
+  offers: number;
+};
+
+export type RevealEntry = {
+  round: number;
+  displayName: string;
+  status: string;
+  fillIn: boolean;
+};
+
+export type RevealTrack = {
+  trackCode: string;
+  seedOwnerName: string;
+  seedOwner: string;
+  entries: RevealEntry[];
+};
+
+export type RevealData = {
+  published: boolean;
+  blocked: string[];
+  tracks: RevealTrack[];
 };
 
 export type PlanData = {

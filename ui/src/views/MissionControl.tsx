@@ -28,7 +28,9 @@ export function MissionControlView({
   onAction: (label: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
 }) {
-  const [confirmPause, setConfirmPause] = useState(false);
+  const initialDialog = new URLSearchParams(window.location.search).get("dialog");
+  const [confirmReveal, setConfirmReveal] = useState(initialDialog === "reveal");
+  const [confirmLock, setConfirmLock] = useState(initialDialog === "lock");
   if (data.firstRun || !data.event) {
     return <FirstRun onAction={onAction} />;
   }
@@ -37,9 +39,11 @@ export function MissionControlView({
   const botTone =
     data.bot.status === "Online"
       ? "ok"
-      : data.bot.status === "Offline"
-        ? "danger"
-        : "muted";
+      : data.bot.status === "Connecting" || data.bot.status === "Reconnecting"
+        ? "warn"
+        : data.bot.status === "Offline"
+          ? "danger"
+          : "muted";
 
   return (
     <div className="view">
@@ -53,15 +57,7 @@ export function MissionControlView({
             <StatusPill tone={stageTone(event.stage)}>
               {event.stage}
             </StatusPill>
-            {event.stage === "Active" ? (
-              <Button
-                variant="quiet"
-                icon="pause"
-                onClick={() => setConfirmPause(true)}
-              >
-                Pause event…
-              </Button>
-            ) : null}
+            <StatusPill tone={botTone}>{data.bot.status}</StatusPill>
           </div>
         }
       />
@@ -70,8 +66,23 @@ export function MissionControlView({
         <div className="banner banner--danger" role="status">
           <Icon name="alert" size={20} />
           <div>
-            <strong>Bot offline.</strong> Offers and direct messages are paused.
-            Claims and submissions wait safely in the local queue.
+            <strong>Bot offline.</strong> Offers, reminders, and receipts wait in
+            the local queue. A file sent while the bot is offline is not
+            guaranteed to arrive. Ask people to send it again after the bot
+            reconnects.
+          </div>
+        </div>
+      ) : data.bot.status === "Connecting" || data.bot.status === "Reconnecting" ? (
+        <div className="banner banner--warn" role="status">
+          <Icon name="clock" size={20} />
+          <div>
+            <strong>
+              {data.bot.status === "Connecting"
+                ? "Bot connecting."
+                : "Bot reconnecting."}
+            </strong>{" "}
+            {data.bot.detail} Offers, reminders, and receipts wait in the local
+            queue. A file sent now may need a resend.
           </div>
         </div>
       ) : null}
@@ -95,7 +106,17 @@ export function MissionControlView({
             <Button
               variant="primary"
               icon="arrow-right"
-              onClick={() => onAction(data.nextAction?.actionLabel ?? "")}
+              onClick={() => {
+                if (data.nextAction?.actionLabel === "Reveal event") {
+                  setConfirmReveal(true);
+                  return;
+                }
+                if (data.nextAction?.actionLabel === "Lock roster") {
+                  setConfirmLock(true);
+                  return;
+                }
+                onAction(data.nextAction?.actionLabel ?? "");
+              }}
             >
               {data.nextAction.actionLabel}
             </Button>
@@ -103,7 +124,11 @@ export function MissionControlView({
             !/^pause/i.test(data.nextAction.secondaryLabel) ? (
               <Button
                 variant="quiet"
-                icon="pause"
+                icon={
+                  /^pause/i.test(data.nextAction.secondaryLabel)
+                    ? "pause"
+                    : "arrow-right"
+                }
                 onClick={() => onAction(data.nextAction?.secondaryLabel ?? "")}
               >
                 {data.nextAction.secondaryLabel}
@@ -183,7 +208,13 @@ export function MissionControlView({
               <EmptyState
                 icon="check"
                 title="No decisions waiting"
-                detail="The round is healthy. Reminders and deadlines run on their own."
+                detail={
+                  event.stage === "Active" &&
+                  event.round > 0 &&
+                  event.round >= event.rounds
+                    ? "Every round is complete. Reveal when the stream ends."
+                    : "The round is healthy. Reminders and deadlines run on their own."
+                }
               />
             ) : (
               <ul className="decision-list">
@@ -208,13 +239,17 @@ export function MissionControlView({
                     </div>
                     <div className="decision__side">
                       <span className="decision__due">{decision.due}</span>
-                      <Button
-                        variant="secondary"
-                        ariaLabel={`${decision.actionLabel}: ${decision.title}`}
-                        onClick={() => onAction(decision.title)}
-                      >
-                        {decision.actionLabel}
-                      </Button>
+                      {decision.kind === "Schedule" ? (
+                        <Button
+                          variant="secondary"
+                          ariaLabel={`${decision.actionLabel}: ${decision.title}`}
+                          onClick={() => onAction("Open schedule planner")}
+                        >
+                          {decision.actionLabel}
+                        </Button>
+                      ) : (
+                        <StatusPill tone="muted">Soon</StatusPill>
+                      )}
                     </div>
                   </li>
                 ))}
@@ -269,10 +304,10 @@ export function MissionControlView({
             {data.bot.status === "Online" ? (
               <Button
                 variant="secondary"
-                icon="refresh"
-                onClick={() => onAction("Test connection")}
+                icon="settings"
+                onClick={() => onAction("Connection settings")}
               >
-                Test connection
+                Connection settings
               </Button>
             ) : null}
           </section>
@@ -301,34 +336,75 @@ export function MissionControlView({
         </aside>
       </div>
 
-      {confirmPause ? (
+      {confirmLock ? (
         <Dialog
-          title="Pause the event?"
-          onClose={() => setConfirmPause(false)}
+          title="Lock the roster?"
+          initialFocusId="lock-cancel"
+          onClose={() => setConfirmLock(false)}
           footer={
             <>
-              <Button variant="secondary" onClick={() => setConfirmPause(false)}>
+              <Button
+                id="lock-cancel"
+                variant="secondary"
+                onClick={() => setConfirmLock(false)}
+              >
                 Cancel
               </Button>
               <Button
                 variant="primary"
-                icon="pause"
                 onClick={() => {
-                  setConfirmPause(false);
-                  onAction("Pause event");
+                  setConfirmLock(false);
+                  onAction("Lock roster");
                 }}
               >
-                Pause event
+                Lock roster
               </Button>
             </>
           }
         >
           <p>
-            Offers stop and reminders pause. Every deadline moves later by the
-            pause length. People keep the tracks they hold.
+            Seed intake closes. Anyone without a seed becomes a fill-in. The app
+            keeps every submitted seed and builds the draft schedule next. This
+            cannot be undone without a host decision.
           </p>
         </Dialog>
       ) : null}
+
+      {confirmReveal ? (
+        <Dialog
+          title="Reveal the event?"
+          initialFocusId="reveal-cancel"
+          onClose={() => setConfirmReveal(false)}
+          footer={
+            <>
+              <Button
+                id="reveal-cancel"
+                variant="secondary"
+                onClick={() => setConfirmReveal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setConfirmReveal(false);
+                  onAction("Reveal event");
+                }}
+              >
+                Reveal event
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Credits, participant names, and the assignment history become
+            public in the reveal channel. This ends anonymity and cannot be
+            undone. If the bot is offline, the message waits in the queue. Make
+            sure every track is final before you continue.
+          </p>
+        </Dialog>
+      ) : null}
+
     </div>
   );
 }

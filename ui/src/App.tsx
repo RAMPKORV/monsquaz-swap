@@ -31,6 +31,9 @@ import {
   isDemoMode,
   createEvent,
   generatePlan,
+  lockRoster,
+  openRound,
+  revealEvent,
   startEvent,
   loadAuditLog,
   loadMissionControl,
@@ -255,7 +258,7 @@ export default function App() {
     setReloadToken((value) => value + 1);
   }
 
-  function notify(label: string) {
+  async function notify(label: string) {
     if (label === "Open event setup" || label === "Start setup") {
       setView("setup");
       return;
@@ -268,8 +271,61 @@ export default function App() {
       setView("people");
       return;
     }
-    if (label === "Open settings") {
+    if (
+      label === "Open settings" ||
+      label === "Connection settings" ||
+      label === "Test connection" ||
+      label === "Reconnect now"
+    ) {
       setView("settings");
+      return;
+    }
+    if (label === "Review decisions") {
+      document.getElementById("decisions-title")?.scrollIntoView({ block: "start" });
+      setToast("Review the decisions below. Nothing moves until you choose.");
+      return;
+    }
+    if (label === "Lock roster") {
+      try {
+        const result = await lockRoster();
+        setToast(
+          `Roster locked. ${result.active} active, ${result.fillIns} fill-in.`,
+        );
+        reloadView();
+      } catch (error) {
+        setToast(`Could not lock the roster. ${errorDetail(error)}`);
+      }
+      return;
+    }
+    const round = /^Open Round (\d+)$/.exec(label);
+    if (round) {
+      try {
+        const opened = await openRound(Number(round[1]) - 1);
+        setToast(
+          `Round ${opened.round + 1} opened. ${opened.offers} offers queued.`,
+        );
+        reloadView();
+      } catch (error) {
+        setToast(`Could not open the round. ${errorDetail(error)}`);
+      }
+      return;
+    }
+    if (label === "Reveal event") {
+      try {
+        const revealed = await revealEvent();
+        if (!revealed.published) {
+          setToast(
+            `Reveal blocked by ${revealed.blocked.length} active assignment(s). Resolve them first.`,
+          );
+        } else {
+          setToast(
+            `Reveal recorded. ${revealed.tracks.length} track credits are queued for the reveal channel.`,
+          );
+        }
+        reloadView();
+      } catch (error) {
+        setToast(`Could not reveal the event. ${errorDetail(error)}`);
+      }
       return;
     }
     setToast(
@@ -277,6 +333,14 @@ export default function App() {
         ? `Preview: “${label}” does not change Discord yet.`
         : `“${label}” is not wired in this build.`,
     );
+  }
+
+  function errorDetail(error: unknown) {
+    return typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "The command failed.";
   }
 
   async function handleGeneratePlan() {
@@ -378,8 +442,9 @@ export default function App() {
     setSaving(true);
     try {
       const saved = await saveSettings(settings);
-      setSettings(saved);
-      setOriginalSettings(saved);
+      const withHealth = { ...saved, gateway: settings.gateway };
+      setSettings(withHealth);
+      setOriginalSettings(withHealth);
       setDirty(false);
       setToast("Settings saved on this computer.");
       focusMainHeading();
@@ -579,9 +644,13 @@ export default function App() {
             <span className="statusbar__item statusbar__bot">
               {mission?.bot?.status === "Online"
                 ? "Bot online"
-                : mission?.bot?.status === "Offline"
-                  ? "Bot offline"
-                  : "No bot"}
+                : mission?.bot?.status === "Connecting"
+                  ? "Bot connecting"
+                  : mission?.bot?.status === "Reconnecting"
+                    ? "Bot reconnecting"
+                  : mission?.bot?.status === "Offline"
+                    ? "Bot offline"
+                    : "No bot"}
             </span>
             <span className="statusbar__spacer" />
             <span className="statusbar__item">
@@ -806,9 +875,13 @@ function Sidebar({
                 ? "Status unavailable"
                 : bot?.status === "Online"
                   ? "Bot online"
-                  : bot?.status === "Offline"
-                    ? "Bot offline"
-                    : "No bot"}
+                  : bot?.status === "Connecting"
+                    ? "Bot connecting"
+                    : bot?.status === "Reconnecting"
+                      ? "Bot reconnecting"
+                    : bot?.status === "Offline"
+                      ? "Bot offline"
+                      : "No bot"}
           </StatusPill>
           <span className="sidebar-bot__name">
             {status === "loading"

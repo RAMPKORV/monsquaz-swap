@@ -55,6 +55,18 @@ pub enum GatewayState {
     Failed,
 }
 
+impl GatewayState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Online => "online",
+            Self::Reconnecting => "reconnecting",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatewayHealth {
     pub state: GatewayState,

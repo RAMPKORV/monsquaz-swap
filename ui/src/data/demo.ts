@@ -202,7 +202,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     mission.bot = {
       status: "Offline",
       label: "Monsquaz Bot",
-      detail: "Discord connection is down, offers are paused",
+      detail: "Discord rejected the bot token",
       lastSeen: "18 minutes ago",
     };
     mission.nextAction = {
@@ -211,9 +211,155 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       detail:
         "The queue is safe. Reconnect before the next batch so offers can go out.",
       actionLabel: "Reconnect now",
-      secondaryLabel: "Run connection test",
+      secondaryLabel: null,
       tone: "attention",
     };
+    return mission;
+  }
+
+  if (scenario === "not-started") {
+    mission.bot = {
+      status: "Offline",
+      label: "Monsquaz Bot",
+      detail: "The gateway is not running.",
+      lastSeen: null,
+    };
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Start the bot",
+      detail: "A token is stored. Open settings and start the Discord gateway.",
+      actionLabel: "Open settings",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    return mission;
+  }
+
+  if (scenario === "reconnecting") {
+    mission.bot = {
+      status: "Reconnecting",
+      label: "Monsquaz Bot",
+      detail: "Discord is not answering. Retry in 8 seconds.",
+      lastSeen: "2 minutes ago",
+    };
+    return mission;
+  }
+
+  if (scenario === "lock-ready") {
+    if (mission.event) {
+      mission.event.stage = "Join phase";
+      mission.event.round = 0;
+      mission.event.seeded = 10;
+      mission.event.fillIns = 0;
+      mission.event.tracks = 10;
+    }
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Lock the roster",
+      detail:
+        "10 seeds are in and 2 people still need a seed. Locking closes seed intake; the 2 people become fill-ins.",
+      actionLabel: "Lock roster",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.facts = mission.facts.map((fact) =>
+      fact.label === "People"
+        ? { ...fact, value: "12 signed up, 10 seeds, 2 without a seed" }
+        : fact.label === "Tracks"
+          ? { ...fact, value: "10 anonymous tracks" }
+          : fact.label === "Next release"
+            ? { ...fact, label: "First release", value: "After the schedule locks" }
+            : fact,
+    );
+    mission.timeline = [
+      {
+        id: "seeds",
+        label: "Seeds",
+        caption: "10 tracks · 2 signups",
+        state: "done",
+      },
+      {
+        id: "roster",
+        label: "Roster lock",
+        caption: "Not locked",
+        state: "current",
+      },
+      {
+        id: "rounds",
+        label: "Rounds",
+        caption: "11 planned",
+        state: "next",
+      },
+      {
+        id: "reveal",
+        label: "Reveal",
+        caption: "After the final round",
+        state: "next",
+      },
+    ];
+    mission.decisions = [
+      {
+        id: "lock-ready",
+        kind: "Seeds",
+        title: "2 people still need a seed",
+        detail:
+          "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.",
+        due: "Before roster lock",
+        actionLabel: "Review",
+      },
+    ];
+    return mission;
+  }
+
+  if (scenario === "round-ready") {
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Open round 4",
+      detail:
+        "Every track in round 3 is resolved. Opening round 4 sends 10 offers in the next batch.",
+      actionLabel: "Open Round 4",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.timeline = mission.timeline.map((step) =>
+      step.id === "round-3" ? { ...step, state: "done" } : step,
+    );
+    mission.decisions = [
+      {
+        id: "round-ready",
+        kind: "Schedule",
+        title: "Round 4 is ready to open",
+        detail:
+          "All round 3 claims are resolved. Opening the round sends ten offers in the next batch.",
+        due: "After round 3 closes",
+        actionLabel: "Preview",
+      },
+    ];
+    return mission;
+  }
+
+  if (scenario === "reveal-ready") {
+    if (mission.event) mission.event.round = 11;
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Reveal the event",
+      detail:
+        "Every planned round is complete. Reveal publishes the credits to the reveal channel.",
+      actionLabel: "Reveal event",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.timeline = mission.timeline.map((step) =>
+      step.id === "reveal"
+        ? { ...step, state: "current" }
+        : { ...step, state: "done" },
+    );
+    mission.facts = mission.facts.map((fact) =>
+      fact.label === "Next release"
+        ? { ...fact, label: "Reveal", value: "Ready now" }
+        : fact,
+    );
+    mission.decisions = [];
     return mission;
   }
 
@@ -327,6 +473,13 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
 
 const defaultSettings: HostSettings = {
   botConfigured: true,
+  gateway: {
+    state: "online",
+    attempt: 0,
+    lastError: null,
+    connectedAt: 1_764_165_600,
+    handlerErrors: 0,
+  },
   botIdentity: "Monsquaz Bot (1184)",
   tokenStorage: "keychain",
   guildId: "8142276038192",
@@ -360,6 +513,33 @@ export function demoSettings(scenario: Scenario): HostSettings {
       revealChannelId: "",
       revealChannelName: "",
       theme: "system",
+    };
+  }
+  if (scenario === "offline") {
+    return {
+      ...defaultSettings,
+      gateway: {
+        state: "failed",
+        attempt: 3,
+        lastError: "Discord rejected the bot token",
+        connectedAt: null,
+        handlerErrors: 0,
+      },
+    };
+  }
+  if (scenario === "not-started") {
+    return { ...defaultSettings, gateway: undefined };
+  }
+  if (scenario === "reconnecting") {
+    return {
+      ...defaultSettings,
+      gateway: {
+        state: "reconnecting",
+        attempt: 3,
+        lastError: "Discord is not answering",
+        connectedAt: null,
+        handlerErrors: 0,
+      },
     };
   }
   if (scenario === "long") {

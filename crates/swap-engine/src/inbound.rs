@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, watch};
 
 use async_trait::async_trait;
 use swap_db::{AssignmentRepo, AuditRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
@@ -20,9 +20,17 @@ use swap_files::BlobStore;
 
 use crate::clock::Clock;
 use crate::delivery::{DeliveryReport, DeliveryWorker};
-use crate::engine::{EngineError, SubmissionSource, SubmitRequest, claim, skip, submit_attachment};
+use crate::engine::{
+    EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed, signup, skip,
+    submit_attachment,
+};
 use crate::prepare::DeliveryPreparer;
 use crate::settings::EventSettings;
+
+type InboundQueue = (
+    mpsc::UnboundedSender<InboundEvent>,
+    tokio::task::JoinHandle<()>,
+);
 
 #[derive(Clone)]
 pub struct InboundService {
@@ -34,7 +42,9 @@ pub struct InboundService {
     clock: Arc<dyn Clock>,
     worker: DeliveryWorker,
     wake: Arc<Notify>,
-    queues: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<InboundEvent>>>>,
+    queues: Arc<Mutex<HashMap<String, InboundQueue>>>,
+    queue_stop: watch::Sender<bool>,
+    stopped: Arc<AtomicBool>,
     backfill_pending: Arc<Mutex<HashSet<String>>>,
     backfill_notify: Arc<Notify>,
     backfill_warned: Arc<AtomicBool>,
@@ -72,6 +82,8 @@ impl InboundService {
             worker,
             wake: Arc::new(Notify::new()),
             queues: Arc::new(Mutex::new(HashMap::new())),
+            queue_stop: watch::channel(false).0,
+            stopped: Arc::new(AtomicBool::new(false)),
             backfill_pending: Arc::new(Mutex::new(HashSet::new())),
             backfill_notify: Arc::new(Notify::new()),
             backfill_warned: Arc::new(AtomicBool::new(false)),
@@ -110,15 +122,19 @@ impl InboundService {
         }
     }
 
-    async fn wait_for_backfill(&self, user_id: &str) {
+    async fn wait_for_backfill(&self, user_id: &str) -> bool {
+        let mut stop = self.queue_stop.subscribe();
         loop {
+            if *stop.borrow() {
+                return false;
+            }
             let pending = self
                 .backfill_pending
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .contains(user_id);
             if !pending {
-                return;
+                return true;
             }
             let notified = self.backfill_notify.notified();
             let still_pending = self
@@ -127,9 +143,16 @@ impl InboundService {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .contains(user_id);
             if !still_pending {
-                return;
+                return true;
             }
-            notified.await;
+            tokio::select! {
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow() {
+                        return false;
+                    }
+                }
+                _ = notified => {}
+            }
         }
     }
 
@@ -138,20 +161,56 @@ impl InboundService {
             .queues
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(sender) = queues.get(user_id) {
+        if let Some((sender, _)) = queues.get(user_id) {
             return sender.clone();
         }
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let service = self.clone();
-        tokio::spawn(async move {
-            while let Some(event) = receiver.recv().await {
-                if let Err(error) = service.process(event).await {
-                    eprintln!("inbound event failed: {error}");
+        let mut stop = self.queue_stop.subscribe();
+        let task = tokio::spawn(async move {
+            loop {
+                if *stop.borrow() {
+                    break;
+                }
+                tokio::select! {
+                    changed = stop.changed() => {
+                        if changed.is_err() || *stop.borrow() {
+                            break;
+                        }
+                    }
+                    event = receiver.recv() => {
+                        let Some(event) = event else {
+                            break;
+                        };
+                        if let Err(error) = service.process(event).await {
+                            eprintln!("inbound event failed: {error}");
+                        }
+                    }
                 }
             }
         });
-        queues.insert(user_id.to_string(), sender.clone());
+        queues.insert(user_id.to_string(), (sender.clone(), task));
         sender
+    }
+
+    /// Stop every per-participant queue. In-flight work finishes; queued work is
+    /// dropped. The service refuses new events after this call.
+    pub async fn stop_queues(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        let _ = self.queue_stop.send(true);
+        let tasks = {
+            let mut queues = self
+                .queues
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            queues
+                .drain()
+                .map(|(_, (_, task))| task)
+                .collect::<Vec<_>>()
+        };
+        for task in tasks {
+            let _ = task.await;
+        }
     }
 
     pub fn wake_notifier(&self) -> Arc<Notify> {
@@ -249,6 +308,7 @@ impl InboundService {
                             &cursor.user_id,
                             &cursor.channel_id,
                             &message.message_id.0,
+                            None,
                             attachment,
                         )
                         .await
@@ -324,15 +384,131 @@ impl InboundService {
         Ok(report)
     }
 
+    async fn join_seed(
+        &self,
+        event: &swap_db::EventRecord,
+        user_id: &str,
+        channel_id: &str,
+        message_id: &str,
+        author_name: Option<&str>,
+        attachment: &DmAttachment,
+    ) -> Result<(), String> {
+        let settings: EventSettings =
+            serde_json::from_str(&event.settings_json).map_err(|error| error.to_string())?;
+        if attachment.size > settings.max_file_bytes {
+            self.notify(
+                user_id,
+                "That seed is larger than this event allows. Send a smaller file.",
+            )
+            .await;
+            self.mark_processed(user_id, message_id, &attachment.id)?;
+            self.update_cursor(user_id, channel_id, message_id)?;
+            return Ok(());
+        }
+        let bytes = match self
+            .fetcher
+            .fetch(&attachment.url, settings.max_file_bytes)
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.notify(
+                    user_id,
+                    "The seed download failed. Please send the file again.",
+                )
+                .await;
+                return Err(error.to_string());
+            }
+        };
+        let participant = {
+            let db = self.lock();
+            swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
+                .map_err(|error| error.to_string())?
+        };
+        let display_name = author_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                participant
+                    .as_ref()
+                    .map(|participant| participant.display_name.clone())
+                    .unwrap_or_else(|| user_id.to_string())
+            });
+        let timezone = participant
+            .as_ref()
+            .map(|participant| participant.timezone.clone())
+            .unwrap_or_else(|| "UTC".to_string());
+        let max_handoffs = participant
+            .as_ref()
+            .map(|participant| participant.max_handoffs)
+            .unwrap_or(4);
+        let db = self.db.clone();
+        let store = self.store.clone();
+        let preparer = self.preparer.clone();
+        let event_id = event.id.clone();
+        let user = user_id.to_string();
+        let filename = attachment.filename.clone();
+        let now = self.now();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let db = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            join_with_seed(
+                &db,
+                &store,
+                preparer.as_ref(),
+                &JoinRequest {
+                    event_id: &event_id,
+                    user_id: &user,
+                    display_name: &display_name,
+                    timezone: &timezone,
+                    max_handoffs,
+                    filename: &filename,
+                    bytes: &bytes,
+                },
+                now,
+            )
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+        match outcome {
+            Ok(_) => {
+                self.mark_processed(user_id, message_id, &attachment.id)?;
+                self.update_cursor(user_id, channel_id, message_id)?;
+                Ok(())
+            }
+            Err(error) if terminal_join(&error) => {
+                self.notify(user_id, &join_message(&error)).await;
+                self.mark_processed(user_id, message_id, &attachment.id)?;
+                self.update_cursor(user_id, channel_id, message_id)?;
+                Ok(())
+            }
+            Err(error) => {
+                self.notify(
+                    user_id,
+                    "The seed was not stored. Please send the file again or ask the host.",
+                )
+                .await;
+                Err(error.to_string())
+            }
+        }
+    }
+
     async fn handle_attachment(
         &self,
         user_id: &DiscordUserId,
         channel_id: &DiscordChannelId,
         message_id: &str,
+        author_name: Option<&str>,
         attachment: &DmAttachment,
     ) -> Result<(), String> {
-        self.attachment(&user_id.0, &channel_id.0, message_id, attachment)
-            .await
+        self.attachment(
+            &user_id.0,
+            &channel_id.0,
+            message_id,
+            author_name,
+            attachment,
+        )
+        .await
     }
 
     async fn attachment(
@@ -340,6 +516,7 @@ impl InboundService {
         user_id: &str,
         channel_id: &str,
         message_id: &str,
+        author_name: Option<&str>,
         attachment: &DmAttachment,
     ) -> Result<(), String> {
         {
@@ -352,13 +529,90 @@ impl InboundService {
         }
 
         let event = {
-            let db = self.lock();
-            EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
-        };
-        let Some(event) = event else {
-            self.notify(user_id, "There is no active swap event for you.")
-                .await;
-            return Ok(());
+            let active = {
+                let db = self.lock();
+                EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+            };
+            if let Some(event) = active {
+                event
+            } else {
+                let signup = {
+                    let db = self.lock();
+                    EventRepo::signup_event(db.conn()).map_err(|error| error.to_string())?
+                };
+                if let Some(event) = signup {
+                    if !message_is_current(message_id, event.created_at) {
+                        self.notify(
+                            user_id,
+                            "That seed is older than the current signup. Send the seed again.",
+                        )
+                        .await;
+                        self.mark_processed(user_id, message_id, &attachment.id)?;
+                        self.update_cursor(user_id, channel_id, message_id)?;
+                        return Ok(());
+                    }
+                    let other = {
+                        let db = self.lock();
+                        EventRepo::open_for_user(db.conn(), user_id)
+                            .map_err(|error| error.to_string())?
+                    };
+                    if other.as_ref().is_some_and(|other| other.id != event.id) {
+                        self.notify(
+                            user_id,
+                            "You are already in an event that has not started. Finish or leave it before you send another seed.",
+                        )
+                        .await;
+                        self.mark_processed(user_id, message_id, &attachment.id)?;
+                        self.update_cursor(user_id, channel_id, message_id)?;
+                        return Ok(());
+                    }
+                    let participant = {
+                        let db = self.lock();
+                        swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
+                            .map_err(|error| error.to_string())?
+                    };
+                    match participant
+                        .as_ref()
+                        .map(|participant| participant.membership)
+                    {
+                        None | Some(swap_core::Membership::SignedUp) => {
+                            return self
+                                .join_seed(
+                                    &event,
+                                    user_id,
+                                    channel_id,
+                                    message_id,
+                                    author_name,
+                                    attachment,
+                                )
+                                .await;
+                        }
+                        Some(swap_core::Membership::Seeded | swap_core::Membership::Active) => {
+                            self.notify(
+                                user_id,
+                                "You already sent a seed. Wait for the host to start the event.",
+                            )
+                            .await;
+                            self.mark_processed(user_id, message_id, &attachment.id)?;
+                            self.update_cursor(user_id, channel_id, message_id)?;
+                            return Ok(());
+                        }
+                        Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
+                            self.notify(
+                                user_id,
+                                "You left this event. Ask the host to return as a fill-in.",
+                            )
+                            .await;
+                            self.mark_processed(user_id, message_id, &attachment.id)?;
+                            self.update_cursor(user_id, channel_id, message_id)?;
+                            return Ok(());
+                        }
+                    }
+                }
+                self.notify(user_id, "There is no active swap event for you.")
+                    .await;
+                return Ok(());
+            }
         };
         let assignment = {
             let db = self.lock();
@@ -472,6 +726,141 @@ impl InboundService {
         }
     }
 
+    async fn handle_join(
+        &self,
+        user_id: &str,
+        options: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let event = {
+            let db = self.lock();
+            EventRepo::signup_event(db.conn()).map_err(|error| error.to_string())?
+        };
+        let Some(event) = event else {
+            self.notify(user_id, "There is no signup event open now.")
+                .await;
+            return Ok(());
+        };
+        let active = {
+            let db = self.lock();
+            EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        };
+        if active.is_some() {
+            self.notify(
+                user_id,
+                "You are already in an active event. Finish or leave it before you join another.",
+            )
+            .await;
+            return Ok(());
+        }
+        let other = {
+            let db = self.lock();
+            EventRepo::open_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        };
+        if other.as_ref().is_some_and(|other| other.id != event.id) {
+            self.notify(
+                user_id,
+                "You are already in an event that has not started. Finish or leave it before you join another.",
+            )
+            .await;
+            return Ok(());
+        }
+        let participant = {
+            let db = self.lock();
+            swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
+                .map_err(|error| error.to_string())?
+        };
+        match participant
+            .as_ref()
+            .map(|participant| participant.membership)
+        {
+            Some(swap_core::Membership::Seeded | swap_core::Membership::Active) => {
+                self.notify(
+                    user_id,
+                    "You already sent a seed. Wait for the host to start.",
+                )
+                .await;
+                return Ok(());
+            }
+            Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
+                self.notify(
+                    user_id,
+                    "You left this event. Ask the host to return as a fill-in.",
+                )
+                .await;
+                return Ok(());
+            }
+            Some(swap_core::Membership::SignedUp) | None => {}
+        }
+        let has_options = options.contains_key("timezone") || options.contains_key("max_handoffs");
+        if participant.is_none() || has_options {
+            let timezone = options
+                .get("timezone")
+                .map(String::as_str)
+                .filter(|value| {
+                    !value.trim().is_empty()
+                        && value.len() <= 64
+                        && value.contains('/')
+                        && !value.contains(' ')
+                })
+                .or_else(|| {
+                    participant
+                        .as_ref()
+                        .map(|participant| participant.timezone.as_str())
+                })
+                .unwrap_or("UTC")
+                .to_string();
+            let max_handoffs = options
+                .get("max_handoffs")
+                .and_then(|value| value.parse::<u32>().ok())
+                .or_else(|| {
+                    participant
+                        .as_ref()
+                        .map(|participant| participant.max_handoffs)
+                })
+                .unwrap_or(4)
+                .clamp(1, 20);
+            let db = self.lock();
+            signup(
+                &db,
+                &event.id,
+                user_id,
+                user_id,
+                &timezone,
+                max_handoffs,
+                self.now(),
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        let settings: EventSettings =
+            serde_json::from_str(&event.settings_json).unwrap_or_default();
+        let formats = settings
+            .allowed_extensions
+            .iter()
+            .map(|extension| format!(".{extension}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let max_mib = settings.max_file_bytes / (1024 * 1024);
+        let content = format!(
+            "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. The bot stores the file locally."
+        );
+        if let Ok(message_id) = self
+            .discord
+            .send_dm(
+                &DiscordUserId::new(user_id),
+                swap_discord::OutboundMessage { content },
+            )
+            .await
+        {
+            let db = self.lock();
+            if let Err(error) =
+                DmCursorRepo::set_sent(db.conn(), user_id, "dm", &message_id.0, true, self.now())
+            {
+                eprintln!("join cursor seed failed: {error}");
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_claim(
         &self,
         event_id: &str,
@@ -582,7 +971,9 @@ impl InboundService {
 
 impl InboundService {
     pub async fn process(&self, event: InboundEvent) -> Result<(), String> {
-        self.wait_for_backfill(&event.user_id().0).await;
+        if !self.wait_for_backfill(&event.user_id().0).await {
+            return Err("the inbound service is stopped".to_string());
+        }
         let result = self.process_inner(event).await;
         self.wake.notify_one();
         result
@@ -594,10 +985,17 @@ impl InboundService {
                 user_id,
                 channel_id,
                 message_id,
+                author_name,
                 attachment,
             } => {
-                self.handle_attachment(&user_id, &channel_id, &message_id.0, &attachment)
-                    .await
+                self.handle_attachment(
+                    &user_id,
+                    &channel_id,
+                    &message_id.0,
+                    author_name.as_deref(),
+                    &attachment,
+                )
+                .await
             }
             InboundEvent::Button {
                 user_id, custom_id, ..
@@ -610,7 +1008,10 @@ impl InboundService {
                 _ => Ok(()),
             },
             InboundEvent::SlashCommand {
-                user_id, command, ..
+                user_id,
+                command,
+                options,
+                ..
             } => match command {
                 swap_discord::SlashCommand::Claim => {
                     let Some(event_id) = self.active_event(&user_id.0).await? else {
@@ -628,6 +1029,7 @@ impl InboundService {
                     };
                     self.handle_skip(&event_id, &user_id.0).await
                 }
+                swap_discord::SlashCommand::Join => self.handle_join(&user_id.0, &options).await,
                 swap_discord::SlashCommand::Status => {
                     self.notify(&user_id.0, "Use the offer in your direct messages.")
                         .await;
@@ -651,6 +1053,9 @@ impl InboundService {
 #[async_trait]
 impl InboundHandler for InboundService {
     async fn handle(&self, event: InboundEvent) -> Result<(), String> {
+        if self.stopped.load(Ordering::SeqCst) {
+            return Err("the inbound service is stopped".to_string());
+        }
         let user_id = event.user_id().0.clone();
         self.queue_sender(&user_id)
             .send(event)
@@ -672,6 +1077,32 @@ fn message_is_current(message_id: &str, cutoff_secs: i64) -> bool {
     };
     let millis = (id >> 22) as i64 + DISCORD_EPOCH_MS;
     millis / 1000 + CLOCK_SKEW_SECS >= cutoff_secs
+}
+
+fn terminal_join(error: &EngineError) -> bool {
+    matches!(
+        error,
+        EngineError::AlreadySeeded
+            | EngineError::ParticipantLeft
+            | EngineError::WrongEventState { .. }
+            | EngineError::File(_)
+            | EngineError::Prepare(_)
+            | EngineError::Settings(_)
+    )
+}
+
+fn join_message(error: &EngineError) -> String {
+    match error {
+        EngineError::AlreadySeeded => "You already sent a seed.".to_string(),
+        EngineError::ParticipantLeft => "You left this event. Ask the host to return.".to_string(),
+        EngineError::WrongEventState { .. } => {
+            "Seed intake is closed. Ask the host about the fill-in path.".to_string()
+        }
+        EngineError::File(_) | EngineError::Prepare(_) => {
+            "That seed file is not allowed. Check the format and size.".to_string()
+        }
+        _ => "The seed was rejected. Ask the host for help.".to_string(),
+    }
 }
 
 fn permanent_backfill_error(error: &DiscordError) -> bool {

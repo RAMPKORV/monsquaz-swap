@@ -22,7 +22,9 @@ normalized events and decides what to do.
   `fetch_dm_after`.
 - `src-tauri/src/live_runtime.rs` owns the supervisor, the inbound service, and
   the delivery worker. The app starts it when a keychain token and guild are
-  configured.
+  configured. It exposes the supervisor health to the host commands.
+- The inbound service handles `/swap join`, claim, skip, status, and help. A
+  seed attachment in the signup state creates the participant and the track.
 
 ## Runtime loop
 
@@ -125,6 +127,22 @@ message. The delivery id is stable. A future transport nonce or reconciliation
 step must close that window. The formal delivery model allows duplicate sends
 and one acknowledgement.
 
+## Classic host actions
+
+- `host_lock_roster` closes seed intake and classifies unseeded signups as
+  fill-ins. The planner refuses to generate a schedule before the lock.
+- `host_open_round` opens one round. The host must call it. No timer opens a
+  round.
+- `host_reveal` checks the reveal gate and writes one credits message to the
+  mapped reveal channel in the same transaction as the state change.
+- `/swap join` records the optional timezone and handoff budget, then sends the
+  seed instructions. It refuses a user who is active in another event or seeded in an event that
+  has not started. It seeds
+  the inbound cursor to the instruction message, so a seed sent during a short
+  outage is backfilled. A seed attachment calls `join_with_seed`.
+- The gateway health appears in the mission control and settings views. The
+  states are starting, online, reconnecting, stopped, and failed.
+
 ## Deferred work
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and
@@ -133,11 +151,9 @@ and one acknowledgement.
   private thread under the announcement channel and adds no participant. The
   host must be a thread member to read the alert. Keep the announcement channel
   free of participants, or add a host-alert channel before beta.
-- The UI does not show gateway health or a dead supervisor task. MSW-045 tracks
-  the status surface.
-- The inbound service handles claim, skip, status, and help. It does not yet
-  route `/swap seed`, `/swap join`, or member joins to the engine. MSW-021
-  tracks the classic end-to-end loop.
+- The DM handshake test message and away dates are not collected in this slice.
+  The timezone and handoff budget use slash options with UTC and four as
+  defaults. A later issue adds the handshake.
 - Transport nonce or reconciliation must close the duplicate-send window
   (MSW-044).
 - The real test guild smoke test needs `DISCORD_TOKEN` and `DISCORD_GUILD`.

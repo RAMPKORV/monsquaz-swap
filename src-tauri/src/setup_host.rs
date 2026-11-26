@@ -191,6 +191,17 @@ pub struct BotStatusDto {
     pub configured: bool,
     pub token_storage: String,
     pub keychain_error: bool,
+    pub gateway: Option<GatewayStatusDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayStatusDto {
+    pub state: String,
+    pub attempt: u32,
+    pub last_error: Option<String>,
+    pub connected_at: Option<i64>,
+    pub handler_errors: u32,
 }
 
 #[derive(Clone, Deserialize)]
@@ -408,6 +419,7 @@ fn status_from(
             configured: true,
             token_storage: "session".to_string(),
             keychain_error: false,
+            gateway: None,
         };
     }
     match keychain {
@@ -415,21 +427,25 @@ fn status_from(
             configured: true,
             token_storage: "keychain".to_string(),
             keychain_error: false,
+            gateway: None,
         },
         Ok(None) => BotStatusDto {
             configured: false,
             token_storage: "none".to_string(),
             keychain_error: false,
+            gateway: None,
         },
         Err(TokenStoreError::NoStore) => BotStatusDto {
             configured: false,
             token_storage: "none".to_string(),
             keychain_error: false,
+            gateway: None,
         },
         Err(_) => BotStatusDto {
             configured: false,
             token_storage: "none".to_string(),
             keychain_error: true,
+            gateway: None,
         },
     }
 }
@@ -567,7 +583,21 @@ pub async fn host_bot_status(
     runtime: State<'_, BotRuntime>,
 ) -> Result<BotStatusDto, String> {
     let settings = host::read_settings(&app).unwrap_or_default();
-    status(&runtime, &settings.token_storage).await
+    let mut status = status(&runtime, &settings.token_storage).await?;
+    #[cfg(feature = "live")]
+    {
+        status.gateway = app
+            .state::<crate::live_runtime::LiveRuntime>()
+            .health()
+            .map(|health| GatewayStatusDto {
+                state: health.state.as_str().to_string(),
+                attempt: health.attempt,
+                last_error: health.last_error,
+                connected_at: health.connected_at,
+                handler_errors: health.handler_errors,
+            });
+    }
+    Ok(status)
 }
 
 #[tauri::command]

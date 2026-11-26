@@ -69,6 +69,7 @@ export function initialScenario(): Scenario {
     "reconnecting",
     "not-started",
     "lock-ready",
+    "extension-ready",
     "round-ready",
     "reveal-ready",
     "infeasible",
@@ -422,6 +423,40 @@ export async function openRound(round: number): Promise<RoundOpen> {
     return { round, offers: 12 };
   }
   return invoke<RoundOpen>("host_open_round", { round });
+}
+
+export async function decideExtension(
+  decisionId: string,
+  approve: boolean,
+  reason: string,
+): Promise<void> {
+  if (isDemoMode()) {
+    await pause(260);
+    return;
+  }
+  return invoke<void>("host_decide_extension", {
+    decisionId,
+    approve,
+    reason,
+  });
+}
+
+export async function decideDeadline(
+  assignmentId: string,
+  action: string,
+  hours: number,
+  reason: string,
+): Promise<void> {
+  if (isDemoMode()) {
+    await pause(300);
+    return;
+  }
+  return invoke<void>("host_decide_deadline", {
+    assignmentId,
+    action,
+    hours,
+    reason,
+  });
 }
 
 export async function revealEvent(): Promise<RevealData> {

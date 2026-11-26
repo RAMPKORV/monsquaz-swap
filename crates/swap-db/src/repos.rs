@@ -111,6 +111,17 @@ impl EventRepo {
         raw.map(TryInto::try_into).transpose()
     }
 
+    pub fn list_active(conn: &Connection) -> Result<Vec<EventRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, name, state, seed, settings_json, created_at, updated_at
+             FROM events WHERE state = 'active' ORDER BY created_at, id",
+        )?;
+        let rows = statement
+            .query_map([], row_to_raw_event)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(TryInto::try_into).collect()
+    }
+
     pub fn open_for_user(conn: &Connection, user_id: &str) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(
@@ -634,6 +645,21 @@ impl AssignmentRepo {
              SET status = 'claimed', claimed_at = ?1, due_at = ?2, updated_at = ?3
              WHERE id = ?4 AND status = 'offered'",
             params![claimed_at, due_at, updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn extend(
+        conn: &Connection,
+        id: &str,
+        due_at: i64,
+        updated_at: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments
+             SET status = 'claimed', due_at = ?1, updated_at = ?2
+             WHERE id = ?3 AND status IN ('claimed', 'overdue')",
+            params![due_at, updated_at, id],
         )?;
         Ok(changed > 0)
     }
@@ -1620,4 +1646,204 @@ mod dm_cursor_tests {
         assert!(cursor.last_seen_message_id.is_none());
         assert_eq!(cursor.last_sent_message_id.as_deref(), Some("300"));
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssignmentDeadlineRecord {
+    pub assignment_id: String,
+    pub extension_count: i64,
+    pub reminded_50: bool,
+    pub reminded_80: bool,
+    pub reminded_95: bool,
+    pub deadline_reminded: bool,
+}
+
+pub struct DeadlineRepo;
+
+impl DeadlineRepo {
+    pub fn ensure(conn: &Connection, assignment_id: &str) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO assignment_deadlines (assignment_id)
+             VALUES (?1) ON CONFLICT(assignment_id) DO NOTHING",
+            params![assignment_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(
+        conn: &Connection,
+        assignment_id: &str,
+    ) -> Result<Option<AssignmentDeadlineRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT assignment_id, extension_count, reminded_50, reminded_80,
+                        reminded_95, deadline_reminded
+                 FROM assignment_deadlines WHERE assignment_id = ?1",
+                params![assignment_id],
+                |row| {
+                    Ok(AssignmentDeadlineRecord {
+                        assignment_id: row.get(0)?,
+                        extension_count: row.get(1)?,
+                        reminded_50: row.get::<_, i64>(2)? != 0,
+                        reminded_80: row.get::<_, i64>(3)? != 0,
+                        reminded_95: row.get::<_, i64>(4)? != 0,
+                        deadline_reminded: row.get::<_, i64>(5)? != 0,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn mark_reminder(
+        conn: &Connection,
+        assignment_id: &str,
+        column: &str,
+    ) -> Result<bool, DbError> {
+        let sql = match column {
+            "reminded_50" => {
+                "UPDATE assignment_deadlines SET reminded_50 = 1
+                 WHERE assignment_id = ?1 AND reminded_50 = 0"
+            }
+            "reminded_80" => {
+                "UPDATE assignment_deadlines SET reminded_80 = 1
+                 WHERE assignment_id = ?1 AND reminded_80 = 0"
+            }
+            "reminded_95" => {
+                "UPDATE assignment_deadlines SET reminded_95 = 1
+                 WHERE assignment_id = ?1 AND reminded_95 = 0"
+            }
+            "deadline_reminded" => {
+                "UPDATE assignment_deadlines SET deadline_reminded = 1
+                 WHERE assignment_id = ?1 AND deadline_reminded = 0"
+            }
+            _ => {
+                return Err(DbError::Sqlite(rusqlite::Error::InvalidParameterName(
+                    column.to_string(),
+                )));
+            }
+        };
+        Ok(conn.execute(sql, params![assignment_id])? > 0)
+    }
+
+    pub fn increment_extension(conn: &Connection, assignment_id: &str) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE assignment_deadlines SET extension_count = extension_count + 1
+             WHERE assignment_id = ?1",
+            params![assignment_id],
+        )? > 0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostDecisionRecord {
+    pub id: String,
+    pub event_id: String,
+    pub assignment_id: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub requested_hours: Option<i64>,
+    pub created_at: i64,
+    pub decided_at: Option<i64>,
+    pub reason: Option<String>,
+}
+
+pub struct HostDecisionRepo;
+
+impl HostDecisionRepo {
+    pub fn insert(conn: &Connection, decision: &HostDecisionRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO host_decisions
+                (id, event_id, assignment_id, kind, status, requested_hours,
+                 created_at, decided_at, reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO NOTHING",
+            params![
+                &decision.id,
+                &decision.event_id,
+                &decision.assignment_id,
+                &decision.kind,
+                &decision.status,
+                decision.requested_hours,
+                decision.created_at,
+                decision.decided_at,
+                &decision.reason,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<HostDecisionRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, assignment_id, kind, status, requested_hours,
+                        created_at, decided_at, reason
+                 FROM host_decisions WHERE id = ?1",
+                params![id],
+                row_to_host_decision,
+            )
+            .optional()?)
+    }
+
+    pub fn open_for_assignment(
+        conn: &Connection,
+        assignment_id: &str,
+        kind: &str,
+    ) -> Result<Option<HostDecisionRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, assignment_id, kind, status, requested_hours,
+                        created_at, decided_at, reason
+                 FROM host_decisions
+                 WHERE assignment_id = ?1 AND kind = ?2 AND status = 'open'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![assignment_id, kind],
+                row_to_host_decision,
+            )
+            .optional()?)
+    }
+
+    pub fn list_open(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<HostDecisionRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, assignment_id, kind, status, requested_hours,
+                    created_at, decided_at, reason
+             FROM host_decisions
+             WHERE event_id = ?1 AND status = 'open'
+             ORDER BY created_at, id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_host_decision)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn close(
+        conn: &Connection,
+        id: &str,
+        status: &str,
+        now: i64,
+        reason: &str,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE host_decisions SET status = ?2, decided_at = ?3, reason = ?4
+             WHERE id = ?1 AND status = 'open'",
+            params![id, status, now, reason],
+        )? > 0)
+    }
+}
+
+fn row_to_host_decision(row: &Row<'_>) -> rusqlite::Result<HostDecisionRecord> {
+    Ok(HostDecisionRecord {
+        id: row.get(0)?,
+        event_id: row.get(1)?,
+        assignment_id: row.get(2)?,
+        kind: row.get(3)?,
+        status: row.get(4)?,
+        requested_hours: row.get(5)?,
+        created_at: row.get(6)?,
+        decided_at: row.get(7)?,
+        reason: row.get(8)?,
+    })
 }

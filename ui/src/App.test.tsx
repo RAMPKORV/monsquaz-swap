@@ -94,6 +94,18 @@ describe("App", () => {
     expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
   });
 
+  it("reviews an extension decision", async () => {
+    setUrl("?demo=1&state=extension-ready&dialog=decision");
+    render(<App />);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Noor asked for 6 more hours",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    expect(
+      await screen.findByText(/host action “approve”/i),
+    ).toBeInTheDocument();
+  });
+
   it("shows the first-run state", async () => {
     setUrl("?demo=1&state=empty");
     render(<App />);

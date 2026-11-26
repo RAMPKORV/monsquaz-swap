@@ -11,6 +11,7 @@ export type Scenario =
   | "reconnecting"
   | "not-started"
   | "lock-ready"
+  | "extension-ready"
   | "round-ready"
   | "reveal-ready"
   | "infeasible";
@@ -57,11 +58,20 @@ export type NextAction = {
 
 export type Decision = {
   id: string;
-  kind: "Deadline" | "Offer" | "Schedule" | "Delivery" | "Seeds";
+  kind:
+    | "Deadline"
+    | "Extension"
+    | "Offer"
+    | "Schedule"
+    | "Delivery"
+    | "Seeds";
   title: string;
   detail: string;
   due: string;
   actionLabel: string;
+  assignmentId?: string;
+  decisionId?: string;
+  requestedHours?: number;
 };
 
 export type ActivityEntry = {

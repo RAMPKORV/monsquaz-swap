@@ -288,6 +288,7 @@ pub fn run(config: &SimulationConfig) -> Result<SimulationReport, SimError> {
             Effect::Offer { .. } => summary.offers += 1,
             Effect::TrackFile { .. } => summary.files += 1,
             Effect::Channel { .. } => summary.channels += 1,
+            Effect::HostAlert { .. } => {}
         }
     }
 
@@ -525,7 +526,9 @@ fn audit_outbound(
                     return (false, format!("offer {track_code} is not opaque"));
                 }
             }
-            Effect::Dm { content, .. } | Effect::Channel { content, .. } => {
+            Effect::Dm { content, .. }
+            | Effect::Channel { content, .. }
+            | Effect::HostAlert { content } => {
                 if contains_name(content, display_names) {
                     return (false, "a message leaks a participant name".to_string());
                 }

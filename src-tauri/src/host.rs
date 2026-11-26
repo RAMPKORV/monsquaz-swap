@@ -116,6 +116,9 @@ struct DecisionDto {
     detail: String,
     due: String,
     action_label: String,
+    assignment_id: Option<String>,
+    decision_id: Option<String>,
+    requested_hours: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1056,6 +1059,37 @@ fn reveal_track_dto(track: TrackCredits) -> RevealTrackDto {
 }
 
 #[tauri::command]
+pub fn host_decide_extension(
+    app: AppHandle,
+    decision_id: String,
+    approve: bool,
+    reason: String,
+) -> Result<(), String> {
+    let db = open_db(&app)?;
+    swap_engine::decide_extension(&db, &decision_id, approve, &reason, now_secs())
+        .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn host_decide_deadline(
+    app: AppHandle,
+    assignment_id: String,
+    action: String,
+    hours: i64,
+    reason: String,
+) -> Result<(), String> {
+    let db = open_db(&app)?;
+    swap_engine::decide_deadline(&db, &assignment_id, &action, hours, &reason, now_secs())
+        .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn host_start_event(app: AppHandle) -> Result<PlanDataDto, String> {
     let db = open_db(&app)?;
     start_host_event(&db)
@@ -1312,7 +1346,62 @@ fn mission_control_with_health(
             detail: "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.".to_string(),
             due: "Before roster lock".to_string(),
             action_label: "Review".to_string(),
+            assignment_id: None,
+            decision_id: None,
+            requested_hours: None,
         });
+    }
+    if let Ok(open) = swap_db::HostDecisionRepo::list_open(db.conn(), &event.id) {
+        let assignments = AssignmentRepo::list_for_event(db.conn(), &event.id).unwrap_or_default();
+        let participants =
+            ParticipantRepo::list_for_event(db.conn(), &event.id).unwrap_or_default();
+        for decision in open {
+            let assignment = decision
+                .assignment_id
+                .as_deref()
+                .and_then(|id| assignments.iter().find(|assignment| assignment.id == id));
+            let track_code = assignment
+                .map(|assignment| assignment.track_code.clone())
+                .unwrap_or_else(|| "the track".to_string());
+            let participant = assignment.and_then(|assignment| {
+                participants
+                    .iter()
+                    .find(|participant| participant.user_id == assignment.participant_id)
+            });
+            let (kind, title, detail) = if decision.kind == "extension" {
+                (
+                    "Extension",
+                    format!(
+                        "{} asked for {} more hours",
+                        participant
+                            .map(|participant| participant.display_name.as_str())
+                            .unwrap_or("A participant"),
+                        decision.requested_hours.unwrap_or(6)
+                    ),
+                    format!(
+                        "Track {track_code} keeps its holder until the host decides. The deadline does not move yet."
+                    ),
+                )
+            } else {
+                (
+                    "Deadline",
+                    format!("Track {track_code} passed its deadline"),
+                    "The track stays with its holder. Extend, mark missed, or keep waiting."
+                        .to_string(),
+                )
+            };
+            decisions.push(DecisionDto {
+                id: format!("host-{}", decision.id),
+                kind: kind.to_string(),
+                title,
+                detail,
+                due: "Awaiting host".to_string(),
+                action_label: "Review".to_string(),
+                assignment_id: decision.assignment_id.clone(),
+                decision_id: Some(decision.id),
+                requested_hours: decision.requested_hours,
+            });
+        }
     }
     let facts = vec![
         EventFactDto {

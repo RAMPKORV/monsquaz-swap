@@ -21,6 +21,7 @@ import type {
   SetupData,
   Theme,
   ViewKey,
+  Decision,
 } from "./types";
 import {
   exportAuditCsv,
@@ -30,6 +31,8 @@ import {
   initialView,
   isDemoMode,
   createEvent,
+  decideDeadline,
+  decideExtension,
   generatePlan,
   lockRoster,
   openRound,
@@ -388,6 +391,44 @@ export default function App() {
     }
   }
 
+  async function handleDecision(decision: Decision, action: string) {
+    if (demo) {
+      setToast(`Preview: the host action “${action}” is applied to this decision.`);
+      return;
+    }
+    try {
+      if (decision.kind === "Extension" && decision.decisionId) {
+        await decideExtension(
+          decision.decisionId,
+          action === "approve",
+          "Host decision",
+        );
+        setToast(
+          action === "approve" ? "Extension approved." : "Extension refused.",
+        );
+      } else if (decision.assignmentId) {
+        const hours = action === "extend" ? 6 : 0;
+        await decideDeadline(
+          decision.assignmentId,
+          action,
+          hours,
+          "Host decision",
+        );
+        setToast(
+          action === "missed"
+            ? "Turn marked missed. The pair counts as seen."
+            : action === "extend"
+              ? "Deadline extended by six hours."
+              : "Deadline kept open.",
+        );
+      }
+      reloadView();
+    } catch (error) {
+      setToast(`Could not apply the decision. ${errorDetail(error)}`);
+      reloadView();
+    }
+  }
+
   async function handleStartEvent() {
     if (demo) {
       setToast("Preview: the schedule is locked and the event starts.");
@@ -511,6 +552,7 @@ export default function App() {
       <MissionControlView
         data={mission}
         onAction={notify}
+        onDecision={handleDecision}
         onNavigate={(next) => setView(next)}
       />
     ) : view === "setup" && setup ? (

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import type { MissionControl } from "../types";
+import type { Decision, MissionControl } from "../types";
 import {
   Button,
   Dialog,
@@ -22,15 +22,20 @@ function stageTone(stage: string) {
 export function MissionControlView({
   data,
   onAction,
+  onDecision,
   onNavigate,
 }: {
   data: MissionControl;
   onAction: (label: string) => void;
+  onDecision: (decision: Decision, action: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
 }) {
   const initialDialog = new URLSearchParams(window.location.search).get("dialog");
   const [confirmReveal, setConfirmReveal] = useState(initialDialog === "reveal");
   const [confirmLock, setConfirmLock] = useState(initialDialog === "lock");
+  const [selectedDecision, setSelectedDecision] = useState<Decision | null>(
+    initialDialog === "decision" ? (data.decisions[0] ?? null) : null,
+  );
   if (data.firstRun || !data.event) {
     return <FirstRun onAction={onAction} />;
   }
@@ -247,6 +252,15 @@ export function MissionControlView({
                         >
                           {decision.actionLabel}
                         </Button>
+                      ) : decision.kind === "Deadline" ||
+                        decision.kind === "Extension" ? (
+                        <Button
+                          variant="secondary"
+                          ariaLabel={`${decision.actionLabel}: ${decision.title}`}
+                          onClick={() => setSelectedDecision(decision)}
+                        >
+                          {decision.actionLabel}
+                        </Button>
                       ) : (
                         <StatusPill tone="muted">Soon</StatusPill>
                       )}
@@ -335,6 +349,79 @@ export function MissionControlView({
 
         </aside>
       </div>
+
+      {selectedDecision ? (
+        <Dialog
+          title={selectedDecision.title}
+          initialFocusId="decision-cancel"
+          onClose={() => setSelectedDecision(null)}
+          footer={
+            <>
+              <Button
+                id="decision-cancel"
+                variant="secondary"
+                onClick={() => setSelectedDecision(null)}
+              >
+                Cancel
+              </Button>
+              {selectedDecision.kind === "Extension" ? (
+                <>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      onDecision(selectedDecision, "refuse");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Refuse
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "approve");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Approve
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="quiet"
+                    onClick={() => {
+                      onDecision(selectedDecision, "wait");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Keep waiting
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      onDecision(selectedDecision, "missed");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Mark missed
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "extend");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Extend 6 hours
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        >
+          <p>{selectedDecision.detail}</p>
+        </Dialog>
+      ) : null}
 
       {confirmLock ? (
         <Dialog

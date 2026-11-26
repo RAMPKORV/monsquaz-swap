@@ -241,6 +241,11 @@ impl InboundService {
         self.clock.now()
     }
 
+    pub fn tick_deadlines(&self) -> Result<crate::engine::DeadlineReport, String> {
+        let db = self.lock();
+        crate::engine::tick_deadlines(&db, self.now()).map_err(|error| error.to_string())
+    }
+
     pub async fn drain_pending(&self) -> Result<DeliveryReport, String> {
         self.worker
             .drain(self.discord.as_ref(), self.now(), 100)
@@ -905,6 +910,34 @@ impl InboundService {
         }
     }
 
+    async fn handle_extension(
+        &self,
+        event_id: &str,
+        user_id: &str,
+        hours: i64,
+    ) -> Result<(), String> {
+        let outcome = {
+            let db = self.lock();
+            crate::engine::request_extension(&db, event_id, user_id, hours, self.now())
+        };
+        match outcome {
+            Ok(outcome) => {
+                if outcome.status == crate::engine::ExtensionStatus::Refused {
+                    self.notify(
+                        user_id,
+                        "This assignment has used its extensions. Submit, skip, or ask the host.",
+                    )
+                    .await;
+                }
+                Ok(())
+            }
+            Err(error) => {
+                self.notify(user_id, &extension_message(&error)).await;
+                Ok(())
+            }
+        }
+    }
+
     async fn handle_skip(&self, event_id: &str, user_id: &str) -> Result<(), String> {
         let db = self.db.clone();
         let event = event_id.to_string();
@@ -1005,6 +1038,10 @@ impl InboundService {
                         .await
                 }
                 Action::Skip => self.handle_skip(custom_id.event_id(), &user_id.0).await,
+                Action::Extend => {
+                    self.handle_extension(custom_id.event_id(), &user_id.0, 6)
+                        .await
+                }
                 _ => Ok(()),
             },
             InboundEvent::SlashCommand {
@@ -1028,6 +1065,18 @@ impl InboundService {
                         return Ok(());
                     };
                     self.handle_skip(&event_id, &user_id.0).await
+                }
+                swap_discord::SlashCommand::Extend => {
+                    let Some(event_id) = self.active_event(&user_id.0).await? else {
+                        self.notify(&user_id.0, "There is no active swap event for you.")
+                            .await;
+                        return Ok(());
+                    };
+                    let hours = options
+                        .get("hours")
+                        .and_then(|value| value.parse::<i64>().ok())
+                        .unwrap_or(6);
+                    self.handle_extension(&event_id, &user_id.0, hours).await
                 }
                 swap_discord::SlashCommand::Join => self.handle_join(&user_id.0, &options).await,
                 swap_discord::SlashCommand::Status => {
@@ -1125,6 +1174,19 @@ fn terminal_submit(error: &EngineError) -> bool {
             | EngineError::OfferExpired
             | EngineError::WrongAssignmentState(_)
     )
+}
+
+fn extension_message(error: &EngineError) -> String {
+    match error {
+        EngineError::NoActiveAssignment => {
+            "You have no claimed track to extend. Claim an offer first.".to_string()
+        }
+        EngineError::InvalidExtensionHours => "Ask for 1 to 12 hours.".to_string(),
+        EngineError::ExtensionLimit => {
+            "This assignment has used its extensions. Submit, skip, or ask the host.".to_string()
+        }
+        _ => "The extension request failed. Try again or ask the host.".to_string(),
+    }
 }
 
 fn terminal_claim(error: &EngineError) -> bool {

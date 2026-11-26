@@ -50,6 +50,9 @@ pub enum PendingDelivery {
         channel_id: String,
         content: String,
     },
+    HostAlert {
+        content: String,
+    },
 }
 
 impl PendingDelivery {
@@ -94,6 +97,9 @@ impl PendingDelivery {
                 channel_id: channel_id.clone(),
                 content: content.clone(),
             },
+            Effect::HostAlert { content } => Self::HostAlert {
+                content: content.clone(),
+            },
         }
     }
 
@@ -102,7 +108,7 @@ impl PendingDelivery {
             Self::Dm { user_id, .. } | Self::Offer { user_id, .. } | Self::File { user_id, .. } => {
                 Some(user_id)
             }
-            Self::Channel { .. } => None,
+            Self::Channel { .. } | Self::HostAlert { .. } => None,
         }
     }
 
@@ -112,6 +118,7 @@ impl PendingDelivery {
             Self::Offer { .. } => "offer",
             Self::File { .. } => "file",
             Self::Channel { .. } => "channel",
+            Self::HostAlert { .. } => "host_alert",
         }
     }
 
@@ -138,6 +145,9 @@ impl PendingDelivery {
                 "channel:{channel_id}:{now}:{}",
                 sha256_hex(content.as_bytes())
             ),
+            Self::HostAlert { content } => {
+                format!("host_alert:{now}:{}", sha256_hex(content.as_bytes()))
+            }
         }
     }
 
@@ -301,7 +311,9 @@ impl DeliveryWorker {
                     .map_err(|error| DeliveryError::Transport(error.to_string()))?;
                 return Ok(true);
             }
-            PendingDelivery::Channel { .. } => return Ok(false),
+            PendingDelivery::Channel { .. } | PendingDelivery::HostAlert { .. } => {
+                return Ok(false);
+            }
         };
         discord
             .send_channel_message(&thread, OutboundMessage { content })
@@ -342,7 +354,13 @@ impl DeliveryWorker {
                     continue;
                 }
             };
-            match deliver(&self.store, discord, &delivery).await {
+            let result = match &delivery {
+                PendingDelivery::HostAlert { content } => {
+                    self.send_host_alert(discord, content).await.map(|()| None)
+                }
+                _ => deliver(&self.store, discord, &delivery).await,
+            };
+            match result {
                 Ok(message_id) => {
                     let db = db_guard(self);
                     if let Some(user_id) = user_of(&delivery)
@@ -471,26 +489,32 @@ impl DeliveryWorker {
     }
 
     pub async fn notify_host(&self, discord: &dyn DiscordPort, content: &str) {
+        let _ = self.send_host_alert(discord, content).await;
+    }
+
+    async fn send_host_alert(
+        &self,
+        discord: &dyn DiscordPort,
+        content: &str,
+    ) -> Result<(), DiscordError> {
         let Some(channel) = &self.alert_channel else {
-            return;
+            return Ok(());
         };
-        let Ok(thread) = discord
+        let thread = discord
             .create_private_thread(
                 &DiscordChannelId::new(channel.clone()),
                 "Monsquaz Swap host alert",
             )
-            .await
-        else {
-            return;
-        };
-        let _ = discord
+            .await?;
+        discord
             .send_channel_message(
                 &thread,
                 OutboundMessage {
                     content: content.to_string(),
                 },
             )
-            .await;
+            .await?;
+        Ok(())
     }
 }
 
@@ -605,6 +629,9 @@ async fn deliver(
             )
             .await
             .map(Some),
+        PendingDelivery::HostAlert { .. } => Err(DiscordError::Other(
+            "host alerts must use the delivery worker".to_string(),
+        )),
     }
 }
 
@@ -620,7 +647,7 @@ fn user_of(delivery: &PendingDelivery) -> Option<&str> {
         PendingDelivery::Dm { user_id, .. }
         | PendingDelivery::Offer { user_id, .. }
         | PendingDelivery::File { user_id, .. } => Some(user_id),
-        PendingDelivery::Channel { .. } => None,
+        PendingDelivery::Channel { .. } | PendingDelivery::HostAlert { .. } => None,
     }
 }
 
@@ -843,6 +870,39 @@ mod worker_alerts {
         )
         .unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn a_host_alert_is_delivered_to_the_private_alert_thread() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = database();
+        enqueue_pending(
+            db.conn(),
+            "evt-1",
+            &PendingDelivery::HostAlert {
+                content: "A track deadline needs a host decision.".to_string(),
+            },
+            10,
+        )
+        .unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let discord = FakeDiscord::new();
+        let worker = DeliveryWorker::new(db.clone(), store).with_alert_channel("alerts");
+        let report = worker.drain(&discord, 20, 10).await.unwrap();
+        assert_eq!(report.sent, 1);
+        assert_eq!(discord.created_threads().len(), 1);
+        assert_eq!(discord.channel_messages().len(), 1);
+        assert!(
+            discord.channel_messages()[0]
+                .message
+                .content
+                .contains("host decision")
+        );
+        assert_eq!(
+            DeliveryRepo::count_pending(db.lock().unwrap().conn()).unwrap(),
+            0
+        );
     }
 
     #[tokio::test]

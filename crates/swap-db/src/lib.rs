@@ -10,8 +10,9 @@ pub mod repos;
 
 pub use db::{Db, DbError};
 pub use repos::{
-    AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo, DeliveryRecord, DeliveryRepo,
-    DmCursorRecord, DmCursorRepo, EventRecord, EventRepo, FileRecord, FileRepo, IdentityCounts,
+    AssignmentDeadlineRecord, AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo,
+    DeadlineRepo, DeliveryRecord, DeliveryRepo, DmCursorRecord, DmCursorRepo, EventRecord,
+    EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo, IdentityCounts,
     MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackRecord, TrackRepo,
 };

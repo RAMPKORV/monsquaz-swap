@@ -311,6 +311,33 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     return mission;
   }
 
+  if (scenario === "extension-ready") {
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Review the extension request",
+      detail:
+        "Noor asked for six more hours on S7F3A. The deadline does not move until you decide.",
+      actionLabel: "Review decisions",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.decisions = [
+      {
+        id: "extension-ready",
+        kind: "Extension",
+        title: "Noor asked for 6 more hours",
+        detail:
+          "Noor has used no extensions. Track S7F3A keeps its holder until the host decides. Approve to move the deadline, or refuse to keep it.",
+        due: "Awaiting host",
+        actionLabel: "Review",
+        assignmentId: "assignment-1",
+        decisionId: "decision-1",
+        requestedHours: 6,
+      },
+    ];
+    return mission;
+  }
+
   if (scenario === "round-ready") {
     mission.nextAction = {
       eyebrow: "Next action",

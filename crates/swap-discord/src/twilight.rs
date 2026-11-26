@@ -633,9 +633,9 @@ fn subcommand_options(name: &str) -> Option<Vec<CommandOption>> {
             true,
         )],
         "extend" => vec![option(
-            "reason",
-            "Why you need more time.",
-            CommandOptionType::String,
+            "hours",
+            "How many extra hours you need, 1 to 12.",
+            CommandOptionType::Integer,
             false,
         )],
         "host-lock" => vec![option(

@@ -493,4 +493,90 @@ mod tests {
         assert_eq!(scrubbed.summary.message_bytes, 8);
         assert!(scrubbed.bytes[0xC8..0xD0].iter().all(|byte| *byte == 0));
     }
+
+    fn structured_seed(kind: FileKind, header: [u8; 16]) -> Vec<u8> {
+        let mut bytes = match kind {
+            FileKind::It | FileKind::Mptm => vec![0u8; 0xC0],
+            FileKind::Xm => vec![0u8; 80],
+            FileKind::S3m => vec![0u8; 0x60],
+            FileKind::Mtm => vec![0u8; 0x42],
+            FileKind::SixSixNine => vec![0u8; 0x1F1],
+            FileKind::Mod => vec![0u8; 1084],
+            _ => unreachable!("only module kinds are tested"),
+        };
+        match kind {
+            FileKind::It | FileKind::Mptm => {
+                bytes[..4].copy_from_slice(b"IMPM");
+                bytes[0x20..0x24].copy_from_slice(&header[..4]);
+                bytes[0x2E..0x30].copy_from_slice(&header[4..6]);
+                bytes[0x36..0x3C].copy_from_slice(&header[6..12]);
+            }
+            FileKind::Xm => {
+                bytes[..17].copy_from_slice(b"Extended Module: ");
+                bytes[60..64].copy_from_slice(&header[..4]);
+            }
+            FileKind::S3m => {
+                bytes[0x2C..0x30].copy_from_slice(b"SCRM");
+                bytes[0x20..0x26].copy_from_slice(&header[..6]);
+            }
+            FileKind::Mtm => {
+                bytes[..3].copy_from_slice(b"MTM");
+                bytes[0x18..0x20].copy_from_slice(&header[..8]);
+            }
+            FileKind::SixSixNine => {
+                bytes[..2].copy_from_slice(b"if");
+                bytes[0x6E] = header[0];
+            }
+            FileKind::Mod => {
+                bytes[1080..1084].copy_from_slice(b"M.K.");
+                bytes[20..22].copy_from_slice(&header[..2]);
+            }
+            _ => unreachable!("only module kinds are tested"),
+        }
+        bytes
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn scrubbing_arbitrary_bytes_never_panics(
+            bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..2048),
+            kind_index in 0usize..7,
+        ) {
+            let kinds = [
+                FileKind::It,
+                FileKind::Mptm,
+                FileKind::Xm,
+                FileKind::S3m,
+                FileKind::Mtm,
+                FileKind::SixSixNine,
+                FileKind::Mod,
+            ];
+            if let Ok(scrubbed) = scrub_metadata(&bytes, kinds[kind_index]) {
+                proptest::prop_assert_eq!(scrubbed.bytes.len(), bytes.len());
+            }
+        }
+
+        #[test]
+        fn scrubbing_a_structured_header_never_panics(
+            header in proptest::prelude::any::<[u8; 16]>(),
+            tail in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..2048),
+            kind_index in 0usize..7,
+        ) {
+            let kinds = [
+                FileKind::It,
+                FileKind::Mptm,
+                FileKind::Xm,
+                FileKind::S3m,
+                FileKind::Mtm,
+                FileKind::SixSixNine,
+                FileKind::Mod,
+            ];
+            let kind = kinds[kind_index];
+            let mut bytes = structured_seed(kind, header);
+            bytes.extend_from_slice(&tail);
+            if let Ok(scrubbed) = scrub_metadata(&bytes, kind) {
+                proptest::prop_assert_eq!(scrubbed.bytes.len(), bytes.len());
+            }
+        }
+    }
 }

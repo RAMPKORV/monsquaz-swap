@@ -753,14 +753,42 @@ function plannerGroups(count: number): PlannerGroup[] {
   }));
 }
 
+function seededOrder(count: number, seed: number): number[] {
+  let state = seed >>> 0;
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const order = Array.from({ length: count }, (_, index) => index);
+  for (let index = count - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [order[index], order[other]] = [order[other]!, order[index]!];
+  }
+  return order;
+}
+
+function planTrackOrder(count: number): number[] {
+  return seededOrder(count, 0x5eed1234);
+}
+
+function planRoundOffsets(count: number): number[] {
+  return seededOrder(count - 1, 0x0badf00d).map((index) => index + 1);
+}
+
 function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
   const groupCount = count >= 40 ? 4 : 2;
   const groupSize = Math.ceil(count / groupCount);
-  return Array.from({ length: count }, (_, trackIndex) => ({
+  const trackOrder = planTrackOrder(count);
+  const offsets = planRoundOffsets(count);
+  return trackOrder.map((trackIndex, position) => ({
     trackCode: trackCodes[trackIndex % trackCodes.length]!,
     ownerGroup: String.fromCharCode(65 + Math.floor(trackIndex / groupSize)),
     cells: Array.from({ length: rounds }, (_, round) => {
-      const person = (trackIndex + round + 1) % count;
+      const offset = offsets[round % offsets.length]!;
+      const person = trackOrder[(position + offset) % count]!;
       const name = names[person % names.length]!;
       return {
         round,
@@ -773,10 +801,13 @@ function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
 }
 
 function buildGraph(count: number, round: number): PlanData["graph"] {
+  const trackOrder = planTrackOrder(count);
+  const offsets = planRoundOffsets(count);
   return {
     round,
-    edges: Array.from({ length: count }, (_, trackIndex) => {
-      const person = (trackIndex + round + 1) % count;
+    edges: trackOrder.map((trackIndex, position) => {
+      const offset = offsets[round % offsets.length]!;
+      const person = trackOrder[(position + offset) % count]!;
       return {
         trackCode: trackCodes[trackIndex % trackCodes.length]!,
         participantName: `${names[person % names.length]!} ${person + 1}`,

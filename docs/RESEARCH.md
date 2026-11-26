@@ -96,9 +96,18 @@ The schedule is a partial Latin square:
 - no symbol repeats in a row or column;
 - the owner is excluded from the column.
 
-N-1 rounds is the complete classic shape for a fixed group. Build it with a
-randomized row-by-row perfect matching. This is a partial Latin rectangle and a
-bipartite edge coloring. It avoids the predictability of a bare cyclic shift.
+N-1 rounds is the complete classic shape for a fixed group. The planner has
+three seeded strategies:
+
+- `balanced` (default): row-by-row min-cost matching with a penalty for
+  participant pairs that already met, especially in the last two rounds;
+- `random_matching`: randomized row-by-row perfect matching, a partial Latin
+  rectangle and a bipartite edge coloring;
+- `cyclic`: a cyclic Latin square with permuted rows, columns, and symbols,
+  which falls back to matching when each participant does not own one track.
+
+All strategies avoid the predictability of a bare cyclic shift and are
+deterministic for the same input and seed.
 
 For skips and fill-ins, use bipartite matching and, when needed, min-cost flow.
 A Hall violator certificate explains infeasibility. Use CP-SAT only for small

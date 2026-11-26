@@ -1,7 +1,7 @@
 # Workflow
 
-Lean, research-first TDD with one issue per worktree. The tracker is the
-durable memory; chat is not. We keep the scaffold's issue tree, decisions,
+Lean, research-first TDD with one batch or issue per worktree. The tracker is
+the durable memory; chat is not. We keep the scaffold's issue tree, decisions,
 evidence, and append-only ledger, but **not** its PRD/sign-off gates. The
 product contract is hand-written in `docs/`.
 
@@ -10,10 +10,11 @@ product contract is hand-written in `docs/`.
 1. **Orient.** `./bin/project status`, `./bin/project next`, then read
    `docs/PRD.md`, `docs/EVENT_SETTINGS.md`, and the issue.
 2. **Claim.** `./bin/project issue claim MSW-### --as-agent <name>`.
-   Respect the WIP limit (2).
-3. **Worktree.** `./bin/project worktree new MSW-### --as-agent <name>`.
-   Worktrees live in `../MonsquazSwap-worktrees/`, outside the repo. Never
-   share a mutable SQLite DB across worktrees.
+   Respect the batch WIP limit (6). Claim every issue in the batch.
+3. **Worktree.** `./bin/project worktree new MSW-### --as-agent <name>` for
+   the first issue. Work the other batch issues in that worktree; do not make a
+   second worktree. Worktrees live in `../MonsquazSwap-worktrees/`, outside the
+   repo. Never share a mutable SQLite DB across worktrees.
 4. **Research.** Codebase first, then official docs/web. Record sources and
    findings in the tracker (`source add`, `finding add`, `issue note add`).
    A factual unknown that can change the plan becomes a timeboxed spike.
@@ -28,8 +29,8 @@ product contract is hand-written in `docs/`.
    error paths, timezones, idempotency, secrets, path safety. Record the review
    for `standard`/`full` ceremony.
 10. **Check.** `scripts/check.sh`. Fix everything; do not weaken tests.
-11. **Merge.** Squash merge from the main checkout with
-    `./bin/project worktree finish ...`. Record test evidence.
+11. **Merge.** Squash merge the batch from the main checkout with
+    `./bin/project worktree finish ...`. Record evidence for every issue.
 12. **Export.** `./bin/project export` and commit the ledger dump with the code.
 
 ## Ceremony
@@ -44,6 +45,22 @@ The default is `light`; raise it deliberately for `full` work. The tracker's
 status gates still exist, but we do not require an independent reviewer for
 every routine issue. An independent review is required for `full`.
 
+## Batch PRs
+
+CI is the main wait. Batch related work into one PR.
+
+- A batch is 3–6 related issues or one milestone slice. One batch is one
+  worktree, one branch, one PR, and one CI run.
+- Claim every issue before you start. Use the first issue for `worktree new`;
+  work the rest in the same worktree.
+- The PR body lists every issue key and the evidence for each one.
+- Close each issue after the merge with the same squash commit. Add one review
+  record per `full` issue, or one shared review with all keys.
+- Do not batch unrelated risky changes. Security, schema, and UI changes can
+  share a batch only when they serve one outcome.
+- A batch may delete or retire a formal artifact in the same PR. Keep the
+  product build independent.
+
 ## Issue rules
 
 - One issue = one observable outcome. No epic/story/task ladder; use hierarchy.
@@ -56,7 +73,7 @@ every routine issue. An independent review is required for `full`.
 
 ## Git
 
-- Trunk-based, short-lived branches; one worktree per issue.
+- Trunk-based, short-lived branches; one worktree per batch or issue.
 - Conventional Commits: `feat:`, `fix:`, `test:`, `docs:`, `chore:`,
   `refactor:`, `perf:`, `build:`, `ci:`.
 - Keep commits small and reviewable; no drive-by refactors.

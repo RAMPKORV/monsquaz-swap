@@ -50,6 +50,14 @@ must not block for longer than that.
 - The runtime logs no message content.
 - The live smoke example prints event discriminants only.
 
+## Local Discord mock
+
+There is no official Discord bot emulator. `crates/swap-discord/tests/setup_http.rs`
+uses Twilight's HTTP proxy setting and a local Wiremock server. It exercises the
+real setup and DM serializers without a token. The mock does not cover gateway
+identification, rate limits, or Discord policy. Use the live smoke test for
+those.
+
 ## Live smoke test
 
 Set the two environment variables. Run the example. Stop it with Ctrl+C.

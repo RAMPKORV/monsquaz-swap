@@ -560,3 +560,77 @@ mod tests {
         assert!(report.effects.files >= 1);
     }
 }
+
+#[cfg(test)]
+mod anonymity_tests {
+    use super::*;
+
+    fn codes() -> HashSet<String> {
+        ["S7F3A".to_string(), "S4K2M".to_string()]
+            .into_iter()
+            .collect()
+    }
+
+    fn names() -> Vec<String> {
+        vec!["Person 0".to_string(), "user-00".to_string()]
+    }
+
+    #[test]
+    fn an_opaque_file_and_message_pass() {
+        let effects = vec![
+            Effect::TrackFile {
+                user_id: "user-01".to_string(),
+                track_code: "S7F3A".to_string(),
+                filename: "S7F3A.it".to_string(),
+                bytes: vec![1],
+                caption: "Your next track is ready.".to_string(),
+            },
+            Effect::Dm {
+                user_id: "user-01".to_string(),
+                content: "Claim within 24 hours.".to_string(),
+            },
+        ];
+        assert_eq!(
+            audit_outbound(&effects, &codes(), &names()),
+            (true, String::new())
+        );
+    }
+
+    #[test]
+    fn a_participant_name_in_a_message_is_refused() {
+        let effects = vec![Effect::Dm {
+            user_id: "user-01".to_string(),
+            content: "This is Person 0's track.".to_string(),
+        }];
+        let (passed, detail) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("leaks a participant name"));
+    }
+
+    #[test]
+    fn an_owner_id_in_a_caption_is_refused() {
+        let effects = vec![Effect::TrackFile {
+            user_id: "user-01".to_string(),
+            track_code: "S7F3A".to_string(),
+            filename: "S7F3A.it".to_string(),
+            bytes: vec![1],
+            caption: "Original owner user-00".to_string(),
+        }];
+        let (passed, _) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+    }
+
+    #[test]
+    fn a_non_opaque_filename_is_refused() {
+        let effects = vec![Effect::TrackFile {
+            user_id: "user-01".to_string(),
+            track_code: "S7F3A".to_string(),
+            filename: "original-song.it".to_string(),
+            bytes: vec![1],
+            caption: "Your next track is ready.".to_string(),
+        }];
+        let (passed, detail) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("is not opaque"));
+    }
+}

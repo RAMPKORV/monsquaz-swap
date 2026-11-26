@@ -205,4 +205,39 @@ mod tests {
             Err(CustomIdError::InvalidToken)
         );
     }
+
+    proptest::proptest! {
+        #[test]
+        fn parsing_arbitrary_text_never_panics(value in proptest::prelude::any::<String>()) {
+            let _ = CustomId::parse(&value);
+        }
+
+        #[test]
+        fn every_action_round_trips(
+            event in "[A-Za-z0-9_-]{1,32}",
+            token in proptest::option::of("[A-Za-z0-9_-]{1,32}"),
+            action_index in 0usize..15,
+        ) {
+            let actions = [
+                Action::Join,
+                Action::Claim,
+                Action::Submit,
+                Action::Skip,
+                Action::Pause,
+                Action::Resume,
+                Action::Extend,
+                Action::Leave,
+                Action::Title,
+                Action::FillIn,
+                Action::AcceptFillIn,
+                Action::DeclineFillIn,
+                Action::Status,
+                Action::Schedule,
+                Action::Help,
+            ];
+            let id = CustomId::new(event, actions[action_index], token).unwrap();
+            let parsed = CustomId::parse(&id.to_string()).unwrap();
+            proptest::prop_assert_eq!(parsed, id);
+        }
+    }
 }

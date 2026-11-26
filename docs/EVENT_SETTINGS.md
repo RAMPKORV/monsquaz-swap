@@ -54,6 +54,7 @@ social-diversity objective. Optional genre/mood content tags can come later.
 | Group size | Balanced, 5–12 | Soft bounds; warn outside | Yes |
 | Group visibility | Hidden | Hidden, host-only names | Yes |
 | Rotation default | Participants | Participants, track pools, both, merge/re-split | Yes |
+| Scheduler strategy | Balanced | Balanced, random matching, cyclic | No |
 | Swap cadence | `K ≈ T/4` (3–5 phases) | K rounds, calendar, host-triggered, exhausted | No |
 | Exhausted policy | Allowed with a warning | Warn when `group_size > T+1` | No |
 | Calendar early swap | Auto-early by default | Auto-early, strict calendar | No |

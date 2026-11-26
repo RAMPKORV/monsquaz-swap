@@ -481,7 +481,12 @@ pub fn generate_schedule(
             owner: ParticipantId::new(track.owner_id.clone()),
         })
         .collect();
-    let schedule = Schedule::generate(&people, &specs, rounds, event.seed)?;
+    let strategy = settings
+        .scheduler
+        .as_deref()
+        .and_then(swap_core::ScheduleStrategy::parse)
+        .unwrap_or_default();
+    let schedule = Schedule::generate_with(&people, &specs, rounds, event.seed, strategy)?;
 
     let previous = PlanRepo::latest(db.conn(), event_id)?;
     let version = previous.map(|plan| plan.version + 1).unwrap_or(1);

@@ -47,7 +47,7 @@ def cmd_init(a):
         core.set_config_row(con, "project.kind", rc["project"].get("kind", "generic"))
         core.set_config_row(con, "workflow.review_bar", rc["workflow"].get("review_bar", 8))
         core.set_config_row(con, "workflow.ceremony_default", rc["workflow"].get("ceremony_default", "standard"))
-        core.set_config_row(con, "workflow.wip_limit", rc["workflow"].get("wip_limit", 2))
+        core.set_config_row(con, "workflow.wip_limit", rc["workflow"].get("wip_limit", 6))
         core.set_config_row(con, "workflow.score_ttl_days", rc["workflow"].get("score_ttl_days", 14))
         core.set_config_row(con, "prd.required_sections", json.dumps(core.REQUIRED_SECTIONS))
         if core.get_config_row(con, "plan.graph_version", "") == "":

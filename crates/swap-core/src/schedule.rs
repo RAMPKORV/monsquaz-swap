@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::ids::{ParticipantId, TrackCode};
 
 const MAX_ATTEMPTS: u32 = 128;
+const BALANCED_ATTEMPTS: u32 = 8;
 const SPLITMIX_GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// One seeded track and its owner.
@@ -23,13 +24,59 @@ pub struct ScheduledAssignment {
     pub participant: ParticipantId,
 }
 
-/// A complete classic schedule. The output is canonical for a given input and
-/// seed.
+/// How the classic schedule shapes its partial Latin rectangle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleStrategy {
+    /// Seeded min-cost matching with a social-pair penalty.
+    #[default]
+    Balanced,
+    /// Seeded row-by-row perfect matching without a pair objective.
+    RandomMatching,
+    /// Randomly permuted cyclic Latin square. Falls back to matching when the
+    /// roster does not have exactly one track per participant.
+    Cyclic,
+}
+
+impl ScheduleStrategy {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "balanced" => Self::Balanced,
+            "random" | "random_matching" => Self::RandomMatching,
+            "cyclic" => Self::Cyclic,
+            _ => return None,
+        })
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Balanced => "balanced",
+            Self::RandomMatching => "random_matching",
+            Self::Cyclic => "cyclic",
+        }
+    }
+}
+
+/// A complete classic schedule. The output is canonical for a given input,
+/// strategy, and seed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schedule {
     pub seed: u64,
     pub rounds: u32,
+    #[serde(default)]
+    pub strategy: ScheduleStrategy,
     pub assignments: Vec<ScheduledAssignment>,
+}
+
+/// Social-balance measurements for a generated schedule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BalanceReport {
+    /// Pairs that met on more than one handoff.
+    pub repeated_handoffs: u32,
+    /// Highest number of handoffs for one participant pair.
+    pub max_pair_meetings: u32,
+    /// Distinct participant pairs that met at least once.
+    pub unique_pairs: usize,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -51,17 +98,35 @@ pub enum ScheduleError {
 }
 
 impl Schedule {
-    /// Generate a randomized partial Latin rectangle.
-    ///
-    /// Each round is a perfect matching over tracks and participants. A person
-    /// never receives their own track and never receives a track twice. The
-    /// result is deterministic for the same participant set, track set, round
-    /// count, and seed. Input order does not matter.
+    /// Generate a randomized partial Latin rectangle with the balanced
+    /// strategy. This is the compatibility entry point.
     pub fn generate(
         participants: &[ParticipantId],
         tracks: &[TrackSpec],
         rounds: u32,
         seed: u64,
+    ) -> Result<Self, ScheduleError> {
+        Self::generate_with(
+            participants,
+            tracks,
+            rounds,
+            seed,
+            ScheduleStrategy::Balanced,
+        )
+    }
+
+    /// Generate a randomized partial Latin rectangle.
+    ///
+    /// Each round is a perfect matching over tracks and participants. A person
+    /// never receives their own track and never receives a track twice. The
+    /// result is deterministic for the same participant set, track set, round
+    /// count, strategy, and seed. Input order does not matter.
+    pub fn generate_with(
+        participants: &[ParticipantId],
+        tracks: &[TrackSpec],
+        rounds: u32,
+        seed: u64,
+        strategy: ScheduleStrategy,
     ) -> Result<Self, ScheduleError> {
         if participants.is_empty() || tracks.is_empty() {
             return Err(ScheduleError::EmptyRoster);
@@ -117,35 +182,171 @@ impl Schedule {
             })
             .collect::<Result<_, _>>()?;
 
-        let mut last_round = 0;
-        for attempt in 0..MAX_ATTEMPTS {
-            let attempt_seed = seed.wrapping_add(u64::from(attempt).wrapping_mul(SPLITMIX_GOLDEN));
-            match attempt_schedule(&people, &specs, &owners, rounds, attempt_seed) {
-                Ok(mut assignments) => {
-                    assignments.sort_by(|a, b| {
-                        a.round
-                            .cmp(&b.round)
-                            .then_with(|| a.track.0.cmp(&b.track.0))
-                            .then_with(|| a.participant.0.cmp(&b.participant.0))
-                    });
-                    return Ok(Self {
-                        seed,
-                        rounds,
-                        assignments,
-                    });
+        let mut assignments = match strategy {
+            ScheduleStrategy::Cyclic => {
+                match cyclic_schedule(&people, &specs, &owners, rounds, seed) {
+                    Some(assignments) => assignments,
+                    None => random_schedule(&people, &specs, &owners, rounds, seed)
+                        .map_err(|round| ScheduleError::Infeasible { round })?,
                 }
-                Err(round) => last_round = round,
+            }
+            ScheduleStrategy::RandomMatching => {
+                random_schedule(&people, &specs, &owners, rounds, seed)
+                    .map_err(|round| ScheduleError::Infeasible { round })?
+            }
+            ScheduleStrategy::Balanced => balanced_schedule(&people, &specs, &owners, rounds, seed)
+                .map_err(|round| ScheduleError::Infeasible { round })?,
+        };
+
+        assignments.sort_by(|a, b| {
+            a.round
+                .cmp(&b.round)
+                .then_with(|| a.track.0.cmp(&b.track.0))
+                .then_with(|| a.participant.0.cmp(&b.participant.0))
+        });
+        Ok(Self {
+            seed,
+            rounds,
+            strategy,
+            assignments,
+        })
+    }
+
+    /// Measure repeated participant pairs across consecutive handoffs. The
+    /// first round is excluded because the seed owner is not stored in the
+    /// schedule.
+    pub fn balance(&self) -> BalanceReport {
+        let mut previous: HashMap<&str, &str> = HashMap::new();
+        let mut pairs: HashMap<(&str, &str), u32> = HashMap::new();
+        let mut sorted: Vec<&ScheduledAssignment> = self.assignments.iter().collect();
+        sorted.sort_by_key(|assignment| {
+            (
+                assignment.round,
+                assignment.track.0.as_str(),
+                assignment.participant.0.as_str(),
+            )
+        });
+        for assignment in sorted {
+            let track = assignment.track.0.as_str();
+            let person = assignment.participant.0.as_str();
+            if let Some(prior) = previous.insert(track, person) {
+                let key = if prior <= person {
+                    (prior, person)
+                } else {
+                    (person, prior)
+                };
+                *pairs.entry(key).or_default() += 1;
             }
         }
-
-        Err(ScheduleError::Infeasible { round: last_round })
+        let repeated_handoffs = pairs.values().map(|count| count.saturating_sub(1)).sum();
+        let max_pair_meetings = pairs.values().copied().max().unwrap_or(0);
+        BalanceReport {
+            repeated_handoffs,
+            max_pair_meetings,
+            unique_pairs: pairs.len(),
+        }
     }
 }
 
-/// Try one deterministic schedule attempt. A matching can paint itself into a
-/// corner when there are fewer tracks than people; the caller retries with a
-/// derived seed. Returns the first failed round.
-fn attempt_schedule(
+/// A randomized cyclic Latin square. It is valid when every participant owns
+/// exactly one track. The row, column, and symbol permutations make the square
+/// look varied while preserving the Latin property.
+fn cyclic_schedule(
+    people: &[ParticipantId],
+    specs: &[TrackSpec],
+    owners: &[usize],
+    rounds: u32,
+    seed: u64,
+) -> Option<Vec<ScheduledAssignment>> {
+    if people.len() != specs.len() {
+        return None;
+    }
+    let count = people.len();
+    let mut track_for_owner = vec![None; count];
+    for (track, owner) in owners.iter().copied().enumerate() {
+        if track_for_owner[owner].replace(track).is_some() {
+            return None;
+        }
+    }
+    let track_for_owner: Vec<usize> = track_for_owner.into_iter().collect::<Option<_>>()?;
+    let mut rng = SplitMix64::new(seed ^ 0xC1C1_C1C1_5EED_5EED);
+    let mut order: Vec<usize> = (0..count).collect();
+    rng.shuffle(&mut order);
+    let mut offsets: Vec<usize> = (1..count).collect();
+    rng.shuffle(&mut offsets);
+
+    let mut assignments = Vec::with_capacity(rounds as usize * count);
+    for round in 0..rounds {
+        let offset = offsets[round as usize];
+        for index in 0..count {
+            let owner_index = order[index];
+            let person_index = order[(index + offset) % count];
+            assignments.push(ScheduledAssignment {
+                round,
+                track: specs[track_for_owner[owner_index]].code.clone(),
+                participant: people[person_index].clone(),
+            });
+        }
+    }
+    Some(assignments)
+}
+
+fn random_schedule(
+    people: &[ParticipantId],
+    specs: &[TrackSpec],
+    owners: &[usize],
+    rounds: u32,
+    seed: u64,
+) -> Result<Vec<ScheduledAssignment>, u32> {
+    let mut last_round = 0;
+    for attempt in 0..MAX_ATTEMPTS {
+        let attempt_seed = seed.wrapping_add(u64::from(attempt).wrapping_mul(SPLITMIX_GOLDEN));
+        match attempt_random(people, specs, owners, rounds, attempt_seed) {
+            Ok(assignments) => return Ok(assignments),
+            Err(round) => last_round = round,
+        }
+    }
+    Err(last_round)
+}
+
+fn balanced_schedule(
+    people: &[ParticipantId],
+    specs: &[TrackSpec],
+    owners: &[usize],
+    rounds: u32,
+    seed: u64,
+) -> Result<Vec<ScheduledAssignment>, u32> {
+    let mut best: Option<(BalanceReport, Vec<ScheduledAssignment>)> = None;
+    let mut last_round = 0;
+    for attempt in 0..BALANCED_ATTEMPTS {
+        let attempt_seed = seed.wrapping_add(u64::from(attempt).wrapping_mul(SPLITMIX_GOLDEN));
+        match attempt_balanced(people, specs, owners, rounds, attempt_seed) {
+            Ok(assignments) => {
+                let report = balance_of(&assignments);
+                let replace = best.as_ref().is_none_or(|(current, _)| {
+                    report.repeated_handoffs < current.repeated_handoffs
+                });
+                if replace {
+                    best = Some((report, assignments));
+                }
+            }
+            Err(round) => last_round = round,
+        }
+    }
+    best.map(|(_, assignments)| assignments).ok_or(last_round)
+}
+
+fn balance_of(assignments: &[ScheduledAssignment]) -> BalanceReport {
+    let schedule = Schedule {
+        seed: 0,
+        rounds: assignments.iter().map(|a| a.round + 1).max().unwrap_or(0),
+        strategy: ScheduleStrategy::Balanced,
+        assignments: assignments.to_vec(),
+    };
+    schedule.balance()
+}
+
+fn attempt_random(
     people: &[ParticipantId],
     specs: &[TrackSpec],
     owners: &[usize],
@@ -198,6 +399,99 @@ fn attempt_schedule(
     Ok(assignments)
 }
 
+/// Balanced matching with a min-cost flow. The cost penalises participant
+/// pairs that already met, especially in the last two rounds, and adds a small
+/// seeded jitter so equal-cost matchings vary.
+fn attempt_balanced(
+    people: &[ParticipantId],
+    specs: &[TrackSpec],
+    owners: &[usize],
+    rounds: u32,
+    seed: u64,
+) -> Result<Vec<ScheduledAssignment>, u32> {
+    let mut history: Vec<HashSet<usize>> = vec![HashSet::new(); specs.len()];
+    let mut last_holder = owners.to_vec();
+    let mut met: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut recent: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut rng = SplitMix64::new(seed ^ 0xBADA_55ED_1234_5678);
+    let mut assignments = Vec::with_capacity(rounds as usize * specs.len());
+
+    for round in 0..rounds {
+        let track_count = specs.len();
+        let person_count = people.len();
+        let source = 0;
+        let track_node = |track: usize| 1 + track;
+        let person_node = |person: usize| 1 + track_count + person;
+        let sink = 1 + track_count + person_count;
+        let mut flow = MinCostFlow::new(sink + 1);
+
+        for track in 0..track_count {
+            flow.add_edge(source, track_node(track), 1, 0);
+        }
+        for person in 0..person_count {
+            flow.add_edge(person_node(person), sink, 1, 0);
+        }
+
+        let mut candidates: Vec<Vec<(usize, usize)>> = vec![Vec::new(); track_count];
+        for track in 0..track_count {
+            for person in 0..person_count {
+                if person == owners[track] || history[track].contains(&person) {
+                    continue;
+                }
+                let pair = ordered_pair(last_holder[track], person);
+                let meetings = i64::from(*met.get(&pair).unwrap_or(&0));
+                let recent_penalty = match recent.get(&pair) {
+                    Some(last) if round.saturating_sub(*last) <= 2 => 25,
+                    _ => 0,
+                };
+                let jitter = rng.next_bounded(8) as i64;
+                let cost = meetings * 100 + recent_penalty + jitter;
+                let edge = flow.add_edge(track_node(track), person_node(person), 1, cost);
+                candidates[track].push((person, edge));
+            }
+        }
+
+        if flow.min_cost_flow(source, sink, track_count).is_none() {
+            return Err(round);
+        }
+
+        let mut person_of_track = vec![usize::MAX; track_count];
+        for (track, candidates) in candidates.iter().enumerate() {
+            for (person, edge) in candidates {
+                if flow.graph[track_node(track)][*edge].cap == 0 {
+                    person_of_track[track] = *person;
+                    break;
+                }
+            }
+        }
+        for (track, person) in person_of_track.into_iter().enumerate() {
+            if person == usize::MAX {
+                return Err(round);
+            }
+            let pair = ordered_pair(last_holder[track], person);
+            *met.entry(pair).or_default() += 1;
+            recent.insert(pair, round);
+            history[track].insert(person);
+            last_holder[track] = person;
+            assignments.push(ScheduledAssignment {
+                round,
+                track: specs[track].code.clone(),
+                participant: people[person].clone(),
+            });
+        }
+    }
+
+    Ok(assignments)
+}
+
+fn ordered_pair(left: usize, right: usize) -> (usize, usize) {
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    }
+}
+
 /// Kuhn's augmenting-path matching. Track vertices are matched to people.
 fn try_kuhn(
     track_index: usize,
@@ -220,6 +514,97 @@ fn try_kuhn(
         }
     }
     false
+}
+
+#[derive(Debug, Clone)]
+struct FlowEdge {
+    to: usize,
+    reverse: usize,
+    cap: i32,
+    cost: i64,
+}
+
+#[derive(Debug, Clone)]
+struct MinCostFlow {
+    graph: Vec<Vec<FlowEdge>>,
+}
+
+impl MinCostFlow {
+    fn new(nodes: usize) -> Self {
+        Self {
+            graph: vec![Vec::new(); nodes],
+        }
+    }
+
+    fn add_edge(&mut self, from: usize, to: usize, cap: i32, cost: i64) -> usize {
+        let forward = self.graph[from].len();
+        let reverse = self.graph[to].len();
+        self.graph[from].push(FlowEdge {
+            to,
+            reverse,
+            cap,
+            cost,
+        });
+        self.graph[to].push(FlowEdge {
+            to: from,
+            reverse: forward,
+            cap: 0,
+            cost: -cost,
+        });
+        forward
+    }
+
+    /// Successive shortest augmenting paths. Small graphs make SPFA simpler
+    /// than maintaining potentials.
+    fn min_cost_flow(&mut self, source: usize, sink: usize, amount: usize) -> Option<i64> {
+        let mut flow = 0;
+        let mut total_cost: i64 = 0;
+        while flow < amount {
+            let nodes = self.graph.len();
+            let mut distance = vec![i64::MAX; nodes];
+            let mut previous: Vec<(usize, usize)> = vec![(usize::MAX, usize::MAX); nodes];
+            let mut in_queue = vec![false; nodes];
+            let mut queue = VecDeque::new();
+            distance[source] = 0;
+            queue.push_back(source);
+            in_queue[source] = true;
+            while let Some(node) = queue.pop_front() {
+                in_queue[node] = false;
+                for (edge_index, edge) in self.graph[node].iter().enumerate() {
+                    if edge.cap == 0 {
+                        continue;
+                    }
+                    let next = edge.to;
+                    let candidate = distance[node].saturating_add(edge.cost);
+                    if candidate < distance[next] {
+                        distance[next] = candidate;
+                        previous[next] = (node, edge_index);
+                        if !in_queue[next] {
+                            in_queue[next] = true;
+                            queue.push_back(next);
+                        }
+                    }
+                }
+            }
+            if distance[sink] == i64::MAX {
+                return None;
+            }
+            let mut node = sink;
+            while node != source {
+                let (from, edge_index) = previous[node];
+                if from == usize::MAX {
+                    return None;
+                }
+                let reverse = self.graph[from][edge_index].reverse;
+                self.graph[from][edge_index].cap -= 1;
+                self.graph[node][reverse].cap += 1;
+                node = from;
+            }
+            total_cost = total_cost.saturating_add(distance[sink]);
+            flow += 1;
+        }
+        Some(total_cost)
+    }
 }
 
 /// Small deterministic PRNG. SplitMix64 is enough for schedule randomization;
@@ -268,6 +653,7 @@ impl SplitMix64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn people(count: usize) -> Vec<ParticipantId> {
         (0..count)
@@ -329,6 +715,54 @@ mod tests {
         let schedule = Schedule::generate(&people, &tracks, 7, 42).unwrap();
         assert_valid(&schedule, &people, &tracks);
         assert_eq!(schedule.assignments.len(), 56);
+        assert_eq!(schedule.strategy, ScheduleStrategy::Balanced);
+    }
+
+    #[test]
+    fn every_strategy_is_valid() {
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::RandomMatching,
+            ScheduleStrategy::Cyclic,
+        ] {
+            for (count, rounds) in [(3, 2), (6, 5), (8, 7), (12, 4)] {
+                let people = people(count);
+                let tracks = tracks(&people);
+                let schedule =
+                    Schedule::generate_with(&people, &tracks, rounds, 77, strategy).unwrap();
+                assert_valid(&schedule, &people, &tracks);
+                assert_eq!(schedule.strategy, strategy);
+            }
+        }
+    }
+
+    #[test]
+    fn an_impossible_roster_is_refused_for_every_strategy() {
+        let people = people(3);
+        let tracks = vec![
+            TrackSpec {
+                code: TrackCode::new("T1"),
+                owner: people[0].clone(),
+            },
+            TrackSpec {
+                code: TrackCode::new("T2"),
+                owner: people[0].clone(),
+            },
+            TrackSpec {
+                code: TrackCode::new("T3"),
+                owner: people[0].clone(),
+            },
+        ];
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::RandomMatching,
+            ScheduleStrategy::Cyclic,
+        ] {
+            assert_eq!(
+                Schedule::generate_with(&people, &tracks, 1, 3, strategy),
+                Err(ScheduleError::Infeasible { round: 0 })
+            );
+        }
     }
 
     #[test]
@@ -344,23 +778,96 @@ mod tests {
     fn the_same_seed_produces_the_same_schedule() {
         let people = people(8);
         let tracks = tracks(&people);
-        let first = Schedule::generate(&people, &tracks, 7, 123).unwrap();
-        let second = Schedule::generate(&people, &tracks, 7, 123).unwrap();
-        assert_eq!(first, second);
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::RandomMatching,
+            ScheduleStrategy::Cyclic,
+        ] {
+            let first = Schedule::generate_with(&people, &tracks, 7, 123, strategy).unwrap();
+            let second = Schedule::generate_with(&people, &tracks, 7, 123, strategy).unwrap();
+            assert_eq!(first, second);
+        }
     }
 
     #[test]
     fn input_order_does_not_change_the_schedule() {
         let people = people(6);
         let tracks = tracks(&people);
-        let first = Schedule::generate(&people, &tracks, 5, 9).unwrap();
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::RandomMatching,
+            ScheduleStrategy::Cyclic,
+        ] {
+            let first = Schedule::generate_with(&people, &tracks, 5, 9, strategy).unwrap();
 
-        let mut reversed_people = people.clone();
-        reversed_people.reverse();
-        let mut reversed_tracks = tracks.clone();
-        reversed_tracks.reverse();
-        let second = Schedule::generate(&reversed_people, &reversed_tracks, 5, 9).unwrap();
-        assert_eq!(first, second);
+            let mut reversed_people = people.clone();
+            reversed_people.reverse();
+            let mut reversed_tracks = tracks.clone();
+            reversed_tracks.reverse();
+            let second =
+                Schedule::generate_with(&reversed_people, &reversed_tracks, 5, 9, strategy)
+                    .unwrap();
+            assert_eq!(first, second);
+        }
+    }
+
+    #[test]
+    fn different_seeds_produce_different_schedules() {
+        let people = people(8);
+        let tracks = tracks(&people);
+        let first = Schedule::generate(&people, &tracks, 7, 1).unwrap();
+        let second = Schedule::generate(&people, &tracks, 7, 2).unwrap();
+        assert_ne!(first.assignments, second.assignments);
+    }
+
+    #[test]
+    fn cyclic_is_not_the_bare_shift() {
+        let people = people(8);
+        let tracks = tracks(&people);
+        let schedule =
+            Schedule::generate_with(&people, &tracks, 7, 5, ScheduleStrategy::Cyclic).unwrap();
+        let bare: Vec<usize> = schedule
+            .assignments
+            .iter()
+            .filter(|assignment| assignment.round == 0)
+            .map(|assignment| {
+                let track_index = tracks
+                    .iter()
+                    .position(|track| track.code == assignment.track)
+                    .unwrap();
+                let person_index = people
+                    .iter()
+                    .position(|person| person == &assignment.participant)
+                    .unwrap();
+                (person_index + 8 - (track_index + 1) % 8) % 8
+            })
+            .collect();
+        assert!(bare.iter().any(|offset| *offset != 0));
+    }
+
+    #[test]
+    fn balanced_keeps_repeated_handoffs_at_least_as_low_as_random() {
+        let people = people(8);
+        let tracks = tracks(&people);
+        for seed in 1..=5 {
+            let balanced =
+                Schedule::generate_with(&people, &tracks, 7, seed, ScheduleStrategy::Balanced)
+                    .unwrap();
+            let random = Schedule::generate_with(
+                &people,
+                &tracks,
+                7,
+                seed,
+                ScheduleStrategy::RandomMatching,
+            )
+            .unwrap();
+            assert!(
+                balanced.balance().repeated_handoffs <= random.balance().repeated_handoffs + 1,
+                "balanced {} vs random {} for seed {seed}",
+                balanced.balance().repeated_handoffs,
+                random.balance().repeated_handoffs
+            );
+        }
     }
 
     #[test]
@@ -469,7 +976,20 @@ mod tests {
         assert_eq!(schedule.rounds, 0);
     }
 
-    use proptest::prelude::*;
+    #[test]
+    fn strategies_parse_and_serialize() {
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::RandomMatching,
+            ScheduleStrategy::Cyclic,
+        ] {
+            assert_eq!(ScheduleStrategy::parse(strategy.as_str()), Some(strategy));
+            let json = serde_json::to_string(&strategy).unwrap();
+            let decoded: ScheduleStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, strategy);
+        }
+        assert_eq!(ScheduleStrategy::parse("unknown"), None);
+    }
 
     proptest! {
         #[test]
@@ -482,6 +1002,32 @@ mod tests {
             let tracks = tracks(&people);
             let rounds = requested_rounds % person_count as u32;
             let schedule = Schedule::generate(&people, &tracks, rounds, seed).unwrap();
+            assert_valid(&schedule, &people, &tracks);
+        }
+
+        #[test]
+        fn all_strategies_are_valid_for_generated_inputs(
+            person_count in 2usize..10,
+            requested_rounds in 0u32..12,
+            seed in any::<u64>(),
+            strategy_index in 0usize..3,
+        ) {
+            let strategies = [
+                ScheduleStrategy::Balanced,
+                ScheduleStrategy::RandomMatching,
+                ScheduleStrategy::Cyclic,
+            ];
+            let people = people(person_count);
+            let tracks = tracks(&people);
+            let rounds = requested_rounds % person_count as u32;
+            let schedule = Schedule::generate_with(
+                &people,
+                &tracks,
+                rounds,
+                seed,
+                strategies[strategy_index],
+            )
+            .unwrap();
             assert_valid(&schedule, &people, &tracks);
         }
     }

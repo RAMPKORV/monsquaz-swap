@@ -67,11 +67,31 @@ impl TwilightConfig {
 }
 
 /// Live directory operations for the setup wizard.
-pub struct TwilightSetup;
+pub struct TwilightSetup {
+    proxy: Option<String>,
+}
 
 impl TwilightSetup {
     pub fn new() -> Self {
-        Self
+        Self { proxy: None }
+    }
+
+    /// Use a local Discord API mock through `host:port`.
+    pub fn with_proxy(host: impl Into<String>) -> Self {
+        Self {
+            proxy: Some(host.into()),
+        }
+    }
+
+    fn client(&self, token: &str) -> Client {
+        match &self.proxy {
+            Some(proxy) => Client::builder()
+                .token(token.trim().to_string())
+                .proxy(proxy.clone(), true)
+                .ratelimiter(None)
+                .build(),
+            None => Client::new(token.trim().to_string()),
+        }
     }
 }
 
@@ -85,7 +105,7 @@ impl Default for TwilightSetup {
 impl SetupDirectory for TwilightSetup {
     async fn validate_token(&self, token: &str) -> Result<BotIdentity, SetupError> {
         validate_bot_token_shape(token)?;
-        let http = Client::new(token.trim().to_string());
+        let http = self.client(token);
         let user = http
             .current_user()
             .await
@@ -101,7 +121,7 @@ impl SetupDirectory for TwilightSetup {
 
     async fn guilds(&self, token: &str) -> Result<Vec<GuildSummary>, SetupError> {
         validate_bot_token_shape(token)?;
-        let http = Client::new(token.trim().to_string());
+        let http = self.client(token);
         let guilds = http
             .current_user_guilds()
             .await
@@ -128,7 +148,7 @@ impl SetupDirectory for TwilightSetup {
             .parse::<u64>()
             .map(Id::new)
             .map_err(|_| SetupError::InvalidSelection)?;
-        let http = Client::new(token.trim().to_string());
+        let http = self.client(token);
         let channels = http
             .guild_channels(guild_id)
             .await
@@ -151,8 +171,11 @@ impl SetupDirectory for TwilightSetup {
 
     async fn send_test_dm(&self, token: &str, user_id: &str) -> Result<String, SetupError> {
         validate_bot_token_shape(token)?;
-        let port =
-            HttpDiscordPort::new(token).map_err(|error| SetupError::Discord(error.to_string()))?;
+        let port = match &self.proxy {
+            Some(proxy) => HttpDiscordPort::with_proxy(token, proxy.clone()),
+            None => HttpDiscordPort::new(token),
+        }
+        .map_err(|error| SetupError::Discord(error.to_string()))?;
         let message = OutboundMessage {
             content: "Monsquaz Swap test message. Your bot can reach you.".to_string(),
         };

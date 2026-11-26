@@ -840,6 +840,7 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         group_count: Some(draft.group_count),
         group_size: Some(draft.group_size),
         rotation: Some(draft.rotation),
+        scheduler: None,
         swap_cadence: Some(draft.swap_cadence),
         schedule_visibility: Some(draft.schedule_visibility),
     };

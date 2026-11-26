@@ -277,3 +277,21 @@ file.
 **Rejected:** a hard minimum, a mandatory warning, and a single fixed export
 channel.
 
+## D-028 — Classic schedule strategy suite
+
+**Context:** a single randomized matching can produce generic squares and does
+not control repeated participant pairs. The host wants varied and balanced
+classic schedules.
+**Decision:** the classic planner has three seeded strategies. `balanced` is the
+default. It uses min-cost matching with a penalty for participant pairs that
+already met, especially in the last two rounds. `random_matching` keeps the
+row-by-row perfect matching. `cyclic` builds a cyclic Latin square and permutes
+the rows, columns, and symbols. Cyclic falls back to matching when the roster
+does not have exactly one track per participant. All strategies are
+deterministic for the same canonical input and seed. The event setting
+`scheduler` selects the strategy. The default is `balanced`.
+**Consequences:** the host can trade speed for social balance. Balance metrics
+are available for tests and future UI. The demo planner uses the same randomized
+shape instead of a bare cyclic shift.
+**Rejected:** bare cyclic shift as the default (predictable), pure greedy
+(dead-ends), and one fixed algorithm for every event.

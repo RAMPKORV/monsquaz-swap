@@ -33,6 +33,18 @@ impl HttpDiscordPort {
         })
     }
 
+    /// Build a port that sends requests through a local Discord API mock.
+    /// The host is `host:port`; the connection uses HTTP.
+    pub fn with_proxy(token: &str, host: impl Into<String>) -> Result<Self, DiscordError> {
+        validate_bot_token_shape(token).map_err(|error| DiscordError::Other(error.to_string()))?;
+        let http = Client::builder()
+            .token(token.trim().to_string())
+            .proxy(host.into(), true)
+            .ratelimiter(None)
+            .build();
+        Ok(Self { http })
+    }
+
     async fn open_dm(&self, user_id: &DiscordUserId) -> Result<Id<ChannelMarker>, DiscordError> {
         let user = parse_id::<UserMarker>(&user_id.0)?;
         let channel = self

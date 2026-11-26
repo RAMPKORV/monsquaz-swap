@@ -49,8 +49,10 @@ Run `pnpm build` before `cargo test` on a clean checkout. `src-tauri` embeds
 ./bin/project export
 ```
 
-Worktrees live in `../MonsquazSwap-worktrees/`. Use one worktree per issue.
-Do not share a mutable `.project` database across worktrees.
+Worktrees live in `../MonsquazSwap-worktrees/`. Use one worktree per batch or
+issue. Claim 3–6 related issues, create the worktree from the first issue, and
+work the rest in the same worktree. Do not share a mutable `.project` database
+across worktrees.
 
 ## Commit and pull request
 
@@ -58,7 +60,7 @@ Do not share a mutable `.project` database across worktrees.
 git add -A
 git commit -m "MSW-###: imperative summary"
 git push -u origin HEAD
-gh pr create --fill --base main
+gh pr create --title "batch: ..." --body "... issue keys ..." --base main
 gh pr checks --watch
 gh pr merge --squash --delete-branch
 ```

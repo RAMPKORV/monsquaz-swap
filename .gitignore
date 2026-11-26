@@ -38,6 +38,10 @@ htmlcov/
 node_modules/
 dist/
 build/
+
+# design gate artifacts and pinned dependency cache
+.cache/
+design/artifacts/
 .next/
 .turbo/
 coverage/

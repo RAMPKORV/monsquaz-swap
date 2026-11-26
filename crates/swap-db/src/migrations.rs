@@ -221,6 +221,29 @@ CREATE TABLE host_decisions (
 
 CREATE INDEX host_decisions_open ON host_decisions(event_id, status);
 "#,
+    r#"
+CREATE TABLE track_titles (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    track_code TEXT NOT NULL,
+    title TEXT NOT NULL,
+    set_by TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (event_id, track_code)
+) STRICT;
+
+CREATE TABLE track_comments (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    track_code TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    body TEXT NOT NULL,
+    redacted_at INTEGER,
+    created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX track_comments_track ON track_comments(event_id, track_code, created_at);
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

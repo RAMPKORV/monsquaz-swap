@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
@@ -18,6 +18,7 @@ import type {
   PeopleData,
   PlanData,
   RevealData,
+  RevealPackage,
   RevealTrack,
   RosterLock,
   RoundOpen,
@@ -34,6 +35,7 @@ import {
   demoMissionControl,
   demoPeople,
   demoPlan,
+  demoRevealPackage,
   demoSettings,
   demoSetup,
 } from "./demo";
@@ -84,6 +86,7 @@ export function initialView(): ViewKey {
     "setup",
     "people",
     "plan",
+    "reveal",
     "audit",
     "settings",
   ];
@@ -459,9 +462,134 @@ export async function decideDeadline(
   });
 }
 
+let demoRevealState: RevealPackage | null = null;
+
+export function resetDemoReveal(): void {
+  demoRevealState = null;
+}
+
+export async function loadRevealPackage(
+  scenario: Scenario,
+): Promise<RevealPackage> {
+  if (scenario === "loading") {
+    return forceLoading<RevealPackage>();
+  }
+  if (scenario === "error") {
+    forceError();
+  }
+  if (isDemoMode()) {
+    await pause(220);
+    if (scenario !== "default" || !demoRevealState) {
+      demoRevealState = demoRevealPackage(scenario);
+    }
+    if (
+      new URLSearchParams(window.location.search).get("published") === "1" &&
+      demoRevealState
+    ) {
+      demoRevealState.published = true;
+      demoRevealState.eventState = "Reveal";
+    }
+    return structuredClone(demoRevealState);
+  }
+  return invoke<RevealPackage>("host_reveal_package");
+}
+
+function demoRevealUpdate(
+  update: (packageData: RevealPackage) => void,
+): RevealPackage {
+  if (!demoRevealState) {
+    demoRevealState = demoRevealPackage("default");
+  }
+  update(demoRevealState);
+  return structuredClone(demoRevealState);
+}
+
+export async function setTrackTitle(
+  trackCode: string,
+  title: string,
+): Promise<RevealPackage> {
+  if (isDemoMode()) {
+    await pause(200);
+    return demoRevealUpdate((packageData) => {
+      const track = packageData.album.find((item) => item.trackCode === trackCode);
+      if (track) {
+        track.title = title.trim();
+      }
+    });
+  }
+  return invoke<RevealPackage>("host_set_track_title", { trackCode, title });
+}
+
+export async function addTrackComment(
+  trackCode: string,
+  participantId: string,
+  kind: string,
+  body: string,
+): Promise<RevealPackage> {
+  if (isDemoMode()) {
+    await pause(200);
+    return demoRevealUpdate((packageData) => {
+      const track = packageData.album.find((item) => item.trackCode === trackCode);
+      if (!track) {
+        return;
+      }
+      const authorName =
+        track.credits.find((credit) => credit.displayName !== "No edit")
+          ?.displayName ?? track.seedOwnerName;
+      track.comments.push({
+        id: `comment-${trackCode}-${track.comments.length + 1}`,
+        participantId,
+        authorName,
+        kind,
+        body: body.trim(),
+        createdAt: Math.floor(Date.now() / 1000),
+      });
+    });
+  }
+  return invoke<RevealPackage>("host_add_track_comment", {
+    trackCode,
+    participantId,
+    kind,
+    body,
+  });
+}
+
+export async function redactTrackComment(
+  commentId: string,
+): Promise<RevealPackage> {
+  if (isDemoMode()) {
+    await pause(160);
+    return demoRevealUpdate((packageData) => {
+      for (const track of packageData.album) {
+        track.comments = track.comments.filter(
+          (comment) => comment.id !== commentId,
+        );
+      }
+    });
+  }
+  return invoke<RevealPackage>("host_redact_track_comment", { commentId });
+}
+
+export function previewUrl(fileId: string): string {
+  if (isDemoMode()) {
+    return "";
+  }
+  return convertFileSrc(fileId, "swap-preview");
+}
+
 export async function revealEvent(): Promise<RevealData> {
   if (isDemoMode()) {
     await pause(420);
+    if (new URLSearchParams(window.location.search).get("blocked") === "1") {
+      return {
+        published: false,
+        blocked: ["Track S7F3A · round 3"],
+        tracks: [],
+      };
+    }
+    if (demoRevealState) {
+      demoRevealState.published = true;
+    }
     return {
       published: true,
       blocked: [],

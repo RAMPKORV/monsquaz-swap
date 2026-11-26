@@ -57,6 +57,32 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  design:
+    name: Design
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .cache/refract
+          key: refract-${{ runner.os }}-61d470a7c1a3cbd986b4cf2d033316dfa09f05c4
+      - name: Install the pinned Refract CLI and Chromium
+        run: |
+          CACHE="$(scripts/install-refract.sh)"
+          sudo "$(command -v node)" "$CACHE/packages/core/node_modules/playwright/cli.js" install-deps chromium
+      - name: Design gate
+        run: scripts/design-check.sh
+
   rust:
     name: Rust
     runs-on: ubuntu-24.04
@@ -147,7 +173,7 @@ jobs:
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [tracker, ui, rust, tauri-smoke]
+    needs: [tracker, ui, design, rust, tauri-smoke]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

@@ -22,6 +22,9 @@ pnpm --dir ui test
 # src-tauri embeds ui/dist at compile time through generate_context!.
 pnpm --dir ui build
 
+echo "== design =="
+scripts/design-check.sh
+
 echo "== rust =="
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

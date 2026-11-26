@@ -25,6 +25,7 @@ pnpm --dir ui test:watch
 
 ```bash
 scripts/check.sh
+scripts/design-check.sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

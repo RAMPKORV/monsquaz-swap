@@ -929,6 +929,20 @@ impl InboundService {
         }
     }
 
+    async fn handle_title(&self, event_id: &str, user_id: &str, title: &str) -> Result<(), String> {
+        let outcome = {
+            let db = self.lock();
+            crate::engine::set_track_title_for_user(&db, event_id, user_id, title, self.now())
+        };
+        match outcome {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                self.notify(user_id, &title_message(&error)).await;
+                Ok(())
+            }
+        }
+    }
+
     async fn handle_skip(&self, event_id: &str, user_id: &str) -> Result<(), String> {
         let db = self.db.clone();
         let event = event_id.to_string();
@@ -1069,6 +1083,19 @@ impl InboundService {
                         .unwrap_or(6);
                     self.handle_extension(&event_id, &user_id.0, hours).await
                 }
+                swap_discord::SlashCommand::Title => {
+                    let Some(event_id) = self.active_event(&user_id.0).await? else {
+                        self.notify(&user_id.0, "There is no active swap event for you.")
+                            .await;
+                        return Ok(());
+                    };
+                    let Some(title) = options.get("title") else {
+                        self.notify(&user_id.0, "Send /swap title with the final track name.")
+                            .await;
+                        return Ok(());
+                    };
+                    self.handle_title(&event_id, &user_id.0, title).await
+                }
                 swap_discord::SlashCommand::Join => self.handle_join(&user_id.0, &options).await,
                 swap_discord::SlashCommand::Status => {
                     self.notify(&user_id.0, "Use the offer in your direct messages.")
@@ -1078,7 +1105,7 @@ impl InboundService {
                 swap_discord::SlashCommand::Help => {
                     self.notify(
                         &user_id.0,
-                        "Send a file to submit your claimed track. Use /swap claim or /swap skip.",
+                        "Send a file to submit your claimed track. Use /swap claim or /swap skip. The final holder names the track with /swap title.",
                     )
                     .await;
                     Ok(())
@@ -1165,6 +1192,22 @@ fn terminal_submit(error: &EngineError) -> bool {
             | EngineError::OfferExpired
             | EngineError::WrongAssignmentState(_)
     )
+}
+
+fn title_message(error: &EngineError) -> String {
+    match error {
+        EngineError::EmptyTitle | EngineError::TitleTooLong => {
+            "Use a title between 1 and 80 characters.".to_string()
+        }
+        EngineError::NotTitleHolder => {
+            "Only the latest holder of the track or the host can name it.".to_string()
+        }
+        EngineError::TitleAlreadySet => {
+            "The host has already named this track. Ask the host to change it.".to_string()
+        }
+        EngineError::WrongEventState { .. } => "Titles are closed for this event now.".to_string(),
+        _ => "The title was not saved. Try again or ask the host.".to_string(),
+    }
 }
 
 fn extension_message(error: &EngineError) -> String {

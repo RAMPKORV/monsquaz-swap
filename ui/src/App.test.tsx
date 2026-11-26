@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
+import { loadRevealPackage, resetDemoReveal } from "./data/client";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -17,6 +18,8 @@ function setUrl(search: string) {
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
+  resetDemoReveal();
   setUrl("?demo=1");
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -34,6 +37,12 @@ beforeEach(() => {
 });
 
 describe("App", () => {
+  it("loads the demo reveal package", async () => {
+    setUrl("?demo=1");
+    const packageData = await loadRevealPackage("default");
+    expect(packageData.album).toHaveLength(6);
+  });
+
   it("shows the mission control next action", async () => {
     render(<App />);
     expect(
@@ -125,6 +134,122 @@ describe("App", () => {
     expect(
       await screen.findByText(/host action “missed”/i),
     ).toBeInTheDocument();
+  });
+
+  it("starts stream-safe and confirms before showing names", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    const toggle = screen.getByRole("button", { name: "Stream-safe mode" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/seeded by Seed owner/)).toBeInTheDocument();
+    expect(screen.queryByText("Host tools")).not.toBeInTheDocument();
+    expect(screen.queryByText("Noor")).not.toBeInTheDocument();
+    expect(screen.queryByText("Remy")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("The bassline answer in the second half is the best thing I heard all week."),
+    ).toBeInTheDocument();
+    fireEvent.click(toggle);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Turn off stream-safe mode?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Turn off stream-safe" }),
+    );
+    expect(screen.getByText(/seeded by Noor/)).toBeInTheDocument();
+    expect(screen.getByText("Host tools")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(screen.getByText(/seeded by Seed owner/)).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("saves a title from the reveal show", async () => {
+    setUrl("?demo=1&view=reveal&stream=0");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    const field = screen.getByLabelText("Track title");
+    fireEvent.change(field, { target: { value: "New Name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+    expect(await screen.findByText("Track title saved.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "New Name" }),
+    ).toBeInTheDocument();
+  });
+
+  it("redacts a comment before the reveal", async () => {
+    setUrl("?demo=1&view=reveal&stream=0");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    const text = "The bassline answer in the second half is the best thing I heard all week.";
+    expect(screen.getByText(text)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /Redact .* comment/ })[0],
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Redact this comment?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Redact comment" }),
+    );
+    expect(
+      await screen.findByText("Comment redacted. It will not appear in the reveal."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
+  });
+
+  it("publishes the reveal from the presenter", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    fireEvent.click(screen.getByRole("button", { name: "Publish reveal" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Publish the reveal?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Publish reveal" }),
+    );
+    expect(
+      await screen.findByText("Reveal published to the reveal channel."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Publish reveal" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Stream-safe hides the public credits/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stream-safe mode" }));
+    const off = await screen.findByRole("dialog", {
+      name: "Turn off stream-safe mode?",
+    });
+    expect(within(off).getByText(/published reveal/i)).toBeInTheDocument();
+    fireEvent.click(
+      within(off).getByRole("button", { name: "Turn off stream-safe" }),
+    );
+    expect(
+      screen.getByText("The reveal is public. Share the names."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the publish dialog open when the reveal is blocked", async () => {
+    setUrl("?demo=1&view=reveal&blocked=1");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    fireEvent.click(screen.getByRole("button", { name: "Publish reveal" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Publish the reveal?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Publish reveal" }),
+    );
+    expect(
+      await within(dialog).findByText("The reveal is still blocked."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("Track S7F3A · round 3")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Reveal published to the reveal channel."),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the first-run state", async () => {

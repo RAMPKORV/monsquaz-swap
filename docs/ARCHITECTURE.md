@@ -203,6 +203,24 @@ are in `docs/SETUP.md`.
 - Backup pruning removes regular files older than a cutoff. The backup
   scheduler and the host UI for these operations are follow-ups.
 
+## Reveal package
+
+- `reveal_package` builds a host-only read model from the event, assignments,
+  files, titles, and comments. It never includes file bytes or storage paths.
+- The album order is `sort(HMAC-SHA256(event seed, track code), track code)`.
+  Submission time never affects the order.
+- Migration 008 adds `track_titles` and `track_comments`. A redacted comment is
+  excluded from the package. The host adds comments before the reveal.
+- The final holder names the track with `/swap title`. The host can set or
+  correct the title before the reveal.
+- The presenter plays audio through the `swap-preview` protocol. The URL
+  contains an opaque file id. Module files render to cached WAV through
+  openmpt123. Byte ranges are supported.
+- Stream-safe mode replaces names with role labels in the UI. It does not
+  change the data or the published reveal.
+- Final-file uploads, schedule disclosure, the ZIP package, and keepsakes stay
+  in MSW-025.
+
 ## Security
 
 - Token in the OS keychain. Never in the UI, logs, SQLite, or git.

@@ -15,6 +15,7 @@ type ButtonProps = {
   className?: string;
   ariaLabel?: string;
   describedBy?: string;
+  pressed?: boolean;
 };
 
 export function Button({
@@ -28,6 +29,7 @@ export function Button({
   className = "",
   ariaLabel,
   describedBy,
+  pressed,
 }: ButtonProps) {
   return (
     <button
@@ -38,6 +40,7 @@ export function Button({
       disabled={disabled}
       aria-label={ariaLabel}
       aria-describedby={describedBy}
+      aria-pressed={pressed}
     >
       {icon ? <Icon name={icon} size={18} /> : null}
       <span>{children}</span>
@@ -288,7 +291,7 @@ export function Dialog({
       }
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]',
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
         ),
       );
       if (focusable.length === 0) {
@@ -296,6 +299,11 @@ export function Dialog({
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
+      if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
@@ -304,10 +312,19 @@ export function Dialog({
         first.focus();
       }
     }
+    const bodyHadNoScroll = document.body.classList.contains("no-scroll");
+    document.body.classList.add("no-scroll");
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      previous?.focus();
+      if (!bodyHadNoScroll) {
+        document.body.classList.remove("no-scroll");
+      }
+      if (previous?.isConnected) {
+        previous.focus();
+      } else {
+        document.querySelector<HTMLElement>("#main h1")?.focus();
+      }
     };
   }, []);
 

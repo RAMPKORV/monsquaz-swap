@@ -1,0 +1,5 @@
+{
+  "repository": "https://github.com/valternunez/refract.git",
+  "commit": "61d470a7c1a3cbd986b4cf2d033316dfa09f05c4",
+  "reason": "Pre-release. Pin the exact source commit until @getrefractjs/cli is published."
+}

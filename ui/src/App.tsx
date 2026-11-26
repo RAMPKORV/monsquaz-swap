@@ -17,6 +17,7 @@ import type {
   MissionControl,
   PeopleData,
   PlanData,
+  RevealPackage,
   Scenario,
   SetupData,
   Theme,
@@ -42,10 +43,14 @@ import {
   loadMissionControl,
   loadPeople,
   loadPlan,
+  loadRevealPackage,
   loadSettings,
   loadSetup,
   saveSettings,
   setParticipantPaused,
+  setTrackTitle,
+  addTrackComment,
+  redactTrackComment,
   sendTestNotification,
 } from "./data/client";
 import {
@@ -58,6 +63,7 @@ import { AuditLogSkeleton, AuditLogView } from "./views/AuditLog";
 import { SetupSkeleton, SetupView } from "./views/Setup";
 import { PeopleSkeleton, PeopleView } from "./views/People";
 import { PlannerSkeleton, PlannerView } from "./views/Planner";
+import { RevealSkeleton, RevealView } from "./views/Reveal";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -75,6 +81,7 @@ const toolItems: Array<{
   { label: "Event setup", icon: "plus", view: "setup" },
   { label: "Participants", icon: "users", view: "people" },
   { label: "Schedule", icon: "shuffle", view: "plan" },
+  { label: "Reveal show", icon: "sparkles", view: "reveal" },
   { label: "Round board", icon: "disc" },
   { label: "Files", icon: "folder" },
 ];
@@ -92,6 +99,19 @@ export default function App() {
   const [setup, setSetup] = useState<SetupData | null>(null);
   const [people, setPeople] = useState<PeopleData | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
+  const [revealPackage, setRevealPackage] = useState<RevealPackage | null>(null);
+  const [streamSafe, setStreamSafe] = useState(() => {
+    const stored = window.sessionStorage.getItem("msw.reveal.streamSafe");
+    if (stored === "0") {
+      return false;
+    }
+    if (stored === "1") {
+      return true;
+    }
+    return (
+      new URLSearchParams(window.location.search).get("stream") !== "0"
+    );
+  });
   const [settings, setSettings] = useState<HostSettings | null>(null);
   const [originalSettings, setOriginalSettings] =
     useState<HostSettings | null>(null);
@@ -137,6 +157,13 @@ export default function App() {
   }, [resolvedTheme]);
 
   useEffect(() => {
+    window.sessionStorage.setItem(
+      "msw.reveal.streamSafe",
+      streamSafe ? "1" : "0",
+    );
+  }, [streamSafe]);
+
+  useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: light)");
     if (!media) {
       return;
@@ -160,8 +187,18 @@ export default function App() {
       loadSetup(scenario),
       loadPeople(scenario),
       loadPlan(scenario),
+      loadRevealPackage(scenario),
     ])
-      .then(([nextMission, nextSettings, nextAudit, nextSetup, nextPeople, nextPlan]) => {
+      .then(
+        ([
+          nextMission,
+          nextSettings,
+          nextAudit,
+          nextSetup,
+          nextPeople,
+          nextPlan,
+          nextReveal,
+        ]) => {
         if (cancelled) {
           return;
         }
@@ -178,12 +215,14 @@ export default function App() {
         setSetup(nextSetup);
         setPeople(nextPeople);
         setPlan(nextPlan);
+        setRevealPackage(nextReveal);
         setDirty(
           isDemoMode() &&
             new URLSearchParams(window.location.search).get("dirty") === "1",
         );
         setStatus("ready");
-      })
+        },
+      )
       .catch((error: unknown) => {
         if (cancelled) {
           return;
@@ -206,6 +245,7 @@ export default function App() {
       setup: "Event setup",
       people: "Participants",
       plan: "Schedule planner",
+      reveal: "Reveal show",
       settings: "Settings",
       audit: "Audit log",
     };
@@ -247,6 +287,18 @@ export default function App() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "reveal" || isDemoMode()) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      loadRevealPackage(scenario)
+        .then(setRevealPackage)
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [view, scenario]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -336,6 +388,7 @@ export default function App() {
           setToast(
             `Reveal recorded. ${revealed.tracks.length} track credits are queued for the reveal channel.`,
           );
+          setView("reveal");
         }
         reloadView();
       } catch (error) {
@@ -555,6 +608,8 @@ export default function App() {
         <PeopleSkeleton />
       ) : view === "plan" ? (
         <PlannerSkeleton />
+      ) : view === "reveal" ? (
+        <RevealSkeleton />
       ) : view === "settings" ? (
         <SettingsSkeleton />
       ) : (
@@ -586,6 +641,56 @@ export default function App() {
         onGeneratePlan={handleGeneratePlan}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
+      />
+    ) : view === "reveal" && revealPackage ? (
+      <RevealView
+        data={revealPackage}
+        streamSafe={streamSafe}
+        onStreamSafeChange={setStreamSafe}
+        onAction={setToast}
+        onSetTitle={async (trackCode, title) => {
+          try {
+            setRevealPackage(await setTrackTitle(trackCode, title));
+          } catch (error) {
+            setToast(`Could not save the title. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
+        onAddComment={async (trackCode, participantId, kind, body) => {
+          try {
+            setRevealPackage(
+              await addTrackComment(trackCode, participantId, kind, body),
+            );
+          } catch (error) {
+            setToast(`Could not add the comment. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
+        onRedact={async (commentId) => {
+          try {
+            setRevealPackage(await redactTrackComment(commentId));
+          } catch (error) {
+            setToast(`Could not redact the comment. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
+        onPublish={async () => {
+          try {
+            const revealed = await revealEvent();
+            if (!revealed.published) {
+              return { published: false, blocked: revealed.blocked };
+            }
+            setRevealPackage({
+              ...(await loadRevealPackage(scenario)),
+              published: true,
+            });
+            setView("reveal");
+            return { published: true, blocked: [] };
+          } catch (error) {
+            setToast(`Could not reveal the event. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
       />
     ) : view === "settings" && settings ? (
       <SettingsView
@@ -638,6 +743,7 @@ export default function App() {
         className={`app${staticMode ? " app--static" : ""}${
           redactionPreview ? " app--redaction" : ""
         }`}
+        data-app-status={status}
         data-theme={resolvedTheme}
       >
         <Sidebar

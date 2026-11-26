@@ -1,4 +1,11 @@
-export type ViewKey = "mission" | "audit" | "settings" | "setup" | "people" | "plan";
+export type ViewKey =
+  | "mission"
+  | "audit"
+  | "settings"
+  | "setup"
+  | "people"
+  | "plan"
+  | "reveal";
 export type Theme = "dark" | "light";
 export type Scenario =
   | "default"
@@ -298,4 +305,60 @@ export type PlanData = {
   warnings: PlannerWarning[];
   funScore: number | null;
   funGuardrails: Array<{ label: string; value: string }>;
+};
+
+export type RevealPackage = {
+  eventName: string;
+  eventState: string;
+  published: boolean;
+  album: RevealAlbumTrack[];
+};
+
+export type RevealAlbumTrack = {
+  position: number;
+  trackCode: string;
+  title: string | null;
+  seedOwnerId: string;
+  seedOwnerName: string;
+  credits: RevealCredit[];
+  comments: RevealComment[];
+  versions: RevealVersion[];
+  stats: RevealStats;
+};
+
+export type RevealCredit = {
+  round: number;
+  participantId: string;
+  displayName: string;
+  status: string;
+  fillIn: boolean;
+};
+
+export type RevealComment = {
+  id: string;
+  participantId: string;
+  authorName: string;
+  kind: string;
+  body: string;
+  createdAt: number;
+};
+
+export type RevealVersion = {
+  version: number;
+  holderId: string;
+  holderName: string;
+  role: "seed" | "edit";
+  round: number | null;
+  fileId: string;
+  extension: string;
+  createdAt: number;
+  playable: boolean;
+  finalVersion: boolean;
+};
+
+export type RevealStats = {
+  edits: number;
+  fillIns: number;
+  skips: number;
+  contributors: number;
 };

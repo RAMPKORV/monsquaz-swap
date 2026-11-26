@@ -1,13 +1,14 @@
-use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
+use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState, album_order};
 use swap_db::{
     AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
     HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, claim, create_event, dispatch, dispatch_pending, event_status,
-    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal,
-    reveal_with_channel, signup, skip, start_event, submit,
+    PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
+    dispatch_pending, event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    open_round, redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
+    set_track_title_for_user, signup, skip, start_event, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -341,8 +342,22 @@ async fn the_classic_loop_reaches_a_reveal() {
         expire_offer(&fixture.db, EVENT, assignment_id, T4 + 86_401).unwrap();
     }
 
+    let original_codes = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+        .unwrap()
+        .into_iter()
+        .map(|track| track.code)
+        .collect::<Vec<_>>();
+    let expected_order = album_order(&original_codes, 42);
     let revealed = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap();
     assert_eq!(revealed.tracks.len(), 4);
+    assert_eq!(
+        revealed
+            .tracks
+            .iter()
+            .map(|track| track.track_code.clone())
+            .collect::<Vec<_>>(),
+        expected_order
+    );
     assert!(!revealed.effects.is_empty());
     for track in &revealed.tracks {
         assert_eq!(track.entries.len(), 1);
@@ -1609,6 +1624,227 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
             .state,
         TrackState::InCustody
     );
+}
+
+#[test]
+fn the_reveal_package_carries_titles_comments_and_credits() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let round_zero = fixture.open(0);
+    let (user_id, assignment_id, track_code) = round_zero[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T5,
+    )
+    .unwrap();
+    let bytes = seed_bytes(101);
+    submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &bytes,
+        },
+        T6,
+    )
+    .unwrap();
+
+    let other_user = &round_zero[1].0;
+    assert!(matches!(
+        set_track_title(&fixture.db, EVENT, &track_code, "Stolen", other_user, T6),
+        Err(EngineError::NotTitleHolder)
+    ));
+    set_track_title(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        "  Midnight Draft  ",
+        "host",
+        T6,
+    )
+    .unwrap();
+    let owner = TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+        .unwrap()
+        .unwrap()
+        .owner_id;
+    let outsider = round_zero
+        .iter()
+        .map(|(candidate, _, _)| candidate)
+        .find(|candidate| **candidate != user_id && **candidate != owner)
+        .unwrap();
+    assert!(matches!(
+        add_track_comment(
+            &fixture.db,
+            EVENT,
+            &track_code,
+            outsider,
+            "comment",
+            "Not my track",
+            T6,
+        ),
+        Err(EngineError::NotTrackContributor)
+    ));
+    add_track_comment(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        &user_id,
+        "comment",
+        "  A great bassline.  ",
+        T6,
+    )
+    .unwrap();
+    let redacted = add_track_comment(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        &user_id,
+        "questionnaire",
+        "I used the seed melody.",
+        T6,
+    )
+    .unwrap();
+    redact_track_comment(&fixture.db, &redacted.id, T6).unwrap();
+
+    let package = reveal_package(&fixture.db, EVENT).unwrap();
+    assert!(!package.published);
+    assert_eq!(package.event_state, EventState::Active);
+    assert_eq!(package.album.len(), 3);
+    assert_eq!(
+        package
+            .album
+            .iter()
+            .map(|track| track.position)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    let codes = package
+        .album
+        .iter()
+        .map(|track| track.track_code.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, album_order(&codes, 42));
+    let track = package
+        .album
+        .iter()
+        .find(|track| track.track_code == track_code)
+        .unwrap();
+    assert_eq!(track.title.as_deref(), Some("Midnight Draft"));
+    assert_eq!(
+        track
+            .credits
+            .iter()
+            .filter(|entry| entry.status == AssignmentStatus::Submitted)
+            .count(),
+        1
+    );
+    assert_eq!(track.comments.len(), 1);
+    assert_eq!(track.comments[0].body, "A great bassline.");
+    assert_eq!(track.comments[0].author_name, "User 0");
+    assert!(track.versions.iter().any(|version| {
+        version.version == 2
+            && version.final_version
+            && version.holder_id == user_id
+            && version.playable
+    }));
+    assert!(track.versions.iter().any(|version| {
+        version.version == 1 && version.role == swap_engine::RevealVersionRole::Seed
+    }));
+}
+
+#[test]
+fn the_final_holder_is_asked_for_a_title_once() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let first_round = fixture.open(0);
+    for (index, (user_id, assignment_id, _)) in first_round.iter().enumerate() {
+        claim(
+            &fixture.db,
+            &fixture.store,
+            EVENT,
+            assignment_id,
+            user_id,
+            T5,
+        )
+        .unwrap();
+        let bytes = seed_bytes(110 + index as u8);
+        submit(
+            &fixture.db,
+            &fixture.store,
+            &PassthroughPreparer,
+            &SubmitRequest {
+                event_id: EVENT,
+                user_id,
+                filename: "edit.it",
+                bytes: &bytes,
+            },
+            T6,
+        )
+        .unwrap();
+    }
+    let final_offers = fixture.open(1);
+    let (user_id, assignment_id, track_code) = final_offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T5,
+    )
+    .unwrap();
+    let bytes = seed_bytes(200);
+    let first = submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &bytes,
+        },
+        T6,
+    )
+    .unwrap();
+    assert_eq!(first.effects.len(), 2);
+    assert!(first.effects.iter().any(|effect| {
+        matches!(effect, Effect::Dm { content, .. } if content.contains("/swap title"))
+    }));
+    assert!(first.effects.iter().any(|effect| {
+        matches!(effect, Effect::Dm { content, .. } if content.contains(&track_code))
+    }));
+    assert!(set_track_title_for_user(&fixture.db, EVENT, &user_id, "Final Name", T7).is_ok());
+    let early_user = &first_round[0].0;
+    assert!(matches!(
+        set_track_title_for_user(&fixture.db, EVENT, early_user, "Too Early", T7),
+        Err(EngineError::NotTitleHolder)
+    ));
+
+    let second_bytes = seed_bytes(201);
+    let second = submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &second_bytes,
+        },
+        T7,
+    )
+    .unwrap();
+    assert_eq!(second.effects.len(), 1);
 }
 
 #[test]

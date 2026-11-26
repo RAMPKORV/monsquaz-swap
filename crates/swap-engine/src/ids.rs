@@ -1,4 +1,5 @@
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
 use swap_db::{PlanAssignmentRecord, PlanRecord};
@@ -23,6 +24,27 @@ pub fn track_code(seed: u64, salt: u32) -> String {
 pub fn assignment_id(event_id: &str, round: u32, track_code: &str) -> String {
     let hash = sha256_hex(format!("msw-assignment-v1:{event_id}:{round}:{track_code}").as_bytes());
     format!("a{}", &hash[..16])
+}
+
+/// A unique comment identifier. A process-local sequence keeps two equal
+/// comments distinct. Comment creation is not retried after a commit.
+pub fn comment_id(
+    event_id: &str,
+    track_code: &str,
+    participant_id: &str,
+    kind: &str,
+    body: &str,
+    now: i64,
+) -> String {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let hash = sha256_hex(
+        format!(
+            "msw-comment-v1:{event_id}:{track_code}:{participant_id}:{kind}:{now}:{sequence}:{body}"
+        )
+        .as_bytes(),
+    );
+    format!("c{}", &hash[..16])
 }
 
 /// Commitment over the schedule and the locked policy. The commitment never

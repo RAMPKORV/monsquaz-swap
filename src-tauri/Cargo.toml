@@ -29,6 +29,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 swap-core = { path = "../crates/swap-core" }
 swap-discord = { path = "../crates/swap-discord", default-features = false }
 swap-db = { path = "../crates/swap-db" }

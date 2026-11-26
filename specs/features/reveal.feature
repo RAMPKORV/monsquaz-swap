@@ -55,6 +55,27 @@ Feature: Reveal and album
     And the presenter shows the credits
     And the presenter hides the mapping in stream-safe mode
 
+  Scenario: The presenter uses opaque audio URLs
+    Given a track with a module seed and a final version
+    When the host opens the presenter
+    Then the audio control receives an opaque preview URL
+    And the UI does not receive file bytes or absolute paths
+    And the app caches the rendered preview
+
+  Scenario: The host records a comment before the reveal
+    Given a track with no comments
+    When the host adds a comment for a participant
+    Then the comment appears with the participant name
+    And the host can redact the comment
+    And a redacted comment does not appear in the presenter
+
+  Scenario: Stream-safe mode hides the mapping
+    Given the presenter shows a completed track
+    When the host turns on stream-safe mode
+    Then the presenter shows role labels instead of names
+    And the presenter hides the host tools
+    And the album, credits, comments, and audio stay visible
+
   Scenario: The app exports the album package
     Given a completed event
     When the host exports the album
@@ -90,5 +111,5 @@ Feature: Reveal and album
     Then the bot asks for the final title
     And the app stores the title for the reveal
     When the final holder does not provide a title
-    Then the app asks the previous submitter
-    And the host can set the title if both are unavailable
+    Then the host can set the title before the reveal
+    And the app keeps the track code until a title is set

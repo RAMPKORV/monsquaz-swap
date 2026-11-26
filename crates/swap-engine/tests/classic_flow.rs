@@ -1657,6 +1657,27 @@ fn the_reveal_package_carries_titles_comments_and_credits() {
         T6,
     )
     .unwrap();
+    let owner = TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+        .unwrap()
+        .unwrap()
+        .owner_id;
+    let outsider = round_zero
+        .iter()
+        .map(|(candidate, _, _)| candidate)
+        .find(|candidate| **candidate != user_id && **candidate != owner)
+        .unwrap();
+    assert!(matches!(
+        add_track_comment(
+            &fixture.db,
+            EVENT,
+            &track_code,
+            outsider,
+            "comment",
+            "Not my track",
+            T6,
+        ),
+        Err(EngineError::NotTrackContributor)
+    ));
     add_track_comment(
         &fixture.db,
         EVENT,
@@ -1723,6 +1744,87 @@ fn the_reveal_package_carries_titles_comments_and_credits() {
     assert!(track.versions.iter().any(|version| {
         version.version == 1 && version.role == swap_engine::RevealVersionRole::Seed
     }));
+}
+
+#[test]
+fn the_final_holder_is_asked_for_a_title_once() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let first_round = fixture.open(0);
+    for (index, (user_id, assignment_id, _)) in first_round.iter().enumerate() {
+        claim(
+            &fixture.db,
+            &fixture.store,
+            EVENT,
+            assignment_id,
+            user_id,
+            T5,
+        )
+        .unwrap();
+        let bytes = seed_bytes(110 + index as u8);
+        submit(
+            &fixture.db,
+            &fixture.store,
+            &PassthroughPreparer,
+            &SubmitRequest {
+                event_id: EVENT,
+                user_id,
+                filename: "edit.it",
+                bytes: &bytes,
+            },
+            T6,
+        )
+        .unwrap();
+    }
+    let final_offers = fixture.open(1);
+    let (user_id, assignment_id, track_code) = final_offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T5,
+    )
+    .unwrap();
+    let bytes = seed_bytes(200);
+    let first = submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &bytes,
+        },
+        T6,
+    )
+    .unwrap();
+    assert_eq!(first.effects.len(), 2);
+    assert!(first.effects.iter().any(|effect| {
+        matches!(effect, Effect::Dm { content, .. } if content.contains("/swap title"))
+    }));
+    assert!(first.effects.iter().any(|effect| {
+        matches!(effect, Effect::Dm { content, .. } if content.contains(&track_code))
+    }));
+
+    let second_bytes = seed_bytes(201);
+    let second = submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &second_bytes,
+        },
+        T7,
+    )
+    .unwrap();
+    assert_eq!(second.effects.len(), 1);
 }
 
 #[test]

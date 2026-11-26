@@ -134,6 +134,8 @@ pub enum EngineError {
     CommentNotFound(String),
     #[error("the comment is already redacted")]
     CommentAlreadyRedacted,
+    #[error("the participant did not work on this track")]
+    NotTrackContributor,
 }
 
 #[derive(Debug, Clone)]
@@ -231,9 +233,11 @@ pub struct CreditEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackCredits {
     pub track_code: String,
+    pub title: Option<String>,
     pub seed_owner: String,
     pub seed_owner_name: String,
     pub entries: Vec<CreditEntry>,
+    pub comments: Vec<RevealComment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1074,27 +1078,30 @@ fn submit_inner(
         return Err(EngineError::AttachmentAlreadyProcessed);
     }
     enqueue_effect(&transaction, request.event_id, &receipt, now)?;
-    if assignment.status != AssignmentStatus::Submitted
+    let title_request = if assignment.status != AssignmentStatus::Submitted
         && let Some(plan) = PlanRepo::latest(&transaction, request.event_id)?
         && assignment.round + 1 == plan.rounds
         && TrackTitleRepo::get(&transaction, request.event_id, &assignment.track_code)?.is_none()
     {
-        enqueue_effect(
-            &transaction,
-            request.event_id,
-            &Effect::Dm {
-                user_id: request.user_id.to_string(),
-                content: format!(
-                    "Your edit closes track {}. Name the final track with /swap title <title>.",
-                    assignment.track_code
-                ),
-            },
-            now,
-        )?;
+        Some(Effect::Dm {
+            user_id: request.user_id.to_string(),
+            content: format!(
+                "Your edit closes track {}. Name the final track with /swap title in the server.",
+                assignment.track_code
+            ),
+        })
+    } else {
+        None
+    };
+    if let Some(effect) = &title_request {
+        enqueue_effect(&transaction, request.event_id, effect, now)?;
     }
     commit(transaction)?;
 
-    let effects = vec![receipt];
+    let mut effects = vec![receipt];
+    if let Some(effect) = title_request {
+        effects.push(effect);
+    }
     Ok(SubmitOutcome {
         version,
         sha256: delivery_blob.sha256,
@@ -1254,6 +1261,8 @@ pub fn reveal_with_channel(
             .map(|participant| participant.display_name.clone())
             .unwrap_or_else(|| "Removed participant".to_string())
     };
+    let titles = TrackTitleRepo::list_for_event(&transaction, event_id)?;
+    let all_comments = TrackCommentRepo::list_for_event(&transaction, event_id)?;
     let mut tracks = Vec::new();
     for track in TrackRepo::list_for_event(&transaction, event_id)? {
         let entries = assignments
@@ -1279,6 +1288,22 @@ pub fn reveal_with_channel(
             })
             .collect();
         tracks.push(TrackCredits {
+            title: titles
+                .iter()
+                .find(|title| title.track_code == track.code)
+                .map(|title| title.title.clone()),
+            comments: all_comments
+                .iter()
+                .filter(|comment| comment.track_code == track.code && comment.redacted_at.is_none())
+                .map(|comment| RevealComment {
+                    id: comment.id.clone(),
+                    participant_id: comment.participant_id.clone(),
+                    author_name: participant_name(&comment.participant_id),
+                    kind: comment.kind.clone(),
+                    body: comment.body.clone(),
+                    created_at: comment.created_at,
+                })
+                .collect(),
             track_code: track.code,
             seed_owner_name: participant_name(&track.owner_id),
             seed_owner: track.owner_id,
@@ -1317,7 +1342,13 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
                 .entries
                 .iter()
                 .filter(|entry| entry.status == AssignmentStatus::Submitted)
-                .map(|entry| entry.display_name.clone())
+                .map(|entry| {
+                    if entry.fill_in {
+                        format!("{} (fill-in)", entry.display_name)
+                    } else {
+                        entry.display_name.clone()
+                    }
+                })
                 .collect::<Vec<_>>();
             if names.is_empty() {
                 "no edits".to_string()
@@ -1325,10 +1356,31 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
                 names.join(", ")
             }
         };
-        let line = format!(
-            "\n{} — seed: {}; edits: {}",
-            track.track_code, track.seed_owner_name, editors
+        let title = track.title.as_deref().unwrap_or(&track.track_code);
+        let gaps = track
+            .entries
+            .iter()
+            .filter(|entry| entry.status != AssignmentStatus::Submitted)
+            .count();
+        let mut line = format!(
+            "\n{} ({}) — seed: {}; edits: {}{}",
+            title,
+            track.track_code,
+            track.seed_owner_name,
+            editors,
+            if gaps > 0 {
+                format!("; gaps: {gaps}")
+            } else {
+                String::new()
+            }
         );
+        for comment in &track.comments {
+            line.push_str(&format!(
+                "\n  {}: {}",
+                comment.author_name,
+                comment.body.replace('\n', " ")
+            ));
+        }
         if current.chars().count() + line.chars().count() > LIMIT {
             messages.push(current);
             current = format!("{event_name} — reveal (continued)");
@@ -1602,10 +1654,19 @@ pub fn add_track_comment(
         return Err(EngineError::CommentTooLong);
     }
     let transaction = begin(db)?;
-    TrackRepo::get(&transaction, event_id, track_code)?
+    let track = TrackRepo::get(&transaction, event_id, track_code)?
         .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
     ParticipantRepo::get(&transaction, event_id, participant_id)?
         .ok_or_else(|| EngineError::ParticipantNotFound(participant_id.to_string()))?;
+    let contributed = track.owner_id == participant_id
+        || AssignmentRepo::list_for_event(&transaction, event_id)?
+            .iter()
+            .any(|assignment| {
+                assignment.track_code == track_code && assignment.participant_id == participant_id
+            });
+    if !contributed {
+        return Err(EngineError::NotTrackContributor);
+    }
     let record = TrackCommentRecord {
         id: crate::ids::comment_id(event_id, track_code, participant_id, kind, body, now),
         event_id: event_id.to_string(),
@@ -2467,6 +2528,7 @@ mod reveal_tests {
     fn reveal_messages_respect_the_discord_limit() {
         let track = TrackCredits {
             track_code: "SAAAA".to_string(),
+            title: Some("A title".to_string()),
             seed_owner: "u1".to_string(),
             seed_owner_name: "Seed".to_string(),
             entries: vec![CreditEntry {
@@ -2476,6 +2538,7 @@ mod reveal_tests {
                 status: AssignmentStatus::Submitted,
                 fill_in: false,
             }],
+            comments: Vec::new(),
         };
         let messages = reveal_messages("Long reveal", &[track]);
         assert!(messages.len() > 1);
@@ -2484,5 +2547,46 @@ mod reveal_tests {
                 .iter()
                 .all(|message| message.chars().count() <= 1_900)
         );
+    }
+
+    #[test]
+    fn reveal_messages_include_titles_fill_ins_gaps_and_comments() {
+        let track = TrackCredits {
+            track_code: "SAAAA".to_string(),
+            title: Some("Midnight Draft".to_string()),
+            seed_owner: "u1".to_string(),
+            seed_owner_name: "Seed".to_string(),
+            entries: vec![
+                CreditEntry {
+                    round: 0,
+                    participant_id: "u2".to_string(),
+                    display_name: "Editor".to_string(),
+                    status: AssignmentStatus::Submitted,
+                    fill_in: true,
+                },
+                CreditEntry {
+                    round: 1,
+                    participant_id: String::new(),
+                    display_name: "No edit".to_string(),
+                    status: AssignmentStatus::SkippedAfterClaim,
+                    fill_in: false,
+                },
+            ],
+            comments: vec![RevealComment {
+                id: "comment-1".to_string(),
+                participant_id: "u2".to_string(),
+                author_name: "Editor".to_string(),
+                kind: "comment".to_string(),
+                body: "A great bassline.".to_string(),
+                created_at: 10,
+            }],
+        };
+        let messages = reveal_messages("Reveal", &[track]);
+        let text = messages.join("\n");
+        assert!(text.contains("Midnight Draft (SAAAA)"));
+        assert!(text.contains("Editor (fill-in)"));
+        assert!(text.contains("gaps: 1"));
+        assert!(text.contains("Editor: A great bassline."));
+        assert!(!text.contains("No edit;"));
     }
 }

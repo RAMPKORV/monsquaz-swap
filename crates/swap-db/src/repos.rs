@@ -111,6 +111,24 @@ impl EventRepo {
         raw.map(TryInto::try_into).transpose()
     }
 
+    pub fn open_for_user(conn: &Connection, user_id: &str) -> Result<Option<EventRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT e.id, e.name, e.state, e.seed, e.settings_json, e.created_at,
+                        e.updated_at
+                 FROM events e
+                 JOIN participants p ON p.event_id = e.id
+                 WHERE p.user_id = ?1
+                   AND p.membership IN ('signed_up', 'seeded', 'active')
+                   AND e.state NOT IN ('reveal', 'archived')
+                 ORDER BY e.updated_at DESC LIMIT 1",
+                params![user_id],
+                row_to_raw_event,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
     pub fn get(conn: &Connection, id: &str) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(

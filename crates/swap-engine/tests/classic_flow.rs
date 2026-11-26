@@ -1320,6 +1320,60 @@ async fn an_active_assignment_wins_over_a_new_signup_event() {
     );
 }
 
+#[tokio::test]
+async fn a_join_is_refused_while_another_event_is_not_started() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordUserId, FakeAttachmentFetcher, InboundEvent, InteractionRef, SlashCommand,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    create_event(
+        &fixture.db,
+        "evt-2",
+        "Next Swap",
+        7,
+        &EventSettings::default(),
+        T5,
+    )
+    .unwrap();
+    MetaRepo::set(fixture.db.conn(), "host.current_event", "evt-2").unwrap();
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        Arc::new(FakeAttachmentFetcher::new()),
+        Arc::new(FixedClock(T5)),
+    );
+    service
+        .process(InboundEvent::SlashCommand {
+            interaction: InteractionRef::new("i-join", "token"),
+            user_id: DiscordUserId::new(user(0)),
+            guild_id: None,
+            command: SlashCommand::Join,
+            options: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        ParticipantRepo::get(db.lock().unwrap().conn(), "evt-2", &user(0))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|dm| dm.message.content.contains("has not started"))
+    );
+}
+
 #[test]
 fn a_signup_after_the_roster_lock_is_refused() {
     let fixture = Fixture::new(2, 0);

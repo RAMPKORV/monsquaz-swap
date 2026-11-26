@@ -551,6 +551,21 @@ impl InboundService {
                         self.update_cursor(user_id, channel_id, message_id)?;
                         return Ok(());
                     }
+                    let other = {
+                        let db = self.lock();
+                        EventRepo::open_for_user(db.conn(), user_id)
+                            .map_err(|error| error.to_string())?
+                    };
+                    if other.as_ref().is_some_and(|other| other.id != event.id) {
+                        self.notify(
+                            user_id,
+                            "You are already in an event that has not started. Finish or leave it before you send another seed.",
+                        )
+                        .await;
+                        self.mark_processed(user_id, message_id, &attachment.id)?;
+                        self.update_cursor(user_id, channel_id, message_id)?;
+                        return Ok(());
+                    }
                     let participant = {
                         let db = self.lock();
                         swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
@@ -733,6 +748,18 @@ impl InboundService {
             self.notify(
                 user_id,
                 "You are already in an active event. Finish or leave it before you join another.",
+            )
+            .await;
+            return Ok(());
+        }
+        let other = {
+            let db = self.lock();
+            EventRepo::open_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        };
+        if other.as_ref().is_some_and(|other| other.id != event.id) {
+            self.notify(
+                user_id,
+                "You are already in an event that has not started. Finish or leave it before you join another.",
             )
             .await;
             return Ok(());

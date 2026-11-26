@@ -165,6 +165,35 @@ shot settings-bot-dialog-confirm-dark-1280 "view=settings&dialog=bot&botError=co
 shot settings-dirty-dark-1280 "view=settings&dirty=1" 1280 800
 shot settings-dirty-dark-1024 "view=settings&dirty=1" 1024 700
 
+shot reveal-populated-dark-1280 "view=reveal&stream=0" 1280 800
+shot reveal-stream-safe-dark-1280 "view=reveal" 1280 800
+shot reveal-populated-light-1280 "view=reveal&stream=0" 1280 800
+shot reveal-populated-dark-1024 "view=reveal&stream=0" 1024 700
+shot reveal-stream-safe-dark-1024 "view=reveal" 1024 700
+shot reveal-populated-light-1024 "view=reveal&stream=0" 1024 700
+shot reveal-dense-dark-1280 "view=reveal&stream=0&state=dense" 1280 800
+shot reveal-dense-dark-1024 "view=reveal&stream=0&state=dense" 1024 700
+shot reveal-long-dark-1280 "view=reveal&stream=0&state=long" 1280 800
+shot reveal-empty-dark-1280 "view=reveal&state=empty" 1280 800
+shot reveal-loading-dark-1280 "view=reveal&state=loading" 1280 800
+shot reveal-error-dark-1280 "view=reveal&state=error" 1280 800
+shot reveal-credits-dark-1280 "view=reveal&stream=0&section=credits" 1280 800
+shot reveal-credits-light-1280 "view=reveal&stream=0&section=credits" 1280 800
+shot reveal-credits-dark-1024 "view=reveal&stream=0&section=credits" 1024 700
+shot reveal-comments-dark-1280 "view=reveal&stream=0&section=comments" 1280 800
+shot reveal-comments-dark-1024 "view=reveal&stream=0&section=comments" 1024 700
+shot reveal-tools-dark-1280 "view=reveal&stream=0&section=tools" 1280 800
+shot reveal-tools-light-1280 "view=reveal&stream=0&section=tools" 1280 800
+shot reveal-publish-dark-1280 "view=reveal&stream=0&dialog=publish" 1280 800
+shot reveal-publish-dark-1024 "view=reveal&stream=0&dialog=publish" 1024 700
+shot reveal-publish-light-1280 "view=reveal&stream=0&dialog=publish" 1280 800
+shot reveal-redact-dark-1280 "view=reveal&stream=0&dialog=redact" 1280 800
+shot reveal-published-dark-1280 "view=reveal&stream=0&published=1" 1280 800
+shot reveal-published-light-1280 "view=reveal&stream=0&published=1" 1280 800
+shot reveal-published-dark-1024 "view=reveal&stream=0&published=1" 1024 700
+shot reveal-populated-dark-zoom200 "view=reveal&stream=0" 640 400
+shot reveal-stream-safe-dark-zoom200 "view=reveal" 640 400
+
 shot audit-empty-dark-1280 "view=audit&state=empty" 1280 800
 shot audit-loading-dark-1280 "view=audit&state=loading" 1280 800
 shot audit-populated-dark-1280 "view=audit" 1280 800

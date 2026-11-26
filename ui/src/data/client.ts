@@ -482,6 +482,13 @@ export async function loadRevealPackage(
     if (scenario !== "default" || !demoRevealState) {
       demoRevealState = demoRevealPackage(scenario);
     }
+    if (
+      new URLSearchParams(window.location.search).get("published") === "1" &&
+      demoRevealState
+    ) {
+      demoRevealState.published = true;
+      demoRevealState.eventState = "Reveal";
+    }
     return structuredClone(demoRevealState);
   }
   return invoke<RevealPackage>("host_reveal_package");
@@ -573,6 +580,13 @@ export function previewUrl(fileId: string): string {
 export async function revealEvent(): Promise<RevealData> {
   if (isDemoMode()) {
     await pause(420);
+    if (new URLSearchParams(window.location.search).get("blocked") === "1") {
+      return {
+        published: false,
+        blocked: ["Track S7F3A · round 3"],
+        tracks: [],
+      };
+    }
     if (demoRevealState) {
       demoRevealState.published = true;
     }

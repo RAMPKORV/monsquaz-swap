@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { Button, Dialog, EmptyState, StatusPill } from "../components";
+import { useEffect, useId, useMemo, useState } from "react";
+import {
+  Button,
+  Dialog,
+  EmptyState,
+  PageHeader,
+  Skeleton,
+  StatusPill,
+} from "../components";
 import { Icon } from "../icons";
 import { previewUrl } from "../data/client";
 import type {
@@ -11,11 +18,30 @@ import type {
 
 export function RevealSkeleton() {
   return (
-    <div className="view reveal-view" aria-busy="true">
-      <div className="skeleton skeleton--title" />
+    <div
+      className="view reveal-view"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading the reveal show"
+    >
+      <span className="visually-hidden">Loading the reveal show</span>
+      <h1 className="visually-hidden" tabIndex={-1}>
+        Reveal show
+      </h1>
+      <div className="page-header">
+        <div className="page-header__copy">
+          <Skeleton width="130px" height={12} />
+          <Skeleton width="360px" height={44} className="skeleton--title" />
+          <Skeleton width="min(100%, 540px)" height={16} />
+        </div>
+      </div>
       <div className="reveal-layout">
-        <div className="skeleton skeleton--panel" />
-        <div className="skeleton skeleton--panel" />
+        <Skeleton width="100%" height={420} />
+        <div className="reveal-detail">
+          <Skeleton width="100%" height={150} />
+          <Skeleton width="100%" height={220} />
+          <Skeleton width="100%" height={220} />
+        </div>
       </div>
     </div>
   );
@@ -23,6 +49,8 @@ export function RevealSkeleton() {
 
 export function RevealView({
   data,
+  streamSafe,
+  onStreamSafeChange,
   onSetTitle,
   onAddComment,
   onRedact,
@@ -30,6 +58,8 @@ export function RevealView({
   onAction,
 }: {
   data: RevealPackage;
+  streamSafe: boolean;
+  onStreamSafeChange: (value: boolean) => void;
   onSetTitle: (trackCode: string, title: string) => Promise<void>;
   onAddComment: (
     trackCode: string,
@@ -38,15 +68,14 @@ export function RevealView({
     body: string,
   ) => Promise<void>;
   onRedact: (commentId: string) => Promise<void>;
-  onPublish: () => Promise<void>;
+  onPublish: () => Promise<{ published: boolean; blocked: string[] }>;
   onAction: (message: string) => void;
 }) {
   const [selectedCode, setSelectedCode] = useState(
     () => data.album[0]?.trackCode ?? "",
   );
-  const [streamSafe, setStreamSafe] = useState(
-    () => new URLSearchParams(window.location.search).get("stream") === "1",
-  );
+  const [confirmStreamOff, setConfirmStreamOff] = useState(false);
+  const [publishBlocked, setPublishBlocked] = useState<string[]>([]);
   const [titleDraft, setTitleDraft] = useState("");
   const [commentBody, setCommentBody] = useState("");
   const [commentKind, setCommentKind] = useState("comment");
@@ -97,7 +126,7 @@ export function RevealView({
     if (section) {
       document
         .getElementById(`reveal-${section}-title`)
-        ?.scrollIntoView({ block: "start" });
+        ?.scrollIntoView({ block: section === "tools" ? "center" : "start" });
     }
   }, [data]);
 
@@ -110,8 +139,37 @@ export function RevealView({
   const seedVersion = selected?.versions[0];
   const finalVersion = selected?.versions[selected.versions.length - 1];
 
-  function hiddenName(real: string, fallback: string) {
-    return streamSafe ? fallback : real;
+  function roleFor(participantId: string, realName: string) {
+    if (!streamSafe) {
+      return realName;
+    }
+    if (selected?.seedOwnerId === participantId) {
+      return "Seed owner";
+    }
+    const credit = selected?.credits.find(
+      (entry) =>
+        entry.participantId === participantId && entry.status === "Submitted",
+    );
+    if (credit) {
+      return `Editor ${credit.round + 1}`;
+    }
+    const unknown = Array.from(
+      new Set(
+        selected?.comments
+          .map((comment) => comment.participantId)
+          .filter(
+            (id) =>
+              id.length > 0 &&
+              id !== selected?.seedOwnerId &&
+              !selected?.credits.some(
+                (entry) =>
+                  entry.participantId === id && entry.status === "Submitted",
+              ),
+          ) ?? [],
+      ),
+    ).sort();
+    const index = unknown.indexOf(participantId);
+    return index >= 0 ? `Participant ${index + 1}` : "Participant";
   }
 
   async function saveTitle() {
@@ -156,7 +214,12 @@ export function RevealView({
     }
     setBusy(true);
     try {
-      await onPublish();
+      const result = await onPublish();
+      if (!result.published) {
+        setPublishBlocked(result.blocked);
+        return;
+      }
+      setPublishBlocked([]);
       setConfirmPublish(false);
       onAction("Reveal published to the reveal channel.");
     } catch {
@@ -185,10 +248,22 @@ export function RevealView({
   if (data.album.length === 0) {
     return (
       <div className="view">
+        <PageHeader
+          title="Reveal show"
+          description="The host-only presenter appears after the event has tracks. Start the event and open a round first."
+        />
         <EmptyState
           icon="sparkles"
           title="The album is not ready"
           detail="The reveal show appears after the event has tracks. Start the event and open a round first."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => onAction("Open event setup")}
+            >
+              Open event setup
+            </Button>
+          }
         />
       </div>
     );
@@ -214,11 +289,23 @@ export function RevealView({
           <StatusPill tone={data.published ? "ok" : "warn"} icon="eye-off">
             {data.published ? "Published" : "Not published"}
           </StatusPill>
+          <span id="stream-safe-help" className="visually-hidden">
+            Hides participant names and the host editing tools for screen
+            sharing.
+          </span>
           <Button
-            variant={streamSafe ? "primary" : "secondary"}
+            variant="secondary"
             icon={streamSafe ? "eye-off" : "monitor"}
-            aria-pressed={streamSafe}
-            onClick={() => setStreamSafe((value) => !value)}
+            pressed={streamSafe}
+            ariaLabel="Stream-safe mode"
+            describedBy="stream-safe-help"
+            onClick={() => {
+              if (streamSafe) {
+                setConfirmStreamOff(true);
+              } else {
+                onStreamSafeChange(true);
+              }
+            }}
           >
             {streamSafe ? "Stream-safe is on" : "Stream-safe off"}
           </Button>
@@ -235,22 +322,29 @@ export function RevealView({
       </header>
 
       {streamSafe ? (
-        <p className="reveal-safe-note">
-          <Icon name="shield" size={16} /> Names and host tools are hidden. The
-          album, credits, comments, and audio stay visible.
+        <p className="reveal-safe-note" role="status">
+          <Icon name="shield" size={16} /> Name labels and the host editing tools
+          are hidden. Comment text is shown as written. Publishing stays
+          available.
         </p>
-      ) : null}
+      ) : (
+        <p className="reveal-unsafe-note" role="status">
+          <Icon name="alert" size={16} /> Names are visible. Turn on stream-safe
+          mode before you share your screen.
+        </p>
+      )}
 
       <div className="reveal-layout">
+        <p className="visually-hidden" role="status">
+          Showing {selected?.title ?? "untitled"} track, position{" "}
+          {selected?.position ?? 1} of {data.album.length}.
+        </p>
         <nav className="card reveal-album" aria-label="Album order">
           <div className="card__header">
             <h2>Album</h2>
-            <span className="card__meta">
-              {data.album.length} tracks · {" "}
-              {data.eventName}
-            </span>
+            <span className="card__meta">{data.album.length} tracks</span>
           </div>
-          <ol className="reveal-album__list">
+          <ol className="reveal-album__list" role="list">
             {data.album.map((track) => (
               <li key={track.trackCode}>
                 <button
@@ -293,7 +387,7 @@ export function RevealView({
                 </h2>
                 <p className="reveal-track-code">
                   {selected.trackCode} · seeded by{" "}
-                  {hiddenName(selected.seedOwnerName, "the seed owner")}
+                  {roleFor(selected.seedOwnerId, selected.seedOwnerName)}
                 </p>
               </div>
               <dl className="reveal-stats">
@@ -326,14 +420,14 @@ export function RevealView({
                   <AudioPlayer
                     label="R1 seed"
                     version={seedVersion}
-                    name={hiddenName(seedVersion.holderName, "Seed owner")}
+                    name={roleFor(seedVersion.holderId, seedVersion.holderName)}
                   />
                 ) : null}
                 {finalVersion ? (
                   <AudioPlayer
                     label="Final"
                     version={finalVersion}
-                    name={hiddenName(finalVersion.holderName, "Final editor")}
+                    name={roleFor(finalVersion.holderId, finalVersion.holderName)}
                   />
                 ) : null}
               </div>
@@ -346,7 +440,7 @@ export function RevealView({
                   {selected.versions.length} versions
                 </span>
               </div>
-              <ol className="reveal-lineage">
+              <ol className="reveal-lineage" role="list">
                 {selected.versions.map((version) => (
                   <li key={version.fileId}>
                     <span className="reveal-lineage__dot" aria-hidden="true" />
@@ -356,12 +450,7 @@ export function RevealView({
                         {version.version}
                       </strong>
                       <span>
-                        {hiddenName(
-                          version.holderName,
-                          version.role === "seed"
-                            ? "Seed owner"
-                            : `Editor ${version.version - 1}`,
-                        )}
+                        {roleFor(version.holderId, version.holderName)}
                         {version.round !== null ? ` · Round ${version.round + 1}` : ""}
                         {version.finalVersion ? " · Final" : ""}
                       </span>
@@ -371,6 +460,21 @@ export function RevealView({
                     </span>
                   </li>
                 ))}
+                {selected.credits
+                  .filter((credit) => credit.status !== "Submitted")
+                  .map((credit) => (
+                    <li key={`gap-${credit.round}`} className="reveal-lineage__gap">
+                      <span
+                        className="reveal-lineage__dot reveal-lineage__dot--gap"
+                        aria-hidden="true"
+                      />
+                      <div>
+                        <strong>Gap · no edit</strong>
+                        <span>Round {credit.round + 1} · the pair is anonymous</span>
+                      </div>
+                      <span className="reveal-lineage__kind">No file</span>
+                    </li>
+                  ))}
               </ol>
             </section>
 
@@ -381,11 +485,11 @@ export function RevealView({
                   Seed owner and every round
                 </span>
               </div>
-              <ol className="reveal-credits">
+              <ol className="reveal-credits" role="list">
                 <li className="reveal-credits__seed">
                   <span>Seed</span>
                   <strong>
-                    {hiddenName(selected.seedOwnerName, "The seed owner")}
+                    {roleFor(selected.seedOwnerId, selected.seedOwnerName)}
                   </strong>
                   <span className="badge">Original track</span>
                 </li>
@@ -394,10 +498,7 @@ export function RevealView({
                     <span>Round {credit.round + 1}</span>
                     <strong>
                       {credit.status === "Submitted"
-                        ? hiddenName(
-                            credit.displayName,
-                            `Editor ${credit.round + 1}`,
-                          )
+                        ? roleFor(credit.participantId, credit.displayName)
                         : "No edit"}
                     </strong>
                     <span className="reveal-credits__marks">
@@ -417,7 +518,8 @@ export function RevealView({
               <div className="card__header">
                 <h2 id="reveal-comments-title">Comments and answers</h2>
                 <span className="card__meta">
-                  {selected.comments.length} visible
+                  {selected.comments.length}{" "}
+                  {selected.comments.length === 1 ? "comment" : "comments"}
                 </span>
               </div>
               {selected.comments.length === 0 ? (
@@ -425,12 +527,12 @@ export function RevealView({
                   No comments or questionnaire answers for this track.
                 </p>
               ) : (
-                <ul className="reveal-comments">
+                <ul className="reveal-comments" role="list">
                   {selected.comments.map((comment) => (
                     <li key={comment.id}>
                       <div>
                         <strong>
-                          {hiddenName(comment.authorName, "Participant")}
+                          {roleFor(comment.participantId, comment.authorName)}
                         </strong>
                         <span className="badge">
                           {comment.kind === "questionnaire"
@@ -443,6 +545,7 @@ export function RevealView({
                         <Button
                           variant="quiet"
                           icon="eye-off"
+                          ariaLabel={`Redact ${comment.authorName}'s comment`}
                           onClick={() => setRedactTarget(comment)}
                         >
                           Redact
@@ -476,16 +579,21 @@ export function RevealView({
                         value={titleDraft}
                         maxLength={80}
                         placeholder="Name the final track"
+                        aria-describedby="reveal-title-limit"
                         onChange={(event) => setTitleDraft(event.target.value)}
                       />
                       <Button
-                        variant="primary"
+                        variant="secondary"
                         type="submit"
-                        disabled={busy || titleDraft.trim().length === 0}
+                        disabled={titleDraft.trim().length === 0}
                       >
                         Save title
                       </Button>
                     </div>
+                    <span id="reveal-title-limit" className="reveal-tool__hint">
+                      Up to 80 characters. The host can change this until the
+                      reveal.
+                    </span>
                   </form>
                   <form
                     className="reveal-tool"
@@ -494,50 +602,61 @@ export function RevealView({
                       void saveComment();
                     }}
                   >
-                    <label htmlFor="reveal-comment">Add a comment or answer</label>
-                    <div className="reveal-tool__row">
-                      <select
+                    <fieldset className="reveal-tool__fieldset">
+                      <legend>Add a comment or answer</legend>
+                      <div className="reveal-tool__row">
+                        <label htmlFor="comment-author">Author</label>
+                        <select
+                          id="comment-author"
+                          className="input"
+                          value={commentAuthor}
+                          onChange={(event) =>
+                            setCommentAuthor(event.target.value)
+                          }
+                        >
+                          {commentChoices.map((person) => (
+                            <option key={person.id} value={person.id}>
+                              {person.name}
+                            </option>
+                          ))}
+                        </select>
+                        <label htmlFor="comment-kind">Kind</label>
+                        <select
+                          id="comment-kind"
+                          className="input"
+                          value={commentKind}
+                          onChange={(event) => setCommentKind(event.target.value)}
+                        >
+                          <option value="comment">Comment</option>
+                          <option value="questionnaire">Questionnaire answer</option>
+                        </select>
+                      </div>
+                      <label htmlFor="reveal-comment">Comment or answer</label>
+                      <textarea
+                        id="reveal-comment"
                         className="input"
-                        aria-label="Comment author"
-                        value={commentAuthor}
-                        onChange={(event) => setCommentAuthor(event.target.value)}
+                        rows={3}
+                        maxLength={1000}
+                        value={commentBody}
+                        placeholder="Add the quote or answer for this track"
+                        aria-describedby="reveal-comment-limit"
+                        onChange={(event) => setCommentBody(event.target.value)}
+                      />
+                      <span id="reveal-comment-limit" className="reveal-tool__hint">
+                        Up to 1,000 characters. Redact it before the reveal if it
+                        must not appear.
+                      </span>
+                      <Button
+                        variant="secondary"
+                        type="submit"
+                        disabled={
+                          commentBody.trim().length === 0 ||
+                          commentAuthor.length === 0
+                        }
                       >
-                        {commentChoices.map((person) => (
-                          <option key={person.id} value={person.id}>
-                            {person.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="input"
-                        aria-label="Comment kind"
-                        value={commentKind}
-                        onChange={(event) => setCommentKind(event.target.value)}
-                      >
-                        <option value="comment">Comment</option>
-                        <option value="questionnaire">Questionnaire</option>
-                      </select>
-                    </div>
-                    <textarea
-                      id="reveal-comment"
-                      className="input"
-                      rows={3}
-                      maxLength={1000}
-                      value={commentBody}
-                      placeholder="Add the quote or answer for this track"
-                      onChange={(event) => setCommentBody(event.target.value)}
-                    />
-                    <Button
-                      variant="secondary"
-                      type="submit"
-                      disabled={
-                        busy ||
-                        commentBody.trim().length === 0 ||
-                        commentAuthor.length === 0
-                      }
-                    >
-                      Add comment
-                    </Button>
+                        Add comment
+                      </Button>
+                    </fieldset>
                   </form>
                 </div>
               </section>
@@ -545,6 +664,40 @@ export function RevealView({
           </article>
         ) : null}
       </div>
+
+      {confirmStreamOff ? (
+        <Dialog
+          title="Turn off stream-safe mode?"
+          initialFocusId="stream-off-cancel"
+          onClose={() => setConfirmStreamOff(false)}
+          footer={
+            <>
+              <Button
+                id="stream-off-cancel"
+                variant="secondary"
+                onClick={() => setConfirmStreamOff(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="dialog__danger-action"
+                onClick={() => {
+                  onStreamSafeChange(false);
+                  setConfirmStreamOff(false);
+                }}
+              >
+                Turn off stream-safe
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Participant names and the host editing tools become visible. Only
+            turn this off when the screen is not shared.
+          </p>
+        </Dialog>
+      ) : null}
 
       {confirmPublish ? (
         <Dialog
@@ -575,9 +728,20 @@ export function RevealView({
             channel. This ends anonymity and cannot be undone.
           </p>
           <p className="dialog__meta">
-            {data.album.length} tracks · check the stream-safe setting and every
+            The album has {data.album.length} tracks. Check stream-safe and every
             comment before you publish.
           </p>
+          {publishBlocked.length > 0 ? (
+            <div className="dialog__blocked" role="alert">
+              <strong>The reveal is still blocked.</strong>
+              <ul>
+                {publishBlocked.map((blocked) => (
+                  <li key={blocked}>{blocked}</li>
+                ))}
+              </ul>
+              <span>Resolve these assignments in mission control.</span>
+            </div>
+          ) : null}
         </Dialog>
       ) : null}
 
@@ -627,6 +791,7 @@ function AudioPlayer({
 }) {
   const url = previewUrl(version.fileId);
   const [failed, setFailed] = useState(false);
+  const noteId = useId();
   return (
     <div className="reveal-audio">
       <div className="reveal-audio__head">
@@ -641,15 +806,17 @@ function AudioPlayer({
             controls
             preload="none"
             src={url}
-            aria-label={`${label} audio preview`}
+            aria-label={`${label} audio preview, version ${version.version}, ${name}`}
+            aria-describedby={noteId}
             onError={() => setFailed(true)}
           />
-          <span className="reveal-audio__note">
+          <span id={noteId} className="reveal-audio__note">
             Preview clip, up to 2 minutes.
           </span>
           {failed ? (
-            <span className="reveal-audio__error">
-              The preview did not load. Check that the renderer is available.
+            <span className="reveal-audio__error" role="alert">
+              The preview could not be prepared. Check the audio tools and try
+              again.
             </span>
           ) : null}
         </>

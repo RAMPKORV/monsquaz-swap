@@ -100,6 +100,18 @@ export default function App() {
   const [people, setPeople] = useState<PeopleData | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [revealPackage, setRevealPackage] = useState<RevealPackage | null>(null);
+  const [streamSafe, setStreamSafe] = useState(() => {
+    const stored = window.sessionStorage.getItem("msw.reveal.streamSafe");
+    if (stored === "0") {
+      return false;
+    }
+    if (stored === "1") {
+      return true;
+    }
+    return (
+      new URLSearchParams(window.location.search).get("stream") !== "0"
+    );
+  });
   const [settings, setSettings] = useState<HostSettings | null>(null);
   const [originalSettings, setOriginalSettings] =
     useState<HostSettings | null>(null);
@@ -143,6 +155,13 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
   }, [resolvedTheme]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem(
+      "msw.reveal.streamSafe",
+      streamSafe ? "1" : "0",
+    );
+  }, [streamSafe]);
 
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-color-scheme: light)");
@@ -260,7 +279,7 @@ export default function App() {
   }, [dialogOpen, botDialogOpen, paletteOpen]);
 
   useEffect(() => {
-    if (view !== "mission" && view !== "reveal") {
+    if (view !== "mission") {
       return;
     }
     const timer = window.setInterval(() => {
@@ -268,6 +287,18 @@ export default function App() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [view]);
+
+  useEffect(() => {
+    if (view !== "reveal" || isDemoMode()) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      loadRevealPackage(scenario)
+        .then(setRevealPackage)
+        .catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [view, scenario]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -614,6 +645,8 @@ export default function App() {
     ) : view === "reveal" && revealPackage ? (
       <RevealView
         data={revealPackage}
+        streamSafe={streamSafe}
+        onStreamSafeChange={setStreamSafe}
         onAction={setToast}
         onSetTitle={async (trackCode, title) => {
           try {
@@ -645,16 +678,14 @@ export default function App() {
           try {
             const revealed = await revealEvent();
             if (!revealed.published) {
-              setToast(
-                `Reveal blocked by ${revealed.blocked.length} active assignment(s). Resolve them first.`,
-              );
-              return;
+              return { published: false, blocked: revealed.blocked };
             }
             setRevealPackage({
               ...(await loadRevealPackage(scenario)),
               published: true,
             });
             setView("reveal");
+            return { published: true, blocked: [] };
           } catch (error) {
             setToast(`Could not reveal the event. ${errorDetail(error)}`);
             throw error;
@@ -712,6 +743,7 @@ export default function App() {
         className={`app${staticMode ? " app--static" : ""}${
           redactionPreview ? " app--redaction" : ""
         }`}
+        data-app-status={status}
         data-theme={resolvedTheme}
       >
         <Sidebar

@@ -11,14 +11,14 @@
 
 | Status | Count |
 |---|---|
-| Triage | 21 |
+| Triage | 18 |
 | Research | 0 |
 | Specification | 0 |
 | Ready for implementation | 10 |
 | Implementation | 0 |
-| Reviewing | 0 |
+| Reviewing | 2 |
 | Testing | 0 |
-| Merging | 0 |
+| Merging | 1 |
 | Done | 42 |
 | Cancelled | 0 |
 | Duplicate | 0 |

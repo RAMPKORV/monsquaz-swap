@@ -16,6 +16,11 @@
 | `D-010` | ASD-STE100 for specifications | accepted | 2026-11-24 |
 | `D-011` | Lean tracker with hand-written specs | accepted | 2026-11-24 |
 | `D-029` | Lock the design scales | accepted | 2026-11-26 |
+| `D-030` | Classic rounds start at the seed | accepted | 2026-11-26 |
+| `D-031` | Classic round lifecycle and shared deadlines | accepted | 2026-11-26 |
+| `D-032` | Own assignments by default; open schedule is the only anonymity exception | accepted | 2026-11-26 |
+| `D-033` | Async intake, targets, windows, and expiry | accepted | 2026-11-26 |
+| `D-034` | max_handoffs modes and the seed budget | accepted | 2026-11-26 |
 
 ## `D-001` — Tauri 2 + Rust backend + React/TS UI
 
@@ -220,3 +225,88 @@ Lock the spacing scale 0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64 pixels. Loc
 ### Consequences
 
 A new off-scale value fails the design gate. A scale change needs a tracker decision or an ADR, a policy diff, a baseline diff, and a gate run. The UI uses the scales at every enforced viewport.
+
+## `D-030` — Classic rounds start at the seed
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+The engine treats seed intake as a pre-round phase and calls the first exchange R1. The event length and file versions both collide with the round number.
+
+### Decision
+
+Round 1 is the seed round. Rounds 2..N are exchange rounds. A full-exposure classic event with N seeded participants has N total rounds. File versions use v1..vN. The host opens R1 explicitly with the pack and a seed deadline (default 7 days). The host planner shows a host-only R1 seed band. Participant-visible schedules start at R2.
+
+### Consequences
+
+The scheduler has N-1 exchange rounds. Plan and assignment rows use the display round number 2..N. Every surface derives the seed round from the round type, not from a minus-one offset. The commitment covers the R1 owner map.
+
+## `D-031` — Classic round lifecycle and shared deadlines
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+The engine has no round table, no shared deadline, and gives each claim its own edit window. Seed intake opens implicitly at event creation.
+
+### Decision
+
+The host explicitly opens R1, then closes seed intake softly and locks the roster in one atomic action with at least two seeds. Seeds after the deadline wait for host approval. Reopen R1 is allowed before commit. Each round has one shared deadline set at open. Offers expire at that deadline and a claim uses the same deadline. Defaults are 7 days for R1, 24 hours for a normal exchange round, and 48 hours for the final exchange round. The host can move a whole round deadline for all offered, claimed, and overdue assignments, preserve individual extensions, return overdue to claimed, re-arm reminders, notify holders, and write one audit entry. Later planned rounds and the reveal shift by the same delta. Submitted work stays final.
+
+### Consequences
+
+Start commits and announces the schedule. Opening R2 is a separate host action. Deadline moves do not create a new commitment. The host can reopen one submitted assignment explicitly.
+
+## `D-032` — Own assignments by default; open schedule is the only anonymity exception
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+A full participant-visible matrix plus full exposure is an owner oracle: each row's missing track is that person's seed.
+
+### Decision
+
+Participants see only their own assignments by default. They do not see group membership, group labels, song numbers, seed owners, titles, or comments before the reveal. The host can enable an open schedule. Open schedule means full transparency: the R2..RN matrix, seed owners, editor names, titles, and comments. The host sees a strong warning and the join card discloses the zero-anonymity exception. The R1 seed band is always host-only.
+
+### Consequences
+
+Participant DTOs never carry owner IDs, group labels, or the full matrix unless open schedule is on. Stream-safe mode must redact the planner and people views, not only the reveal presenter.
+
+## `D-033` — Async intake, targets, windows, and expiry
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+Async exposure is over-determined when the host sets songs, claims per person, and editors per track independently. The engine reuses classic rounds for async.
+
+### Decision
+
+Async has its own seed intake, separate from classic R1. The host sets expected songs and claims per participant. One track per seeder, so the seeded participant count equals the track count. The host explicitly closes intake and starts the queue. Fewer seeds: the host waits or explicitly shrinks or reserves. Late seeds are off by default; the host can enable them with a feasibility check and a minimum claim quota. Claim and edit windows default to 24 hours each, are set per event, and lock at queue start. After start the host can extend a single offer, never shorten one or change the global window. Async uses handoffs, not synchronized rounds, and has no final round. First expired offer gives a 24-hour cooldown, then a re-offer. A second expiry pauses the participant until Ready or a host action. Expiry does not mark a pair seen and the pair is never re-offered. A claim marks the pair seen.
+
+### Consequences
+
+The app computes editors per track from songs and claims and warns when the value is fractional. The gap report separates exposure gaps from edit gaps. Async credits use a handoff index, never a round label.
+
+## `D-034` — max_handoffs modes and the seed budget
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+The join flow collects max_handoffs, defaults to 4, and the classic scheduler ignores it. Full exposure for six people needs five exchange edits.
+
+### Decision
+
+The seed is not an edit and never consumes the max_handoffs budget. The host chooses per event between strict full exposure and flexible participation. Strict mode requires every active participant to have max_handoffs at least N-1; the host must raise a low budget, bench the person as a fill-in, or switch modes before R1 closes. Flexible mode gives each participant their earliest exchange rounds up to their budget, leaves gaps for the rounds they skip, and the host fills gaps with fill-ins or manual edits. Participants do not request specific tracks; the host edits the plan manually. Date-driven availability is a separate feature and can combine with either mode.
+
+### Consequences
+
+Classic no longer silently ignores max_handoffs. The planner shows coverage gaps for flexible events. Async uses the same budget for extra handoffs.

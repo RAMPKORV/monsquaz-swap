@@ -1202,6 +1202,9 @@ fn title_message(error: &EngineError) -> String {
         EngineError::NotTitleHolder => {
             "Only the latest holder of the track or the host can name it.".to_string()
         }
+        EngineError::TitleAlreadySet => {
+            "The host has already named this track. Ask the host to change it.".to_string()
+        }
         EngineError::WrongEventState { .. } => "Titles are closed for this event now.".to_string(),
         _ => "The title was not saved. Try again or ask the host.".to_string(),
     }

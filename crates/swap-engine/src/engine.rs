@@ -124,6 +124,8 @@ pub enum EngineError {
     TitleTooLong,
     #[error("only the latest holder or the host can name this track")]
     NotTitleHolder,
+    #[error("the host has already named this track")]
+    TitleAlreadySet,
     #[error("the comment is empty")]
     EmptyComment,
     #[error("the comment is longer than 1000 characters")]
@@ -1593,6 +1595,9 @@ pub fn set_track_title(
     let track = TrackRepo::get(&transaction, event_id, track_code)?
         .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
     if actor_id != "host" {
+        if TrackTitleRepo::get(&transaction, event_id, track_code)?.is_some() {
+            return Err(EngineError::TitleAlreadySet);
+        }
         let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
         let latest = assignments
             .iter()

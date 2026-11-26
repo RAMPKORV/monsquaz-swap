@@ -869,6 +869,15 @@ fn submit_inner(
         ),
     };
     let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, request.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(request.event_id.to_string()))?;
+    if !matches!(current.state, EventState::Active | EventState::Paused) {
+        return Err(EngineError::WrongEventState {
+            action: "submission",
+            state: current.state,
+            expected: "active or paused",
+        });
+    }
     FileRepo::insert(&transaction, &file)?;
     if !AssignmentRepo::submit(&transaction, &assignment.id, now, now)? {
         return Err(EngineError::WrongAssignmentState(assignment.status));

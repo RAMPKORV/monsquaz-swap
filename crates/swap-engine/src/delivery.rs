@@ -322,17 +322,19 @@ impl DeliveryWorker {
         let mut report = DeliveryReport::default();
         for row in rows {
             if row.attempts >= MAX_DELIVERY_ATTEMPTS {
-                self.fail(db_guard(self).conn(), &row, now, "retry limit reached")?;
-                self.alert(discord, &row, "retry limit reached").await;
-                report.failed += 1;
+                if self.fail(db_guard(self).conn(), &row, now, "retry limit reached")? {
+                    self.alert(discord, &row, "retry limit reached").await;
+                    report.failed += 1;
+                }
                 continue;
             }
             let delivery = match PendingDelivery::decode(&row.payload) {
                 Ok(delivery) => delivery,
                 Err(error) => {
-                    self.fail(db_guard(self).conn(), &row, now, &error.to_string())?;
-                    self.alert(discord, &row, &error.to_string()).await;
-                    report.failed += 1;
+                    if self.fail(db_guard(self).conn(), &row, now, &error.to_string())? {
+                        self.alert(discord, &row, &error.to_string()).await;
+                        report.failed += 1;
+                    }
                     continue;
                 }
             };
@@ -371,15 +373,17 @@ impl DeliveryWorker {
                                     "{} The private-thread fallback is not available.",
                                     error
                                 );
-                                self.fail(db.conn(), &row, now, &message)?;
-                                failure = Some(message);
+                                if self.fail(db.conn(), &row, now, &message)? {
+                                    failure = Some(message);
+                                }
                             }
                             Err(fallback_error) => {
                                 let message = format!(
                                     "{error} The private-thread fallback failed: {fallback_error}."
                                 );
-                                self.fail(db.conn(), &row, now, &message)?;
-                                failure = Some(message);
+                                if self.fail(db.conn(), &row, now, &message)? {
+                                    failure = Some(message);
+                                }
                             }
                         }
                     }
@@ -394,7 +398,9 @@ impl DeliveryWorker {
                     {
                         let db = db_guard(self);
                         if cap {
-                            self.fail(db.conn(), &row, now, &message)?;
+                            if !self.fail(db.conn(), &row, now, &message)? {
+                                continue;
+                            }
                         } else {
                             DeliveryRepo::mark_retry(db.conn(), &row.id, now, &message)?;
                             report.retried += 1;
@@ -416,8 +422,10 @@ impl DeliveryWorker {
         row: &DeliveryRecord,
         now: i64,
         error: &str,
-    ) -> Result<(), DeliveryError> {
-        DeliveryRepo::mark_failed(conn, &row.id, now, error)?;
+    ) -> Result<bool, DeliveryError> {
+        if !DeliveryRepo::mark_failed(conn, &row.id, now, error)? {
+            return Ok(false);
+        }
         AuditRepo::insert(
             conn,
             &row.event_id,
@@ -431,7 +439,7 @@ impl DeliveryWorker {
                 serde_json::to_string(error).unwrap_or_else(|_| "\"unknown\"".to_string())
             ),
         )?;
-        Ok(())
+        Ok(true)
     }
 
     async fn alert(&self, discord: &dyn DiscordPort, row: &DeliveryRecord, error: &str) {

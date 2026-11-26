@@ -192,6 +192,10 @@ ALTER TABLE deliveries ADD COLUMN recipient_id TEXT;
 CREATE INDEX deliveries_by_recipient ON deliveries(recipient_id);
 ALTER TABLE dm_cursors ADD COLUMN last_sent_message_id TEXT;
 "#,
+    r#"
+-- Migration 006: retried rows move behind untouched rows in one pass.
+CREATE INDEX deliveries_pending_updated ON deliveries(status, updated_at);
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

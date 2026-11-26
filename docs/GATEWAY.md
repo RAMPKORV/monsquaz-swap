@@ -115,8 +115,10 @@ and one acknowledgement.
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and
   `host-status`. Discord command permissions do not apply per subcommand.
-- The settings screen has no dedicated host-alert channel. Keep the alert channel
-  host-only, or add that setting before beta.
+- The settings screen has no dedicated host-alert channel. The worker creates a
+  private thread under the announcement channel and adds no participant. The
+  host must be a thread member to read the alert. Keep the announcement channel
+  free of participants, or add a host-alert channel before beta.
 - The UI does not show gateway health or a dead supervisor task. MSW-045 tracks
   the status surface.
 - Transport nonce or reconciliation must close the duplicate-send window

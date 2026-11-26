@@ -165,6 +165,68 @@ impl DiscordPort for HttpDiscordPort {
         self.send_message(channel, &message).await
     }
 
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError> {
+        let channel = parse_id::<ChannelMarker>(&channel_id.0)?;
+        let thread = self
+            .http
+            .create_thread(channel, name, ChannelType::PrivateThread)
+            .await
+            .map_err(map_http_error)?
+            .model()
+            .await
+            .map_err(map_body_error)?;
+        Ok(DiscordChannelId::new(thread.id.get().to_string()))
+    }
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError> {
+        let thread = parse_id::<ChannelMarker>(&thread_id.0)?;
+        let user = parse_id::<UserMarker>(&user_id.0)?;
+        self.http
+            .add_thread_member(thread, user)
+            .await
+            .map_err(map_http_error)?;
+        Ok(())
+    }
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError> {
+        let channel = parse_id::<ChannelMarker>(&channel_id.0)?;
+        let filename = safe_filename(&file.filename);
+        let attachment = DiscordAttachment {
+            file: file.bytes,
+            filename: filename.to_string(),
+            id: 0,
+            description: None,
+            duration_secs: None,
+            is_spoiler: None,
+            title: None,
+            waveform: None,
+        };
+        let mut message = self.http.create_message(channel);
+        if !file.caption.trim().is_empty() {
+            message = message.content(&file.caption);
+        }
+        let sent = message
+            .attachments(std::slice::from_ref(&attachment))
+            .await
+            .map_err(map_http_error)?
+            .model()
+            .await
+            .map_err(map_body_error)?;
+        Ok(MessageId::new(sent.id.get().to_string()))
+    }
+
     async fn fetch_dm_after(
         &self,
         user_id: &DiscordUserId,

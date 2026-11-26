@@ -58,6 +58,13 @@ impl InboundService {
         self
     }
 
+    pub fn with_fallback_channel(mut self, channel_id: Option<String>) -> Self {
+        if let Some(channel_id) = channel_id.filter(|value| !value.trim().is_empty()) {
+            self.worker = self.worker.with_fallback_channel(channel_id);
+        }
+        self
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Db> {
         self.db
             .lock()

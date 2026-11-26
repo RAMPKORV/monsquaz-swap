@@ -525,6 +525,7 @@ pub async fn host_bot_save(
                 token,
                 settings.guild_id.clone(),
                 Some(settings.announcement_channel_id.clone()),
+                settings.dm_fallback,
             )?;
         }
     }

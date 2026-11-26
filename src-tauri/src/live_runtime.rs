@@ -40,6 +40,7 @@ impl LiveRuntime {
         token: String,
         guild_id: String,
         alert_channel_id: Option<String>,
+        dm_fallback: bool,
     ) -> Result<(), String> {
         if self.is_running() {
             return Err("the Discord gateway is already running".to_string());
@@ -59,9 +60,15 @@ impl LiveRuntime {
         );
         let discord = Arc::new(HttpDiscordPort::new(&token).map_err(|error| error.to_string())?);
         let fetcher = Arc::new(HttpAttachmentFetcher::new().map_err(|error| error.to_string())?);
+        let fallback_channel = if dm_fallback {
+            alert_channel_id.clone()
+        } else {
+            None
+        };
         let service = Arc::new(
             InboundService::new(db, store, preparer, discord, fetcher, Arc::new(SystemClock))
-                .with_alert_channel(alert_channel_id),
+                .with_alert_channel(alert_channel_id)
+                .with_fallback_channel(fallback_channel),
         );
         let gateway = GatewayHost::start(token, guild_id, service.clone())?;
         *self

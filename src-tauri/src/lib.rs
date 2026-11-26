@@ -62,6 +62,7 @@ pub fn run() {
                         token,
                         settings.guild_id.clone(),
                         Some(settings.announcement_channel_id.clone()),
+                        settings.dm_fallback,
                     )
                 {
                     eprintln!("Discord gateway did not start: {error}");

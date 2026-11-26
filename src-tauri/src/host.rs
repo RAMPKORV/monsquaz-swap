@@ -142,7 +142,7 @@ pub struct SettingsDto {
     pub(crate) announcement_channel_name: String,
     pub(crate) reveal_channel_id: String,
     pub(crate) reveal_channel_name: String,
-    dm_fallback: bool,
+    pub(crate) dm_fallback: bool,
     timezone: String,
     retention_days: u32,
     theme: String,

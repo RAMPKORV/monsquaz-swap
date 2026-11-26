@@ -138,6 +138,24 @@ pub trait DiscordPort: Send + Sync {
         message: OutboundMessage,
     ) -> Result<MessageId, DiscordError>;
 
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError>;
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError>;
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError>;
+
     async fn fetch_dm_after(
         &self,
         user_id: &DiscordUserId,
@@ -164,6 +182,25 @@ pub struct SentChannelMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedThread {
+    pub channel_id: DiscordChannelId,
+    pub parent_id: DiscordChannelId,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadMember {
+    pub thread_id: DiscordChannelId,
+    pub user_id: DiscordUserId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentChannelFile {
+    pub channel_id: DiscordChannelId,
+    pub file: OutboundFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditedMessage {
     pub user_id: DiscordUserId,
     pub message_id: MessageId,
@@ -176,6 +213,9 @@ struct FakeState {
     dms: Vec<SentDm>,
     files: Vec<SentFile>,
     channel_messages: Vec<SentChannelMessage>,
+    threads: Vec<CreatedThread>,
+    thread_members: Vec<ThreadMember>,
+    channel_files: Vec<SentChannelFile>,
     edits: Vec<EditedMessage>,
     inbound: Vec<(DiscordUserId, InboundDm)>,
     fail_next_dm: Option<DiscordError>,
@@ -210,6 +250,18 @@ impl FakeDiscord {
 
     pub fn channel_messages(&self) -> Vec<SentChannelMessage> {
         self.lock().channel_messages.clone()
+    }
+
+    pub fn created_threads(&self) -> Vec<CreatedThread> {
+        self.lock().threads.clone()
+    }
+
+    pub fn thread_members(&self) -> Vec<ThreadMember> {
+        self.lock().thread_members.clone()
+    }
+
+    pub fn channel_files(&self) -> Vec<SentChannelFile> {
+        self.lock().channel_files.clone()
     }
 
     pub fn edits(&self) -> Vec<EditedMessage> {
@@ -285,6 +337,48 @@ impl DiscordPort for FakeDiscord {
         state.channel_messages.push(SentChannelMessage {
             channel_id: channel_id.clone(),
             message,
+        });
+        Ok(message_id)
+    }
+
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError> {
+        let mut state = self.lock();
+        let thread_id = DiscordChannelId::new(format!("thread-{}", state.next_id + 1));
+        state.next_id += 1;
+        state.threads.push(CreatedThread {
+            channel_id: thread_id.clone(),
+            parent_id: channel_id.clone(),
+            name: name.to_string(),
+        });
+        Ok(thread_id)
+    }
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError> {
+        self.lock().thread_members.push(ThreadMember {
+            thread_id: thread_id.clone(),
+            user_id: user_id.clone(),
+        });
+        Ok(())
+    }
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError> {
+        let mut state = self.lock();
+        let message_id = Self::next_message_id(&mut state);
+        state.channel_files.push(SentChannelFile {
+            channel_id: channel_id.clone(),
+            file,
         });
         Ok(message_id)
     }

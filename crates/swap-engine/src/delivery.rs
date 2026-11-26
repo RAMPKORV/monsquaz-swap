@@ -17,6 +17,8 @@ use thiserror::Error;
 
 use crate::effects::Effect;
 
+const MAX_DELIVERY_ATTEMPTS: i64 = 5;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingDelivery {
     Dm {
@@ -166,9 +168,10 @@ pub(crate) fn enqueue_pending(
     now: i64,
 ) -> Result<bool, DeliveryError> {
     let payload = delivery.encode()?;
+    let id = format!("{event_id}:{}", delivery.dedupe_key());
     Ok(DeliveryRepo::enqueue(
         conn,
-        &delivery.dedupe_key(),
+        &id,
         event_id,
         delivery.kind(),
         &payload,
@@ -182,6 +185,7 @@ pub struct DeliveryWorker {
     db: Arc<Mutex<Db>>,
     store: BlobStore,
     alert_channel: Option<String>,
+    fallback_channel: Option<String>,
 }
 
 impl DeliveryWorker {
@@ -190,12 +194,86 @@ impl DeliveryWorker {
             db,
             store,
             alert_channel: None,
+            fallback_channel: None,
         }
     }
 
     pub fn with_alert_channel(mut self, channel_id: impl Into<String>) -> Self {
         self.alert_channel = Some(channel_id.into());
         self
+    }
+
+    pub fn with_fallback_channel(mut self, channel_id: impl Into<String>) -> Self {
+        self.fallback_channel = Some(channel_id.into());
+        self
+    }
+
+    async fn fallback(
+        &self,
+        discord: &dyn DiscordPort,
+        delivery: &PendingDelivery,
+        error: &DiscordError,
+    ) -> Result<bool, DeliveryError> {
+        if !matches!(error, DiscordError::DmClosed) {
+            return Ok(false);
+        }
+        let Some(channel) = &self.fallback_channel else {
+            return Ok(false);
+        };
+        let Some(user_id) = user_of(delivery) else {
+            return Ok(false);
+        };
+        let thread = discord
+            .create_private_thread(
+                &DiscordChannelId::new(channel.clone()),
+                "Monsquaz Swap delivery",
+            )
+            .await
+            .map_err(|error| DeliveryError::Codec(error.to_string()))?;
+        discord
+            .add_thread_member(&thread, &DiscordUserId::new(user_id.to_string()))
+            .await
+            .map_err(|error| DeliveryError::Codec(error.to_string()))?;
+        let content = match delivery {
+            PendingDelivery::Dm { content, .. } => content.clone(),
+            PendingDelivery::Offer {
+                track_code,
+                due_at,
+                claim_window_secs,
+                ..
+            } => {
+                let hours = (*claim_window_secs as f64) / 3600.0;
+                format!(
+                    "Track {track_code} is available. Claim within {hours} hours (due {due_at})."
+                )
+            }
+            PendingDelivery::File {
+                filename,
+                sha256,
+                caption,
+                ..
+            } => {
+                let bytes = self.store.read(sha256)?;
+                discord
+                    .send_file_to_channel(
+                        &thread,
+                        OutboundFile {
+                            filename: filename.clone(),
+                            bytes,
+                            caption: caption.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|error| DeliveryError::Codec(error.to_string()))?;
+                return Ok(true);
+            }
+            PendingDelivery::Channel { .. } => return Ok(false),
+        };
+        discord
+            .send_channel_message(&thread, OutboundMessage { content })
+            .await
+            .map_err(|error| DeliveryError::Codec(error.to_string()))?;
+        Ok(true)
     }
 
     pub async fn drain(
@@ -216,6 +294,15 @@ impl DeliveryWorker {
             let Some(row) = row else {
                 break;
             };
+            if row.attempts >= MAX_DELIVERY_ATTEMPTS {
+                let db = self
+                    .db
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                DeliveryRepo::mark_failed(db.conn(), &row.id, now, "retry limit reached")?;
+                report.failed += 1;
+                continue;
+            }
             let delivery = match PendingDelivery::decode(&row.payload) {
                 Ok(delivery) => delivery,
                 Err(error) => {
@@ -238,25 +325,31 @@ impl DeliveryWorker {
                     report.sent += 1;
                 }
                 Err(error) if permanent(&error) => {
+                    let sent_fallback = self.fallback(discord, &delivery, &error).await?;
                     let db = self
                         .db
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    DeliveryRepo::mark_failed(db.conn(), &row.id, now, &error.to_string())?;
-                    if let Some(channel) = &self.alert_channel
-                        && !matches!(delivery, PendingDelivery::Channel { .. })
-                    {
-                        let alert = PendingDelivery::Channel {
-                            channel_id: channel.clone(),
-                            content: format!(
-                                "Delivery failed for {}. {} Open a private thread with the participant or retry the send.",
-                                describe(&delivery),
-                                error
-                            ),
-                        };
-                        enqueue_pending(db.conn(), &row.event_id, &alert, now)?;
+                    if sent_fallback {
+                        DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
+                        report.sent += 1;
+                    } else {
+                        DeliveryRepo::mark_failed(db.conn(), &row.id, now, &error.to_string())?;
+                        if let Some(channel) = &self.alert_channel
+                            && !matches!(delivery, PendingDelivery::Channel { .. })
+                        {
+                            let alert = PendingDelivery::Channel {
+                                channel_id: channel.clone(),
+                                content: format!(
+                                    "Delivery failed for {}. {} Open a private thread with the participant or retry the send.",
+                                    describe(&delivery),
+                                    error
+                                ),
+                            };
+                            enqueue_pending(db.conn(), &row.event_id, &alert, now)?;
+                        }
+                        report.failed += 1;
                     }
-                    report.failed += 1;
                 }
                 Err(error) => {
                     let db = self
@@ -284,6 +377,11 @@ pub async fn dispatch_pending(
     let rows = DeliveryRepo::pending(db.conn(), limit)?;
     let mut report = DeliveryReport::default();
     for row in rows {
+        if row.attempts >= MAX_DELIVERY_ATTEMPTS {
+            DeliveryRepo::mark_failed(db.conn(), &row.id, now, "retry limit reached")?;
+            report.failed += 1;
+            continue;
+        }
         let delivery = match PendingDelivery::decode(&row.payload) {
             Ok(delivery) => delivery,
             Err(error) => {
@@ -378,6 +476,15 @@ async fn deliver(
             )
             .await
             .map(|_| ()),
+    }
+}
+
+fn user_of(delivery: &PendingDelivery) -> Option<&str> {
+    match delivery {
+        PendingDelivery::Dm { user_id, .. }
+        | PendingDelivery::Offer { user_id, .. }
+        | PendingDelivery::File { user_id, .. } => Some(user_id),
+        PendingDelivery::Channel { .. } => None,
     }
 }
 
@@ -556,11 +663,14 @@ mod tests {
     }
 
     fn delivery_key(user_id: &str, content: &str) -> String {
-        PendingDelivery::Dm {
-            user_id: user_id.to_string(),
-            content: content.to_string(),
-        }
-        .dedupe_key()
+        format!(
+            "evt-1:{}",
+            PendingDelivery::Dm {
+                user_id: user_id.to_string(),
+                content: content.to_string(),
+            }
+            .dedupe_key()
+        )
     }
 
     #[test]
@@ -587,6 +697,49 @@ mod worker_alerts {
     use swap_db::{EventRecord, EventRepo};
     use swap_discord::FakeDiscord;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn a_closed_dm_uses_a_private_thread_when_configured() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = Db::open_in_memory().unwrap();
+        EventRepo::insert(
+            db.conn(),
+            &EventRecord {
+                id: "evt-1".to_string(),
+                name: "Test Swap".to_string(),
+                state: EventState::Active,
+                seed: 42,
+                settings_json: "{}".to_string(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+        let db = Arc::new(Mutex::new(db));
+        {
+            let db = db.lock().unwrap();
+            enqueue_pending(
+                db.conn(),
+                "evt-1",
+                &PendingDelivery::Dm {
+                    user_id: "u1".to_string(),
+                    content: "hello".to_string(),
+                },
+                10,
+            )
+            .unwrap();
+        }
+        let discord = FakeDiscord::new();
+        discord.fail_next_dm(DiscordError::DmClosed);
+        let worker = DeliveryWorker::new(db.clone(), store).with_fallback_channel("announcements");
+        let report = worker.drain(&discord, 20, 10).await.unwrap();
+        assert_eq!(report.sent, 1);
+        assert_eq!(report.failed, 0);
+        assert_eq!(discord.created_threads().len(), 1);
+        assert_eq!(discord.thread_members().len(), 1);
+        assert_eq!(discord.channel_messages().len(), 1);
+    }
 
     #[tokio::test]
     async fn a_closed_dm_queues_a_host_alert() {

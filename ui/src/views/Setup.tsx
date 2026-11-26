@@ -22,9 +22,11 @@ const extensions = ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac
 
 export function SetupView({
   data,
+  timezone,
   onCreate,
 }: {
   data: SetupData;
+  timezone?: string;
   onCreate: (draft: EventDraft) => void;
 }) {
   const [step, setStep] = useState(() => {
@@ -109,7 +111,9 @@ export function SetupView({
         {step === 0 ? <BasicsStep draft={draft} update={update} /> : null}
         {step === 1 ? <FilesStep draft={draft} update={update} /> : null}
         {step === 2 ? <GroupsStep draft={draft} update={update} /> : null}
-        {step === 3 ? <ReviewStep data={data} draft={draft} /> : null}
+        {step === 3 ? (
+          <ReviewStep data={data} draft={draft} timezone={timezone} />
+        ) : null}
 
         <div className="wizard-actions">
           <Button
@@ -532,7 +536,15 @@ function GroupsStep({
   );
 }
 
-function ReviewStep({ data, draft }: { data: SetupData; draft: EventDraft }) {
+function ReviewStep({
+  data,
+  draft,
+  timezone,
+}: {
+  data: SetupData;
+  draft: EventDraft;
+  timezone?: string;
+}) {
   return (
     <div className="wizard-grid">
       <dl className="review-grid">
@@ -586,7 +598,13 @@ function ReviewStep({ data, draft }: { data: SetupData; draft: EventDraft }) {
         ))}
       </div>
 
-      <JoinInstructions formats={draft.allowlist} maxMib={20} />
+      <JoinInstructions
+        formats={draft.allowlist}
+        maxMib={20}
+        exampleTimezone={timezone}
+        preview
+        headingLevel={3}
+      />
     </div>
   );
 }

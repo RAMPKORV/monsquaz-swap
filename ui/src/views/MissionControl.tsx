@@ -109,8 +109,7 @@ export function MissionControlView({
         <JoinInstructions
           formats={data.join.formats}
           maxMib={data.join.maxFileMib}
-          timezone={timezone}
-          onAction={onAction}
+          exampleTimezone={timezone}
         />
       ) : null}
 

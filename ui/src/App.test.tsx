@@ -322,11 +322,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Invite participants" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "/swap join timezone:Europe/Stockholm max_handoffs:4",
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText("/swap join")).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "Copy join instructions" }),
     );
@@ -339,6 +335,30 @@ describe("App", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining("20 MiB"),
     );
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("3. Send one seed file to the bot"),
+    );
+  });
+
+  it("shows the copy fallback when the clipboard fails", async () => {
+    setUrl("?demo=1&state=join-phase&view=mission");
+    const writeText = vi
+      .mocked(navigator.clipboard.writeText)
+      .mockRejectedValueOnce(new Error("blocked"));
+    render(<App />);
+    await screen.findByRole("heading", { name: "Invite participants" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy join instructions" }),
+    );
+    expect(
+      await screen.findByText(
+        "Could not copy. Select the text below and copy it.",
+      ),
+    ).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalled();
+    expect(
+      screen.getByText(/1\. In the server, run \/swap join\./),
+    ).toBeInTheDocument();
   });
 
   it("shows the join instructions in the setup review", async () => {
@@ -349,7 +369,8 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Copy join instructions" }),
-    ).toBeInTheDocument();
+    ).toBeDisabled();
+    expect(screen.getByText("Draft preview")).toBeInTheDocument();
   });
 
   it("shows the first-run state", async () => {

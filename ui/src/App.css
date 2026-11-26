@@ -4291,10 +4291,14 @@ select.input {
 
 /* Join instructions */
 .join-card {
-  padding: 14px 16px;
+  padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.join-card .card__meta {
+  color: var(--muted);
 }
 
 .join-card > p {
@@ -4306,37 +4310,87 @@ select.input {
 .join-steps {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: 12px 0 0;
+  gap: 12px;
+  margin: 14px 0 0;
   padding: 0;
   list-style: none;
+  counter-reset: join-step;
 }
 
 .join-steps li {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  position: relative;
+  display: block;
+  padding-left: 22px;
+  counter-increment: join-step;
+}
+
+.join-steps li::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--faint-raised);
+  content: counter(join-step) ".";
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .join-steps strong {
+  display: block;
   font-size: 12px;
 }
 
 .join-steps code {
   display: block;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
   padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--field);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  white-space: nowrap;
+  font-size: 12.5px;
+  white-space: pre-wrap;
 }
 
 .join-steps p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.join-formats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.join-formats > ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.join-formats code {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.join-next {
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -4344,11 +4398,39 @@ select.input {
 .join-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .join-copied {
   color: var(--mint);
   font-size: 12px;
+}
+
+.join-copied--error {
+  color: var(--danger);
+}
+
+.join-fallback {
+  margin-top: 10px;
+}
+
+.join-fallback p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.join-fallback pre {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  user-select: text;
 }

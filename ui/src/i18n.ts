@@ -9,16 +9,26 @@ export const messages = {
     title: "Invite participants",
     detail:
       "Send these instructions in the server before you lock the roster.",
-    commandLabel: "1. Run this command in the server.",
-    command: "/swap join timezone:{timezone} max_handoffs:{handoffs}",
-    seedLabel: "2. Send one seed file in a direct message.",
-    formats: "Allowed formats: {formats}.",
+    intro: "Join the swap:",
+    commandLabel: "In the server, run /swap join.",
+    command: "/swap join",
+    options:
+      "Choose your timezone (for example {timezone}) and max_handoffs (the number of tracks you will edit, 1 to 20).",
+    seedLabel: "Send one seed file to the bot in a direct message.",
+    seedHelp: "A seed is a track you made.",
+    formats: "Allowed formats:",
     size: "Maximum size: {size} MiB.",
+    next: "The host starts the event after the roster locks.",
     copy: "Copy join instructions",
     copied: "Join instructions copied.",
-    copyFailed: "Could not copy. Select the text and copy it.",
+    copyFailed: "Could not copy. Select the text below and copy it.",
+    copyFallback: "Select this text and copy it:",
     closed:
       "The roster is locked. These are the instructions this event used.",
+    open: "Join phase open",
+    preview: "Draft preview",
+    previewHelp:
+      "Create the event first. Then copy the instructions on mission control.",
   },
   planner: {
     warnings: "{count} {label} to review",
@@ -64,17 +74,17 @@ export function formatDateTime(
 }
 
 export function joinInstructions(
-  timezone: string,
-  handoffs: number,
+  exampleTimezone: string,
   formats: string[],
   maxMib: number,
 ): string {
   return [
-    format(messages.join.command, { timezone, handoffs }),
-    format(messages.join.seedLabel, {}),
-    format(messages.join.formats, {
-      formats: formats.map((item) => `.${item}`).join(", "),
-    }),
+    messages.join.intro,
+    `1. ${messages.join.commandLabel}`,
+    `2. ${format(messages.join.options, { timezone: exampleTimezone })}`,
+    `3. ${messages.join.seedLabel} ${messages.join.seedHelp}`,
+    `${messages.join.formats} ${formats.map((item) => `.${item}`).join(", ")}`,
     format(messages.join.size, { size: maxMib }),
+    messages.join.next,
   ].join("\n");
 }

@@ -124,9 +124,15 @@ shot setup-review-dark-1280 "view=setup&step=review" 1280 800
 shot setup-review-dark-1024 "view=setup&step=review" 1024 700
 shot setup-review-light-1280 "view=setup&step=review&theme=light" 1280 800
 shot setup-review-dark-1280x1400 "view=setup&step=review" 1280 1400
+shot setup-review-dark-1024x1000 "view=setup&step=review" 1024 1000
+shot setup-review-dark-1024x1100 "view=setup&step=review" 1024 1100
+shot setup-review-light-1280x1400 "view=setup&step=review&theme=light" 1280 1400
 shot mission-join-dark-1280 "view=mission&state=join-phase" 1280 800
 shot mission-join-dark-1024 "view=mission&state=join-phase" 1024 700
 shot mission-join-light-1280 "view=mission&state=join-phase&theme=light" 1280 800
+shot mission-join-light-1024 "view=mission&state=join-phase&theme=light" 1024 700
+shot mission-join-dark-zoom200 "view=mission&state=join-phase" 640 400
+shot mission-join-long-zone-dark-1280 "view=mission&state=join-phase&joinTimezone=America/Argentina/Buenos_Aires" 1280 800
 
 shot people-empty-dark-1280 "view=people&state=empty" 1280 800
 shot people-loading-dark-1280 "view=people&state=loading" 1280 800

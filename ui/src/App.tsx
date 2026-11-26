@@ -646,7 +646,11 @@ export default function App() {
         onNavigate={(next) => setView(next)}
       />
     ) : view === "setup" && setup ? (
-      <SetupView data={setup} onCreate={handleCreateEvent} />
+      <SetupView
+        data={setup}
+        timezone={settings?.timezone}
+        onCreate={handleCreateEvent}
+      />
     ) : view === "people" && people ? (
       <PeopleView
         data={people}

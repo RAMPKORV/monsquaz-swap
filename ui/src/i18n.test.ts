@@ -3,7 +3,6 @@ import {
   format,
   formatDateTime,
   joinInstructions,
-  messages,
   plural,
 } from "./i18n";
 
@@ -30,13 +29,10 @@ describe("i18n", () => {
   });
 
   it("builds the copyable join instructions", () => {
-    const text = joinInstructions("Europe/Stockholm", 4, ["it", "xm"], 20);
-    expect(text).toContain(
-      format(messages.join.command, {
-        timezone: "Europe/Stockholm",
-        handoffs: 4,
-      }),
-    );
+    const text = joinInstructions("Europe/Stockholm", ["it", "xm"], 20);
+    expect(text).toContain("1. In the server, run /swap join.");
+    expect(text).toContain("2. Choose your timezone");
+    expect(text).toContain("3. Send one seed file to the bot");
     expect(text).toContain(".it, .xm");
     expect(text).toContain("20 MiB");
   });

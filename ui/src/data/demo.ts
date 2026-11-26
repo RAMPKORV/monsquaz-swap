@@ -181,7 +181,7 @@ function baseMission(): MissionControl {
     timeline: defaultTimeline,
     facts: defaultFacts(),
     join: {
-      formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg"],
+      formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
       maxFileMib: 20,
     },
   };
@@ -204,7 +204,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       timeline: [],
       facts: [],
       join: {
-        formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg"],
+        formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
         maxFileMib: 20,
       },
     };

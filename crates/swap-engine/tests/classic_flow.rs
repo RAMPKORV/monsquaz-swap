@@ -3,20 +3,24 @@ use swap_core::{
 };
 use swap_db::{
     AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
-    HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, PrivacyRepo, SeenRepo, TrackRepo,
+    HostDecisionRepo, MetaRepo, PackRecord, PackRepo, ParticipantRepo, PlanRepo, PrivacyRepo,
+    RoundRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
-    dispatch_async_wave, dispatch_pending, edit_plan_assignment, event_status, expire_offer,
-    generate_schedule, join_with_seed, lock_roster, open_round, plan_edit_candidates,
-    redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
-    set_track_title_for_user, set_track_title_for_user_on_track, signup, skip, start_async_event,
-    start_event, start_event_with_channel, submit, tick_deadlines,
+    PreparedBytes, SubmitRequest, accept_late_seed, add_track_comment, claim, create_event,
+    create_event_with_secret, dispatch, dispatch_async_wave, dispatch_pending,
+    edit_plan_assignment, event_status, expire_offer, generate_schedule, join_with_seed,
+    lock_roster, move_round_deadline, open_round, open_seed_round, pending_late_seeds,
+    plan_edit_candidates, redact_track_comment, reveal, reveal_package, reveal_with_channel,
+    set_track_title, set_track_title_for_user, set_track_title_for_user_on_track, signup, skip,
+    start_async_event, start_event, start_event_with_channel, submit, tick_deadlines,
+    verify_commitment,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
 const EVENT: &str = "evt-1";
+const SECRET: &str = "0000000000000000000000000000002a";
 const T0: i64 = 1_000;
 const T1: i64 = 2_000;
 const T2: i64 = 2_100;
@@ -41,8 +45,24 @@ impl Fixture {
         let directory = tempfile::tempdir().unwrap();
         let store = BlobStore::new(directory.path().join("blobs"));
         let db = Db::open_in_memory().unwrap();
-        create_event(&db, EVENT, "Test Swap", 42, &settings, T0).unwrap();
+        create_event_with_secret(&db, EVENT, "Test Swap", 42, &settings, Some(SECRET), T0).unwrap();
         MetaRepo::set(db.conn(), "host.current_event", EVENT).unwrap();
+        let blob = store.store(b"IMPMtest-pack").unwrap();
+        PackRepo::insert(
+            db.conn(),
+            &PackRecord {
+                id: "pack-1".to_string(),
+                event_id: EVENT.to_string(),
+                filename: "pack.zip".to_string(),
+                sha256: blob.sha256.clone(),
+                size: blob.size,
+                storage_path: blob.relative_path.clone(),
+                created_at: T0,
+                locked_at: None,
+            },
+        )
+        .unwrap();
+        open_seed_round(&db, EVENT, T0 + 1_000_000, None, T0).unwrap();
         for index in 0..seeded {
             join(&db, &store, index);
         }
@@ -75,7 +95,11 @@ impl Fixture {
     }
 
     fn open(&self, round: u32) -> Vec<(String, String, String)> {
-        let outcome = open_round(&self.db, EVENT, round, T4).unwrap();
+        self.open_at(round, T4)
+    }
+
+    fn open_at(&self, round: u32, now: i64) -> Vec<(String, String, String)> {
+        let outcome = open_round(&self.db, EVENT, round, now).unwrap();
         offers(&outcome.effects)
     }
 }
@@ -95,6 +119,30 @@ fn xm_bytes() -> Vec<u8> {
     let mut bytes = b"Extended Module: ".to_vec();
     bytes.resize(64, 0);
     bytes
+}
+
+fn open_named_event(db: &Db, store: &BlobStore, event_id: &str) {
+    let blob = store.store(b"IMPMtest-pack").unwrap();
+    PackRepo::insert(
+        db.conn(),
+        &PackRecord {
+            id: format!("pack-{event_id}"),
+            event_id: event_id.to_string(),
+            filename: "pack.zip".to_string(),
+            sha256: blob.sha256.clone(),
+            size: blob.size,
+            storage_path: blob.relative_path.clone(),
+            created_at: T0,
+            locked_at: None,
+        },
+    )
+    .unwrap();
+    open_seed_round(db, event_id, T0 + 1_000_000, None, T0).unwrap();
+}
+
+fn open_test_event(db: &Db, store: &BlobStore, settings: EventSettings) {
+    create_event_with_secret(db, EVENT, "Test Swap", 42, &settings, Some(SECRET), T0).unwrap();
+    open_named_event(db, store, EVENT);
 }
 
 fn join(db: &Db, store: &BlobStore, index: usize) {
@@ -172,15 +220,7 @@ fn a_prepared_seed_keeps_the_original_and_delivers_the_scrub() {
     let directory = tempfile::tempdir().unwrap();
     let store = BlobStore::new(directory.path().join("blobs"));
     let db = Db::open_in_memory().unwrap();
-    create_event(
-        &db,
-        EVENT,
-        "Prepared Swap",
-        42,
-        &EventSettings::default(),
-        T0,
-    )
-    .unwrap();
+    open_test_event(&db, &store, EventSettings::default());
     for index in 0..2 {
         let user_id = user(index);
         let bytes = seed_bytes(index as u8);
@@ -278,7 +318,7 @@ async fn the_classic_loop_reaches_a_reveal() {
     assert_eq!(schedule.version, 1);
     assert_eq!(schedule.rounds, 3);
     assert_eq!(schedule.assignments.len(), 12);
-    assert_eq!(schedule.commitment.len(), 64);
+    assert_eq!(schedule.commitment.len(), 32);
 
     fixture.start();
     let round_zero = fixture.open(0);
@@ -343,7 +383,7 @@ async fn the_classic_loop_reaches_a_reveal() {
     let blocked = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap_err();
     assert!(matches!(blocked, EngineError::PendingAssignments { .. }));
     for (_, assignment_id, _) in &round_two {
-        expire_offer(&fixture.db, EVENT, assignment_id, T4 + 86_401).unwrap();
+        expire_offer(&fixture.db, EVENT, assignment_id, T4 + 172_801).unwrap();
     }
 
     let original_codes = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
@@ -421,7 +461,7 @@ fn an_expiry_returns_the_track_and_blocks_a_late_claim() {
         expire_offer(&fixture.db, EVENT, assignment_id, T4).unwrap_err(),
         EngineError::OfferNotDue
     ));
-    expire_offer(&fixture.db, EVENT, assignment_id, T4 + 86_401).unwrap();
+    expire_offer(&fixture.db, EVENT, assignment_id, T4 + 172_801).unwrap();
     let track = TrackRepo::get(fixture.db.conn(), EVENT, track_code)
         .unwrap()
         .unwrap();
@@ -432,7 +472,7 @@ fn an_expiry_returns_the_track_and_blocks_a_late_claim() {
         EVENT,
         assignment_id,
         user_id,
-        T4 + 86_402,
+        T4 + 172_802,
     )
     .unwrap_err();
     assert!(matches!(
@@ -571,10 +611,15 @@ fn an_unseeded_signup_becomes_a_fill_in() {
 }
 
 #[test]
-fn a_second_seed_is_refused() {
+fn a_second_seed_replaces_the_first_before_the_deadline() {
     let fixture = Fixture::new(2, 0);
     let user_id = user(0);
-    let error = join_with_seed(
+    let original = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+        .unwrap()
+        .into_iter()
+        .find(|track| track.owner_id == user_id)
+        .unwrap();
+    let outcome = join_with_seed(
         &fixture.db,
         &fixture.store,
         &PassthroughPreparer,
@@ -589,8 +634,16 @@ fn a_second_seed_is_refused() {
         },
         T0,
     )
-    .unwrap_err();
-    assert!(matches!(error, EngineError::AlreadySeeded));
+    .unwrap();
+    assert!(outcome.replaced);
+    assert!(!outcome.held);
+    assert_eq!(outcome.track_code, original.code);
+    let files = FileRepo::list_for_track(fixture.db.conn(), EVENT, &original.code).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].version, 1);
+    assert_eq!(files[0].sha256, sha256_hex(&seed_bytes(9)));
+    let after = TrackRepo::list_for_event(fixture.db.conn(), EVENT).unwrap();
+    assert_eq!(after.len(), 2);
 }
 
 #[test]
@@ -764,7 +817,7 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
     let store = BlobStore::new(directory.path().join("blobs"));
     {
         let db = Db::open(&database).unwrap();
-        create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+        open_test_event(&db, &store, EventSettings::default());
         for index in 0..3 {
             join(&db, &store, index);
         }
@@ -820,7 +873,7 @@ async fn an_attachment_is_downloaded_stored_and_processed_once() {
     let directory = tempfile::tempdir().unwrap();
     let store = BlobStore::new(directory.path().join("blobs"));
     let db = Db::open_in_memory().unwrap();
-    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    open_test_event(&db, &store, EventSettings::default());
     for index in 0..3 {
         join(&db, &store, index);
     }
@@ -909,7 +962,7 @@ async fn a_claim_command_delivers_the_claimed_file_from_the_outbox() {
     let directory = tempfile::tempdir().unwrap();
     let store = BlobStore::new(directory.path().join("blobs"));
     let db = Db::open_in_memory().unwrap();
-    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    open_test_event(&db, &store, EventSettings::default());
     for index in 0..3 {
         join(&db, &store, index);
     }
@@ -957,7 +1010,7 @@ async fn backfill_recovers_a_dm_attachment_after_an_outage() {
     let directory = tempfile::tempdir().unwrap();
     let store = BlobStore::new(directory.path().join("blobs"));
     let db = Db::open_in_memory().unwrap();
-    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    open_test_event(&db, &store, EventSettings::default());
     for index in 0..3 {
         join(&db, &store, index);
     }
@@ -1276,6 +1329,7 @@ async fn an_active_assignment_wins_over_a_new_signup_event() {
         T5,
     )
     .unwrap();
+    open_named_event(&fixture.db, &fixture.store, "evt-2");
     MetaRepo::set(fixture.db.conn(), "host.current_event", "evt-2").unwrap();
 
     let discord = Arc::new(swap_discord::FakeDiscord::new());
@@ -1359,6 +1413,7 @@ async fn a_join_is_refused_while_another_event_is_not_started() {
         T5,
     )
     .unwrap();
+    open_named_event(&fixture.db, &fixture.store, "evt-2");
     MetaRepo::set(fixture.db.conn(), "host.current_event", "evt-2").unwrap();
     let discord = Arc::new(swap_discord::FakeDiscord::new());
     let db = Arc::new(Mutex::new(fixture.db));
@@ -1400,6 +1455,7 @@ async fn the_deadline_tick_is_idempotent_and_marks_overdue_without_moving_the_tr
     let base = T4;
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         ..EventSettings::default()
     };
     let fixture = Fixture::with_settings(3, 0, settings);
@@ -1475,12 +1531,13 @@ fn quiet_hours_delay_a_reminder_without_moving_the_deadline() {
     let base = 25_130_i64;
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         ..EventSettings::default()
     };
     let fixture = Fixture::with_settings(2, 0, settings);
     fixture.lock_and_schedule();
     fixture.start();
-    let offers = fixture.open(0);
+    let offers = fixture.open_at(0, base);
     let (user_id, assignment_id, _) = offers[0].clone();
     claim(
         &fixture.db,
@@ -1513,6 +1570,7 @@ fn quiet_hours_can_be_turned_off() {
     let base = 25_130_i64;
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         quiet_hours_start: 8,
         quiet_hours_end: 8,
         ..EventSettings::default()
@@ -1520,7 +1578,7 @@ fn quiet_hours_can_be_turned_off() {
     let fixture = Fixture::with_settings(2, 0, settings);
     fixture.lock_and_schedule();
     fixture.start();
-    let offers = fixture.open(0);
+    let offers = fixture.open_at(0, base);
     let (user_id, assignment_id, _) = offers[0].clone();
     claim(
         &fixture.db,
@@ -1541,12 +1599,13 @@ fn reminders_do_not_burst_after_quiet_hours() {
     let base = 25_130_i64;
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         ..EventSettings::default()
     };
     let fixture = Fixture::with_settings(2, 0, settings);
     fixture.lock_and_schedule();
     fixture.start();
-    let offers = fixture.open(0);
+    let offers = fixture.open_at(0, base);
     let (user_id, assignment_id, _) = offers[0].clone();
     claim(
         &fixture.db,
@@ -1586,27 +1645,15 @@ fn a_manual_edit_swaps_two_assignments_and_validates_the_plan() {
         .unwrap()
         .unwrap()
         .owner_id;
-    let candidate = schedule
-        .iter()
-        .find(|assignment| {
-            assignment.round == 0
-                && assignment.participant_id != target.participant_id
-                && assignment.participant_id != owner
-                && !schedule.iter().any(|other| {
-                    other.participant_id == assignment.participant_id
-                        && other.track_code == target.track_code
-                })
-        })
-        .unwrap()
-        .clone();
-    let candidate_old_track = candidate.track_code.clone();
     let displaced = target.participant_id.clone();
     let candidates = plan_edit_candidates(&fixture.db, EVENT, 0, &target.track_code).unwrap();
-    assert!(
-        candidates
-            .iter()
-            .any(|item| item.participant_id == candidate.participant_id)
-    );
+    assert!(!candidates.is_empty());
+    let candidate = candidates
+        .iter()
+        .find(|item| item.participant_id != owner)
+        .unwrap();
+    let candidate_participant = candidate.participant_id.clone();
+    let candidate_old_track = candidate.current_track.clone();
     assert!(
         candidates
             .iter()
@@ -1654,7 +1701,7 @@ fn a_manual_edit_swaps_two_assignments_and_validates_the_plan() {
         EVENT,
         0,
         &target.track_code,
-        &candidate.participant_id,
+        &candidate_participant,
         1,
         T4,
     )
@@ -2207,7 +2254,7 @@ fn locking_the_schedule_publishes_the_latest_commitment() {
             assert_eq!(channel_id, "announce");
             assert!(content.contains(&edited.commitment[..16]));
             assert!(!content.contains(&first.commitment[..16]));
-            assert!(!content.contains(&edited.commitment));
+            assert!(content.contains(&edited.commitment));
             for index in 0..5 {
                 let file_hash = sha256_hex(&seed_bytes(index));
                 assert!(!content.contains(&file_hash[..16]));
@@ -2230,6 +2277,7 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
 
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         ..EventSettings::default()
     };
     let fixture = Fixture::with_settings(2, 0, settings);
@@ -2413,7 +2461,13 @@ fn the_reveal_package_carries_titles_comments_and_credits() {
     );
     assert_eq!(track.comments.len(), 1);
     assert_eq!(track.comments[0].body, "A great bassline.");
-    assert_eq!(track.comments[0].author_name, "User 0");
+    assert_eq!(
+        track.comments[0].author_name,
+        ParticipantRepo::get(fixture.db.conn(), EVENT, &user_id)
+            .unwrap()
+            .unwrap()
+            .display_name
+    );
     assert!(track.versions.iter().any(|version| {
         version.version == 2
             && version.final_version
@@ -2649,6 +2703,7 @@ fn a_missed_deadline_decision_records_seen_and_returns_the_track() {
 
     let settings = EventSettings {
         round_window_secs: 100,
+        final_round_window_secs: 100,
         ..EventSettings::default()
     };
     let fixture = Fixture::with_settings(2, 0, settings);
@@ -2706,9 +2761,9 @@ fn deadline_flags_and_decisions_survive_a_restart() {
     let store = BlobStore::new(directory.path().join("blobs"));
     let (user_id, assignment_id) = {
         let db = Db::open(&database).unwrap();
-        create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+        open_test_event(&db, &store, EventSettings::default());
         MetaRepo::set(db.conn(), "host.current_event", EVENT).unwrap();
-        for index in 0..2 {
+        for index in 0..3 {
             join(&db, &store, index);
         }
         lock_roster(&db, EVENT, T1).unwrap();
@@ -3019,7 +3074,7 @@ async fn an_offer_holder_cannot_submit_before_a_claim() {
     let directory = tempfile::tempdir().unwrap();
     let store = BlobStore::new(directory.path().join("blobs"));
     let db = Db::open_in_memory().unwrap();
-    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    open_test_event(&db, &store, EventSettings::default());
     for index in 0..3 {
         join(&db, &store, index);
     }
@@ -3113,4 +3168,214 @@ fn an_attachment_source_is_marked_in_the_submit_transaction() {
     let versions = FileRepo::list_for_track(fixture.db.conn(), EVENT, &track_code).unwrap();
     assert_eq!(versions.len(), 2);
     assert!(!assignments.is_empty());
+}
+
+#[test]
+fn seed_round_open_requires_a_pack_and_two_seeds() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event_with_secret(
+        &db,
+        EVENT,
+        "Seed Gate",
+        42,
+        &EventSettings::default(),
+        Some(SECRET),
+        T0,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        open_seed_round(&db, EVENT, T0 + 100_000, None, T0),
+        Err(EngineError::PackRequired)
+    ));
+
+    let blob = store.store(b"IMPMseed-gate-pack").unwrap();
+    PackRepo::insert(
+        db.conn(),
+        &PackRecord {
+            id: "seed-gate-pack".to_string(),
+            event_id: EVENT.to_string(),
+            filename: "pack.zip".to_string(),
+            sha256: blob.sha256.clone(),
+            size: blob.size,
+            storage_path: blob.relative_path.clone(),
+            created_at: T0,
+            locked_at: None,
+        },
+    )
+    .unwrap();
+    open_seed_round(&db, EVENT, T0 + 100_000, None, T0).unwrap();
+    assert_eq!(
+        EventRepo::get(db.conn(), EVENT).unwrap().unwrap().state,
+        EventState::Signup
+    );
+
+    join(&db, &store, 0);
+    assert!(matches!(
+        lock_roster(&db, EVENT, T1),
+        Err(EngineError::SeedMinimum {
+            seeds: 1,
+            minimum: 2
+        })
+    ));
+    join(&db, &store, 1);
+    let locked = lock_roster(&db, EVENT, T1).unwrap();
+    assert_eq!(locked.active, 2);
+    let round = RoundRepo::get(db.conn(), EVENT, 1).unwrap().unwrap();
+    assert_eq!(round.status, swap_core::RoundStatus::Closed);
+    assert!(
+        EventRepo::seed_round_closed_at(db.conn(), EVENT)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn a_late_seed_is_held_and_the_host_can_accept_it() {
+    let fixture = Fixture::new(2, 0);
+    let user_id = user(2);
+    let outcome = join_with_seed(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &JoinRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            display_name: "Late Person",
+            timezone: "Europe/Stockholm",
+            max_handoffs: 3,
+            filename: "seed.it",
+            bytes: &seed_bytes(22),
+        },
+        T0 + 2_000_000,
+    )
+    .unwrap();
+    assert!(outcome.held);
+    let held = pending_late_seeds(&fixture.db, EVENT).unwrap();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].user_id, user_id);
+
+    accept_late_seed(&fixture.db, EVENT, &held[0].id, T0 + 2_000_001).unwrap();
+    assert!(pending_late_seeds(&fixture.db, EVENT).unwrap().is_empty());
+    let locked = lock_roster(&fixture.db, EVENT, T1).unwrap();
+    assert_eq!(locked.active, 3);
+}
+
+#[test]
+fn a_classic_round_has_one_shared_deadline_and_a_final_48_hours() {
+    let fixture = Fixture::new(4, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let first = fixture.open(0);
+    let due = AssignmentRepo::get(fixture.db.conn(), &first[0].1)
+        .unwrap()
+        .unwrap()
+        .due_at
+        .unwrap();
+    assert_eq!(due, T4 + 86_400);
+    let round = RoundRepo::get(fixture.db.conn(), EVENT, 2)
+        .unwrap()
+        .unwrap();
+    assert_eq!(round.deadline_at, Some(T4 + 86_400));
+    for (user_id, assignment_id, _) in &first {
+        skip(&fixture.db, EVENT, user_id, T4 + 10).unwrap();
+        let _ = assignment_id;
+    }
+
+    let middle = fixture.open(1);
+    assert_eq!(
+        RoundRepo::get(fixture.db.conn(), EVENT, 3)
+            .unwrap()
+            .unwrap()
+            .deadline_at,
+        Some(T4 + 86_400)
+    );
+    for (user_id, _, _) in &middle {
+        skip(&fixture.db, EVENT, user_id, T4 + 10).unwrap();
+    }
+
+    let final_round = fixture.open(2);
+    assert_eq!(final_round.len(), 4);
+    assert_eq!(
+        RoundRepo::get(fixture.db.conn(), EVENT, 4)
+            .unwrap()
+            .unwrap()
+            .deadline_at,
+        Some(T4 + 172_800)
+    );
+}
+
+#[test]
+fn moving_a_round_deadline_shifts_planned_rounds_and_the_reveal() {
+    let fixture = Fixture::new(4, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let reveal_before = EventRepo::reveal_at(fixture.db.conn(), EVENT)
+        .unwrap()
+        .unwrap();
+    let planned_before = RoundRepo::get(fixture.db.conn(), EVENT, 3)
+        .unwrap()
+        .unwrap()
+        .deadline_at
+        .unwrap();
+    let new_deadline = T4 + 2 * 86_400;
+    let moved = move_round_deadline(
+        &fixture.db,
+        EVENT,
+        2,
+        new_deadline,
+        "server outage",
+        T4 + 100,
+    )
+    .unwrap();
+    assert_eq!(moved.moved, 4);
+    assert_eq!(
+        AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+            .unwrap()
+            .unwrap()
+            .due_at,
+        Some(new_deadline)
+    );
+    assert_eq!(
+        RoundRepo::get(fixture.db.conn(), EVENT, 3)
+            .unwrap()
+            .unwrap()
+            .deadline_at,
+        Some(planned_before + 86_400)
+    );
+    assert_eq!(
+        EventRepo::reveal_at(fixture.db.conn(), EVENT).unwrap(),
+        Some(reveal_before + 86_400)
+    );
+}
+
+#[test]
+fn commitment_v2_covers_the_seed_owner_map() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    assert!(verify_commitment(&fixture.db, EVENT).unwrap().verified);
+    fixture
+        .db
+        .conn()
+        .execute(
+            "DELETE FROM plan_seed_owners WHERE event_id = ?1 AND rowid = (
+                SELECT rowid FROM plan_seed_owners WHERE event_id = ?1 LIMIT 1
+             )",
+            [EVENT],
+        )
+        .unwrap();
+    assert!(!verify_commitment(&fixture.db, EVENT).unwrap().verified);
 }

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { Decision, MissionControl } from "../types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type { Decision, MissionControl, PackInfo } from "../types";
 import {
   Button,
   Dialog,
   EmptyState,
+  Field,
   Meter,
   PageHeader,
   Skeleton,
@@ -26,16 +28,34 @@ export function MissionControlView({
   onAction,
   onDecision,
   onNavigate,
+  onUploadPack,
+  onOpenSeedRound,
+  onCloseSeedRound,
+  onExtendSeedDeadline,
+  onDecideLateSeed,
+  onMoveRoundDeadline,
 }: {
   data: MissionControl;
   timezone?: string;
   onAction: (label: string) => void;
   onDecision: (decision: Decision, action: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
+  onUploadPack: (path: string) => Promise<PackInfo>;
+  onOpenSeedRound: (deadlineAt: number, channelId: string | null) => Promise<void>;
+  onCloseSeedRound: () => Promise<void>;
+  onExtendSeedDeadline: (deadlineAt: number) => Promise<void>;
+  onDecideLateSeed: (id: string, accept: boolean) => Promise<void>;
+  onMoveRoundDeadline: (
+    roundNo: number,
+    deadlineAt: number,
+    reason: string,
+  ) => Promise<void>;
 }) {
   const initialDialog = new URLSearchParams(window.location.search).get("dialog");
   const [confirmReveal, setConfirmReveal] = useState(initialDialog === "reveal");
   const [confirmLock, setConfirmLock] = useState(initialDialog === "lock");
+  const [moveDeadline, setMoveDeadline] = useState<string | null>(null);
+  const [moveReason, setMoveReason] = useState("");
   const [selectedDecision, setSelectedDecision] = useState<Decision | null>(
     initialDialog === "decision" ? (data.decisions[0] ?? null) : null,
   );
@@ -105,6 +125,19 @@ export function MissionControlView({
         the mapping.
       </p>
 
+      {event.stage === "Setup" || event.stage === "Join phase" ? (
+        <SeedRoundCard
+          event={event}
+          lateSeeds={data.lateSeeds}
+          timezone={timezone}
+          onUploadPack={onUploadPack}
+          onOpenSeedRound={onOpenSeedRound}
+          onCloseSeedRound={onCloseSeedRound}
+          onExtendSeedDeadline={onExtendSeedDeadline}
+          onDecideLateSeed={onDecideLateSeed}
+        />
+      ) : null}
+
       {event.stage === "Join phase" ? (
         <JoinInstructions
           formats={data.join.formats}
@@ -113,7 +146,7 @@ export function MissionControlView({
         />
       ) : null}
 
-      {data.nextAction ? (
+      {data.nextAction && event.stage !== "Setup" ? (
         <section
           className={`next-action next-action--${data.nextAction.tone}`}
           aria-labelledby="next-action-title"
@@ -166,15 +199,38 @@ export function MissionControlView({
                 <h2 id="round-progress-title">Round progress</h2>
                 <p className="card__subtitle">
                   {event.round === 0
-                    ? "The schedule has not started."
-                    : `${event.rounds - event.round} rounds remain after this one.`}
+                    ? "The seed round is not open."
+                    : event.seedRoundOpen
+                      ? "Round 1 is the seed round. Each person makes one track from the host pack."
+                      : `${event.rounds - event.round} rounds remain after this one.`}
                 </p>
               </div>
-              <span className="card__meta">
-                {event.round === 0
-                  ? "Not started"
-                  : `Round ${event.round} of ${event.rounds}`}
-              </span>
+              <div className="header-actions">
+                <span className="card__meta">
+                  {event.round === 0
+                    ? "Not started"
+                    : event.seedRoundOpen
+                      ? `Seed round · R1 of ${event.rounds}`
+                      : `Round ${event.round} of ${event.rounds}`}
+                </span>
+                {event.stage === "Active" && event.round >= 2 ? (
+                  <Button
+                    variant="quiet"
+                    icon="clock"
+                    onClick={() => {
+                      const next = new Date(Date.now() + 24 * 60 * 60 * 1000);
+                      const offset = next.getTimezoneOffset() * 60_000;
+                      setMoveDeadline(
+                        new Date(next.getTime() - offset)
+                          .toISOString()
+                          .slice(0, 16),
+                      );
+                    }}
+                  >
+                    Move deadline
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <Meter
               value={event.round}
@@ -569,6 +625,72 @@ export function MissionControlView({
         </Dialog>
       ) : null}
 
+      {moveDeadline ? (
+        <Dialog
+          title={`Move the Round ${event.round} deadline`}
+          onClose={() => setMoveDeadline(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setMoveDeadline(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  const deadlineAt = fromDateTimeInput(moveDeadline);
+                  if (!Number.isFinite(deadlineAt)) {
+                    return;
+                  }
+                  await onMoveRoundDeadline(
+                    event.round,
+                    deadlineAt,
+                    moveReason || "host moved the round deadline",
+                  );
+                  setMoveDeadline(null);
+                }}
+              >
+                Move deadline
+              </Button>
+            </>
+          }
+        >
+          <p>
+            The new deadline applies to offered, claimed, and overdue work in
+            Round {event.round}. Overdue work returns to claimed. Later
+            individual extensions are preserved. Submitted work stays final.
+          </p>
+          <Field
+            label="New deadline"
+            htmlFor="move-round-deadline"
+            helpId="move-round-deadline-help"
+            help="Use the host timezone. The bot sends the new time to every holder."
+          >
+            <input
+              id="move-round-deadline"
+              className="input"
+              type="datetime-local"
+              aria-describedby="move-round-deadline-help"
+              value={moveDeadline}
+              onChange={(event) => setMoveDeadline(event.target.value)}
+            />
+          </Field>
+          <Field
+            label="Reason"
+            htmlFor="move-round-reason"
+            helpId="move-round-reason-help"
+            help="The reason appears in the audit log. It is not sent to participants."
+          >
+            <input
+              id="move-round-reason"
+              className="input"
+              aria-describedby="move-round-reason-help"
+              value={moveReason}
+              onChange={(event) => setMoveReason(event.target.value)}
+              placeholder="A server outage delayed three edits"
+            />
+          </Field>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -705,6 +827,412 @@ function SkeletonCard({ lines }: { lines: number }) {
           />
         ))}
       </div>
+    </section>
+  );
+}
+
+function defaultSeedDeadline() {
+  return Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+}
+
+function toDateTimeInput(epochSeconds: number) {
+  const date = new Date(epochSeconds * 1000);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function fromDateTimeInput(value: string) {
+  return Math.floor(new Date(value).getTime() / 1000);
+}
+
+function formatDeadline(epochSeconds: number, timezone?: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: timezone,
+  }).format(new Date(epochSeconds * 1000));
+}
+
+function SeedRoundCard({
+  event,
+  lateSeeds,
+  timezone,
+  onUploadPack,
+  onOpenSeedRound,
+  onCloseSeedRound,
+  onExtendSeedDeadline,
+  onDecideLateSeed,
+}: {
+  event: NonNullable<MissionControl["event"]>;
+  lateSeeds: MissionControl["lateSeeds"];
+  timezone?: string;
+  onUploadPack: (path: string) => Promise<PackInfo>;
+  onOpenSeedRound: (deadlineAt: number, channelId: string | null) => Promise<void>;
+  onCloseSeedRound: () => Promise<void>;
+  onExtendSeedDeadline: (deadlineAt: number) => Promise<void>;
+  onDecideLateSeed: (id: string, accept: boolean) => Promise<void>;
+}) {
+  const [pack, setPack] = useState<PackInfo | null>(null);
+  const [deadline, setDeadline] = useState(() =>
+    toDateTimeInput(event.seedDeadlineAt ?? defaultSeedDeadline()),
+  );
+  const [busy, setBusy] = useState(false);
+  const [extending, setExtending] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [error, setError] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("seedError") === "1"
+      ? "The file is larger than 20 MiB."
+      : null,
+  );
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (extending) {
+      document.getElementById("seed-deadline-move")?.focus();
+    }
+  }, [extending]);
+
+  function focusTitle() {
+    document.getElementById("seed-round-title")?.focus();
+  }
+  const isTauri = "__TAURI_INTERNALS__" in window;
+
+  async function choosePack() {
+    let path = "demo-pack.zip";
+    if (isTauri) {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: "Host pack",
+            extensions: ["zip", "7z", "rar", "it", "xm", "mod", "s3m"],
+          },
+        ],
+      });
+      if (!picked || Array.isArray(picked)) {
+        return;
+      }
+      path = picked;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      setPack(await onUploadPack(path));
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "The host pack could not be uploaded.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openRound() {
+    const deadlineAt = fromDateTimeInput(deadline);
+    if (!Number.isFinite(deadlineAt)) {
+      setDeadlineError("Choose a date and a time for the seed deadline.");
+      return;
+    }
+    setDeadlineError(null);
+    setBusy(true);
+    try {
+      await onOpenSeedRound(deadlineAt, null);
+      focusTitle();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeRound() {
+    setBusy(true);
+    try {
+      await onCloseSeedRound();
+      setConfirmClose(false);
+      focusTitle();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function extend() {
+    const deadlineAt = fromDateTimeInput(deadline);
+    if (!Number.isFinite(deadlineAt)) {
+      setDeadlineError("Choose a date and a time for the seed deadline.");
+      return;
+    }
+    setDeadlineError(null);
+    setBusy(true);
+    try {
+      await onExtendSeedDeadline(deadlineAt);
+      setExtending(false);
+      document.getElementById("extend-seed-deadline")?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = pack !== null || event.packId !== null;
+
+  return (
+    <section className="card seed-round-card" aria-labelledby="seed-round-title">
+      <div className="card__header">
+        <div>
+          <h2 id="seed-round-title" tabIndex={-1}>
+            Round 1 · Seed round
+          </h2>
+          <p className="card__subtitle">
+            Every participant makes one track from the host pack. Round 1 is the
+            seed round and counts in the event length: {event.participants || "N"}{" "}
+            participants make {event.rounds || "N"} rounds. Rounds 2 to{" "}
+            {event.rounds || "N"} are exchanges.
+          </p>
+        </div>
+        <StatusPill tone={event.seedRoundOpen ? "ok" : "info"}>
+          {event.seedRoundOpen ? "Open" : "Not open"}
+        </StatusPill>
+      </div>
+
+      {error ? (
+        <div className="banner banner--danger" role="alert">
+          <Icon name="alert" size={20} />
+          <div>
+            <strong>The host pack could not be uploaded.</strong> {error} Try
+            again, or choose a different file.
+          </div>
+        </div>
+      ) : null}
+
+      {!event.seedRoundOpen ? (
+        <>
+          <div className="seed-round-row">
+            <div>
+              <strong>Host pack</strong>
+              <p className="field-help">
+                Samples and an empty module. Allowed files: zip, 7z, rar, it,
+                xm, mod, s3m. Bring-your-own is a separate option in setup.
+              </p>
+              <p className="card__meta">
+                {pack
+                  ? `${pack.filename} · ${(pack.size / (1024 * 1024)).toFixed(1)} MiB`
+                  : event.packId
+                    ? `Pack ${event.packId} is ready`
+                    : "No pack uploaded yet"}
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              icon="file"
+              onClick={choosePack}
+              disabled={busy}
+            >
+              {pack || event.packId ? "Replace host pack…" : "Upload host pack…"}
+            </Button>
+          </div>
+
+          <div className="seed-round-row seed-round-row--field">
+            <Field
+              label={`Seed deadline${timezone ? ` (${timezone})` : ""}`}
+              htmlFor="seed-deadline"
+              helpId="seed-deadline-help"
+              help={`Round 1 closes at ${formatDeadline(
+                fromDateTimeInput(deadline),
+                timezone,
+              )}. The default is 7 days after you open Round 1. A late seed does not count until you accept it.`}
+            >
+              <input
+                id="seed-deadline"
+                className="input"
+                type="datetime-local"
+                aria-describedby="seed-deadline-help"
+                aria-invalid={deadlineError ? true : undefined}
+                value={deadline}
+                onChange={(event) => setDeadline(event.target.value)}
+              />
+            </Field>
+            <Button
+              variant="primary"
+              icon="play"
+              onClick={openRound}
+              disabled={busy || !ready}
+              describedBy={!ready ? "seed-open-help" : undefined}
+            >
+              Open Round 1
+            </Button>
+          </div>
+          {deadlineError ? (
+            <p className="field-help field-help--danger" role="alert">
+              {deadlineError}
+            </p>
+          ) : null}
+          {!ready ? (
+            <p className="field-help" id="seed-open-help">
+              Upload the host pack to open Round 1. The pack is stored locally
+              and sent by DM. It never travels through the app window.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {lateSeeds.length > 0 ? (
+            <p className="field-help field-help--danger" id="late-seed-help">
+              Accept or decline {lateSeeds.length} late{" "}
+              {lateSeeds.length === 1 ? "seed" : "seeds"} before you close Round
+              1.
+            </p>
+          ) : null}
+          {extending ? (
+            <div className="seed-round-row">
+              <Field
+                label="New seed deadline"
+                htmlFor="seed-deadline-move"
+                helpId="seed-deadline-move-help"
+                help="The new deadline applies to late seeds and the roster close."
+              >
+                <input
+                  id="seed-deadline-move"
+                  className="input"
+                  type="datetime-local"
+                  aria-describedby="seed-deadline-move-help"
+                  value={deadline}
+                  onChange={(event) => setDeadline(event.target.value)}
+                />
+              </Field>
+              <div className="header-actions">
+                <Button variant="secondary" onClick={() => setExtending(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={extend} disabled={busy}>
+                  Save deadline
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="header-actions seed-round-actions">
+              <Button
+                variant="primary"
+                icon="lock"
+                onClick={() => setConfirmClose(true)}
+                disabled={
+                  busy || event.seeded < 2 || lateSeeds.length > 0
+                }
+                describedBy={
+                  lateSeeds.length > 0
+                    ? "late-seed-help"
+                    : event.seeded < 2
+                      ? "seed-minimum-help"
+                      : undefined
+                }
+              >
+                Close seed round and lock roster
+              </Button>
+              <Button
+                id="extend-seed-deadline"
+                variant="secondary"
+                icon="clock"
+                onClick={() => setExtending(true)}
+                disabled={busy}
+              >
+                Extend deadline
+              </Button>
+            </div>
+          )}
+          <p className="field-help">
+            Closing stops seed intake and locks the roster. New participants
+            cannot join. Rounds 2 to {event.rounds} start when you continue.
+          </p>
+          {event.seeded < 2 ? (
+            <p className="field-help" id="seed-minimum-help">
+              At least two seeds are needed before the roster can lock.
+            </p>
+          ) : null}
+          <dl className="review-grid review-grid--three">
+            <div>
+              <dt>Seed deadline{timezone ? ` (${timezone})` : ""}</dt>
+              <dd>
+                {event.seedDeadlineAt
+                  ? formatDeadline(event.seedDeadlineAt, timezone)
+                  : formatDeadline(fromDateTimeInput(deadline), timezone)}
+              </dd>
+            </div>
+            <div>
+              <dt>Seeds in</dt>
+              <dd aria-live="polite">
+                {event.seeded} of {event.participants} participants. Minimum to
+                lock the roster: 2.
+              </dd>
+            </div>
+            <div>
+              <dt>Pack</dt>
+              <dd>
+                {event.packId ? `Uploaded · ${event.packId}` : "Bring your own"}
+              </dd>
+            </div>
+          </dl>
+
+          {lateSeeds.length > 0 ? (
+            <div className="warnings" role="status" aria-live="polite">
+              {lateSeeds.map((seed) => (
+                <div className="warning warning--warn" key={seed.id}>
+                  <Icon name="clock" size={18} />
+                  <div>
+                    <strong>{seed.displayName} sent a late seed</strong>
+                    <p>
+                      Track {seed.trackCode}. Accept it before you close Round 1.
+                    </p>
+                    <div className="header-actions">
+                      <Button
+                        variant="secondary"
+                        ariaLabel={`Accept ${seed.displayName}'s late seed`}
+                        onClick={() => onDecideLateSeed(seed.id, true)}
+                      >
+                        Accept seed
+                      </Button>
+                      <Button
+                        variant="quiet"
+                        ariaLabel={`Decline ${seed.displayName}'s late seed`}
+                        onClick={() => onDecideLateSeed(seed.id, false)}
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+
+      {confirmClose ? (
+        <Dialog
+          title="Close the seed round?"
+          onClose={() => setConfirmClose(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setConfirmClose(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon="lock"
+                onClick={closeRound}
+                disabled={busy}
+              >
+                Close and lock roster
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Seed intake stops and the roster locks with {event.seeded} seeded
+            participants. New participants cannot join after this. The host can
+            reopen the seed round before the schedule starts.
+          </p>
+        </Dialog>
+      ) : null}
     </section>
   );
 }

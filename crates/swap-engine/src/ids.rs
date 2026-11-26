@@ -8,10 +8,43 @@ use swap_files::sha256_hex;
 /// Ambiguous characters are removed so a host can read a code aloud.
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/// A cryptographically random 128-bit value, encoded as 32 lowercase hex
+/// characters. The event secret and the commitment nonce use this.
+pub fn random_hex_128() -> String {
+    let mut bytes = [0_u8; 16];
+    if getrandom::fill(&mut bytes).is_err() {
+        static FALLBACK: AtomicU64 = AtomicU64::new(0);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos() as u64)
+            .unwrap_or(0);
+        let counter = FALLBACK.fetch_add(1, Ordering::Relaxed);
+        let digest = Sha256::digest(format!("msw-fallback-v1:{now}:{counter}").as_bytes());
+        bytes.copy_from_slice(&digest[..16]);
+    }
+    let mut hex = String::with_capacity(32);
+    for byte in bytes {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
+
 /// An opaque, stable track code. The code does not contain the owner, the
 /// submission order, or the original title.
 pub fn track_code(seed: u64, salt: u32) -> String {
     let digest = Sha256::digest(format!("msw-track-v1:{seed}:{salt}").as_bytes());
+    let mut code = String::with_capacity(6);
+    code.push('S');
+    for byte in digest.iter().take(5) {
+        code.push(ALPHABET[(byte & 31) as usize] as char);
+    }
+    code
+}
+
+/// An opaque track code for a new-model event. The code derives from the
+/// 128-bit event secret, not from the creation time or the submission order.
+pub fn track_code_from_secret(secret_hex: &str, salt: u32) -> String {
+    let digest = Sha256::digest(format!("msw-track-v2:{secret_hex}:{salt}").as_bytes());
     let mut code = String::with_capacity(6);
     code.push('S');
     for byte in digest.iter().take(5) {
@@ -75,6 +108,63 @@ fn reduce_assignments(assignments: &[PlanAssignmentRecord], canonical: &mut Stri
             assignment.round, assignment.track_code, assignment.participant_id
         );
     }
+}
+
+/// Inputs to commitment v2.
+pub struct CommitmentInputs<'a> {
+    pub event_id: &'a str,
+    pub plan_version: u32,
+    pub total_rounds: u32,
+    pub exchange_rounds: u32,
+    pub secret_hex: &'a str,
+    pub nonce: &'a str,
+    pub pack_id: Option<&'a str>,
+    pub settings_json: &'a str,
+    pub seed_owners: &'a [(String, String)],
+    pub assignments: &'a [PlanAssignmentRecord],
+}
+
+/// Commitment v2 covers the seed round owner map, the exchange schedule, the
+/// pack identity, the locked policy, and the plan version. It returns 32
+/// lowercase hex characters. The event secret and the nonce are random
+/// 128-bit values. The recipe is published at the reveal.
+pub fn plan_commitment_v2(input: &CommitmentInputs<'_>) -> String {
+    let mut canonical = String::new();
+    let _ = writeln!(canonical, "msw-plan-v2");
+    let _ = writeln!(canonical, "event={}", input.event_id);
+    let _ = writeln!(canonical, "version={}", input.plan_version);
+    let _ = writeln!(canonical, "model=1");
+    let _ = writeln!(canonical, "total_rounds={}", input.total_rounds);
+    let _ = writeln!(canonical, "exchange_rounds={}", input.exchange_rounds);
+    let _ = writeln!(canonical, "secret={}", input.secret_hex);
+    let _ = writeln!(canonical, "nonce={}", input.nonce);
+    let _ = writeln!(canonical, "pack={}", input.pack_id.unwrap_or("none"));
+    let _ = writeln!(
+        canonical,
+        "policy={}",
+        sha256_hex(input.settings_json.as_bytes())
+    );
+    let mut owners: Vec<&(String, String)> = input.seed_owners.iter().collect();
+    owners.sort_by(|left, right| left.0.cmp(&right.0));
+    for (track_code, owner_id) in owners {
+        let _ = writeln!(canonical, "R1:{track_code}:{owner_id}");
+    }
+    let mut ordered: Vec<&PlanAssignmentRecord> = input.assignments.iter().collect();
+    ordered.sort_by(|left, right| {
+        left.round
+            .cmp(&right.round)
+            .then_with(|| left.track_code.cmp(&right.track_code))
+            .then_with(|| left.participant_id.cmp(&right.participant_id))
+    });
+    for assignment in ordered {
+        let round_no = assignment.round + 2;
+        let _ = writeln!(
+            canonical,
+            "R{round_no}:{}:{}",
+            assignment.track_code, assignment.participant_id
+        );
+    }
+    sha256_hex(canonical.as_bytes())[..32].to_string()
 }
 
 #[cfg(test)]

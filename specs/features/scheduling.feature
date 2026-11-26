@@ -14,10 +14,12 @@ Feature: Classic anonymous scheduling
     And no assignment gives a participant their own track
     And no participant receives the same track twice
 
-  Scenario: A default classic event runs N-1 rounds
+  Scenario: A default classic event runs N total rounds
     Given a locked roster of 6 participants
     When the host creates a default classic event
-    Then the schedule has 5 swap rounds
+    Then Round 1 is the seed round
+    And the schedule has 5 exchange rounds
+    And the event has 6 total rounds
     And the planner reports that each track can reach every eligible participant
 
   Scenario: The planner warns about overcrowding

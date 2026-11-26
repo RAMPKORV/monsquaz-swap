@@ -15,6 +15,7 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
 sha2 = "0.10"
+getrandom = "0.3"
 swap-core = { path = "../swap-core" }
 swap-db = { path = "../swap-db" }
 swap-discord = { path = "../swap-discord", default-features = false }

@@ -19,17 +19,19 @@ All timestamps are UTC in the database and local in the UI.
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
 | Mode | Classic for 12 or fewer participants; async for more | Classic, Async | Yes |
-| Classic length | `N-1` swap rounds | Any number from 1 to `N-1` | Yes |
+| Classic length | `N` total rounds: R1 seed and R2..RN exchanges | Any number from 2 to `N` | Yes |
 | Overcrowding warning | On above 12 participants | On, off | No |
+| Seed deadline | 7 days | 1–30 days | Yes |
 | Async completeness | Exposure: every participant receives every planned track | Exposure; capped rounds with coverage report; no completeness promise | Yes |
 | Async length | `N-1` for 12 or fewer; 6–8 rounds above 12 | Host can choose full exposure; the planner shows the projected duration | Yes |
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
-| Classic round deadline | 24 hours | 12–336 hours | Yes |
+| Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
 | Round/phase dates | Host-set | Calendar windows; host can shift | No |
 
 Rules:
 
-- Classic `N-1` means every participant can touch every other track.
+- Classic `N` total rounds means every participant can touch every other track:
+  R1 seed and N-1 exchanges.
 - Above 12 participants, each track can have many contributors. The planner
   must show the contributor count and the event duration.
 - The host can cap the length. A capped event does not touch every track with
@@ -199,8 +201,8 @@ Rules:
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
 | Join mode | Self-serve + join by submission | Self-serve; role-gated; manual | Yes |
-| Join by submission after R1 | Off | Off; host-opened window | Yes |
-| Late seed cutoff | Host lock | Host lock; fixed deadline | No |
+| Join by submission after R1 | Held for host approval | Held until the host closes Round 1; refuse | No |
+| Late seed cutoff | Seed deadline | Seed deadline; host close | No |
 | Late seed integration | Host choice; if allowed in a capped event, extra quota + minimum editor quota | Extra quota + minimum; no late seeds; fill-in only | Yes |
 | Unseeded signup | Auto fill-in | Fill-in; waitlist; remove; spectator (not in v1) | Yes |
 | Leave | Allowed | Allowed; before lock only; host approval | Yes |
@@ -269,10 +271,10 @@ These settings stay changeable with an audit entry:
 
 | Preset | Mode | Length | Groups | Deadline | Release | Notes |
 |---|---|---|---|---|---|---|
-| Classic Monsquaz | Classic | N-1 | 1 for ≤9; lookup above | 24h | One/day | Hidden schedule, full anonymity |
-| Fast Async | Async | N-1 | Lookup | 24h from claim | One/day | Per-person queue, claim-first |
-| Large Group Swap | Classic | N-1 | Lookup, K≈T/4 | 24h | One/day | Participants rotate; cross-pollination |
-| Casual | Classic | 6–8 | 1–2 | 48h | One/day | Shorter, relaxed |
+| Classic Monsquaz | Classic | N (R1 + N-1) | 1 for ≤9; lookup above | 24h; final 48h | One/day | Hidden schedule, full anonymity |
+| Fast Async | Async | N-1 handoffs | Lookup | 24h from claim | One/day | Per-person queue, claim-first |
+| Large Group Swap | Classic | N (R1 + N-1) | Lookup, K≈T/4 | 24h; final 48h | One/day | Participants rotate; cross-pollination |
+| Casual | Classic | 8 total | 1–2 | 48h | One/day | Shorter, relaxed |
 | Custom | — | — | — | — | — | No preset |
 
 The host can save a custom preset. The wizard must show a reset-to-recommended

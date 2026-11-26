@@ -15,7 +15,7 @@ disagree, stop and decide which is wrong; record the decision.
 | **Seed** | The participant's initial track submission (Round 1 / version 1). |
 | **Track / lineage** | The evolving file, identified by an opaque code; versions are append-only. |
 | **Owner** | The participant who seeded the track. Never assigned their own track. |
-| **Round** | In classic mode, one synchronized handoff cycle. `R1` is the seed; `R2..RN` are swaps. In file names, `R#` is the **track version** (R1 = seed, R2 = first edit). |
+| **Round** | In classic mode, one synchronized handoff cycle. `R1` is the seed round; `R2..RN` are exchange rounds. A file version is `v1..vN`, where `v1` is the seed. `R#` never means a file version. |
 | **Phase** | A run of rounds with fixed group membership/pools. |
 | **Handoff / assignment** | One participant's turn with one track. |
 | **Offer** | A claim-first notification with a track code and deadline; no file yet. |
@@ -97,9 +97,10 @@ OFFERED ──claim──► CLAIMED/WORKING ──submit──► SUBMITTED
 EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 ```
 
-- Claim timeout default **12h** (host-set). On expiry: return to pool; after two
-  expiries, auto-pause + host alert.
-- Claim starts the async deadline. Classic has one global round deadline.
+- Async claim timeout default **24h** (host-set). On expiry: return to pool; a
+  cooldown, then a re-offer; a second expiry pauses the participant.
+- Classic has one shared deadline for each round. The offer expires at that
+  deadline and a claim uses the same deadline. The seed deadline is separate.
 - A claimed track may be skipped: the track returns unchanged, the pair is
   recorded as seen, and the participant can leave.
 - An unclaimed offer is not "seen"; the track can be offered to someone else or
@@ -111,9 +112,10 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 
 ### Classic
 
-- Default: `N-1` swap rounds after the seed, so every participant can touch
-  every other track. The planner warns above 12 participants that each track
-  will have many contributors and the event will be long; the host can cap.
+- Default: `N` total rounds for `N` seeded participants. R1 is the seed round;
+  R2..RN are exchange rounds. Every participant can touch every other track.
+  The planner warns above 12 participants that each track will have many
+  contributors and the event will be long; the host can cap.
 - Construction: a randomized partial Latin rectangle over tracks × participants,
   built row by row with a perfect matching. Invariants: no own track, no repeat,
   one track per person per round, one person per track per round.
@@ -211,10 +213,11 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 ## Files and naming
 
 - Track IDs are opaque codes (e.g. `S7F3A`), not owner-derived or submission
-  order. `R#` is the track version (R1 seed, R2 first edit, ...).
-- Host storage is detailed: `R4.S7F3A.alice.it` (version, code, holder). Sent
+  order. `v#` is the track version (v1 seed, v2 first edit, ...). `R#` is only a
+  round number.
+- Host storage is detailed: `v4.S7F3A.alice.it` (version, code, holder). Sent
   to a participant: `S7F3A.it` only — no version, holder, or original name.
-- Canonical store: a round view (`Round1/`, `Round2/`) plus a track history
+- Canonical store: a round view (`R1/`, `R2/`) plus a track history
   (`Tracks/<code>/`); SQLite records the mapping. Hardlinks avoid duplicate
   bytes.
 - Default allowlist: tracker modules + audio + zip, editable per event.

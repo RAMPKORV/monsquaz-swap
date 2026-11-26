@@ -136,11 +136,11 @@ const defaultActivity: ActivityEntry[] = [
 
 function defaultFacts() {
   return [
-    { label: "Mode", value: "Classic, 11 rounds" },
+    { label: "Mode", value: "Classic, 12 rounds" },
     { label: "People", value: "12 active, including 2 fill-ins" },
     { label: "Tracks", value: "12 anonymous tracks" },
-    { label: "Round length", value: "24 hours" },
-    { label: "Claim window", value: "12 hours" },
+    { label: "Seed round", value: "7 days (Round 1)" },
+    { label: "Exchange round", value: "24 hours (final 48 hours)" },
     { label: "Next release", value: "Fri 27 Nov, 20:00 CET" },
     { label: "Timezone", value: "Europe/Stockholm" },
   ];
@@ -159,7 +159,12 @@ function baseMission(): MissionControl {
       fillIns: 2,
       tracks: 12,
       round: 3,
-      rounds: 11,
+      rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: false,
+      seedDeadlineAt: null,
+      lateSeedCount: 0,
+      packId: "pack-demo",
     },
     bot: {
       status: "Online",
@@ -184,6 +189,7 @@ function baseMission(): MissionControl {
       formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
       maxFileMib: 20,
     },
+    lateSeeds: [],
   };
 }
 
@@ -207,26 +213,93 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
         maxFileMib: 20,
       },
+      lateSeeds: [],
     };
   }
 
   const mission = baseMission();
 
+  if (scenario === "seed-setup") {
+    mission.event = {
+      ...mission.event!,
+      stage: "Setup",
+      participants: 0,
+      seeded: 0,
+      fillIns: 0,
+      round: 0,
+      rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: false,
+      seedDeadlineAt: null,
+      packId: null,
+    };
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Open Round 1",
+      detail:
+        "Upload the host pack and set the seed deadline. Round 1 is the seed round.",
+      actionLabel: "Set up Round 1",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.timeline = [];
+    mission.decisions = [];
+    mission.activity = [];
+    return mission;
+  }
+
+  if (scenario === "join-late") {
+    mission.event = {
+      ...mission.event!,
+      stage: "Join phase",
+      participants: 12,
+      seeded: 6,
+      fillIns: 0,
+      round: 1,
+      rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: true,
+      seedDeadlineAt: Math.floor(Date.now() / 1000) + 4 * 24 * 60 * 60,
+    };
+    mission.lateSeeds = [
+      {
+        id: "late-seed-1",
+        displayName: "Tove",
+        trackCode: "S9X2Q",
+        createdAt: Math.floor(Date.now() / 1000) - 600,
+      },
+    ];
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "One late seed waits",
+      detail:
+        "Tove sent a seed after the deadline. Accept or decline it before you close Round 1.",
+      actionLabel: "Set up Round 1",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    return mission;
+  }
+
   if (scenario === "join-phase") {
     mission.event = {
       ...mission.event!,
       stage: "Join phase",
-      participants: 9,
+      participants: 12,
       seeded: 6,
       fillIns: 0,
-      round: 0,
+      round: 1,
+      rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: true,
+      seedDeadlineAt: Math.floor(Date.now() / 1000) + 4 * 24 * 60 * 60,
     };
     mission.nextAction = {
       eyebrow: "Next action",
-      title: "Invite six more people",
+      title: "Six seeds are in",
       detail:
-        "Share the join command. Each person sends one seed file in a direct message. Lock the roster when the last seed arrives.",
-      actionLabel: "Open event setup",
+        "The pack is delivered. Round 1 closes at the deadline, or when you close it and lock the roster.",
+      actionLabel: "Set up Round 1",
       secondaryLabel: null,
       tone: "attention",
     };
@@ -440,6 +513,11 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       tracks: 20,
       round: 9,
       rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: false,
+      seedDeadlineAt: null,
+      lateSeedCount: 0,
+      packId: "pack-demo",
     };
     mission.bot = {
       status: "Online",
@@ -522,8 +600,8 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         value: "40 active, 8 fill-ins, 3 paused for travel",
       },
       { label: "Tracks", value: "20 anonymous tracks" },
-      { label: "Round length", value: "36 hours" },
-      { label: "Claim window", value: "18 hours" },
+      { label: "Seed round", value: "7 days (Round 1)" },
+      { label: "Exchange round", value: "36 hours (final 48 hours)" },
       { label: "Next release", value: "Fri 27 Nov, 20:00 CET" },
       {
         label: "Timezone",
@@ -811,7 +889,12 @@ function eventSummary(
     fillIns: Math.min(2, participants),
     tracks,
     round: 0,
-    rounds,
+    rounds: rounds + 1,
+    exchangeRounds: rounds,
+    seedRoundOpen: false,
+    seedDeadlineAt: null,
+    lateSeedCount: 0,
+    packId: "pack-demo",
   };
 }
 
@@ -1240,10 +1323,13 @@ export function demoPlan(scenario: Scenario): PlanData {
       version: 0,
       commitment: "",
       rounds: 0,
+      exchangeRounds: 0,
+      totalRounds: 0,
       tracks: 0,
       participants: 0,
       committed: false,
       matrix: [],
+      seedOwners: [],
       graph: { round: 0, edges: [] },
       groups: [],
       phases: [],
@@ -1267,10 +1353,18 @@ export function demoPlan(scenario: Scenario): PlanData {
       version: 1,
       commitment: "demo-commit-1",
       rounds,
+      exchangeRounds: rounds,
+      totalRounds: rounds + 1,
       tracks: count,
       participants: count,
       committed: false,
       matrix: groupPlan.matrix,
+      seedOwners: groupPlan.matrix.map((track) => ({
+        trackCode: track.trackCode,
+        ownerId: track.ownerId,
+        ownerName:
+          names[Number(track.ownerId.replace("user-", "")) % names.length],
+      })),
       graph: buildGraph(groupPlan.matrix, 2),
       groups: plannerGroups(count),
       phases: groupPlan.phases,
@@ -1340,10 +1434,18 @@ export function demoPlan(scenario: Scenario): PlanData {
     version: 1,
     commitment: "demo-commit-1",
     rounds,
+    exchangeRounds: rounds,
+    totalRounds: rounds + 1,
     tracks: count,
     participants: count,
     committed: false,
     matrix: groupPlan.matrix,
+    seedOwners: groupPlan.matrix.map((track) => ({
+      trackCode: track.trackCode,
+      ownerId: track.ownerId,
+      ownerName:
+          names[Number(track.ownerId.replace("user-", "")) % names.length],
+    })),
     graph: buildGraph(groupPlan.matrix, 2),
     groups: plannerGroups(count),
     phases: groupPlan.phases,

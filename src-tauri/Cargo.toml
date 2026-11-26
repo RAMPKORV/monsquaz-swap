@@ -25,6 +25,7 @@ keyring = "4"
 async-trait = "0.1"
 tauri = { version = "2.12.7", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }

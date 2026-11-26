@@ -14,8 +14,11 @@ import type {
   EventSummary,
   GuildOption,
   HostSettings,
+  LateSeed,
   MissionControl,
+  PackInfo,
   PeopleData,
+  CommitmentCheck,
   PlanData,
   PlanEditCandidate,
   RevealData,
@@ -76,6 +79,8 @@ export function initialScenario(): Scenario {
     "round-ready",
     "reveal-ready",
     "join-phase",
+    "join-late",
+    "seed-setup",
     "infeasible",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";
@@ -803,7 +808,127 @@ export async function createEvent(draft: EventDraft): Promise<EventSummary> {
       tracks: 0,
       round: 0,
       rounds: draft.rounds ?? 0,
+      exchangeRounds: draft.rounds ?? 0,
+      seedRoundOpen: false,
+      seedDeadlineAt: null,
+      lateSeedCount: 0,
+      packId: null,
     };
   }
   return invoke<EventSummary>("host_create_event", { draft });
+}
+
+export async function uploadPack(path: string): Promise<PackInfo> {
+  if (isDemoMode()) {
+    await pause(300);
+    return {
+      id: "pack-demo",
+      filename: path.split(/[\\/]/).pop() ?? "pack.zip",
+      sha256: "e3b0c44298fc1c149afbf4c8996fb924",
+      size: 12_400_000,
+      locked: false,
+    };
+  }
+  return invoke<PackInfo>("host_upload_pack", { path });
+}
+
+export async function openSeedRound(
+  deadlineAt: number,
+  channelId: string | null,
+): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(320);
+    return demoEventSummary({ seedRoundOpen: true, seedDeadlineAt: deadlineAt, round: 1 });
+  }
+  return invoke<EventSummary>("host_open_seed_round", {
+    deadlineAt,
+    channelId,
+  });
+}
+
+export async function extendSeedDeadline(deadlineAt: number): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(220);
+    return demoEventSummary({ seedRoundOpen: true, seedDeadlineAt: deadlineAt, round: 1 });
+  }
+  return invoke<EventSummary>("host_extend_seed_deadline", { deadlineAt });
+}
+
+export async function reopenSeedRound(deadlineAt: number): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(220);
+    return demoEventSummary({ seedRoundOpen: true, seedDeadlineAt: deadlineAt, round: 1 });
+  }
+  return invoke<EventSummary>("host_reopen_seed_round", { deadlineAt });
+}
+
+export async function pendingLateSeeds(): Promise<LateSeed[]> {
+  if (isDemoMode()) {
+    await pause(180);
+    return [];
+  }
+  return invoke<LateSeed[]>("host_pending_late_seeds");
+}
+
+export async function decideLateSeed(
+  id: string,
+  accept: boolean,
+  reason: string,
+): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(240);
+    return demoEventSummary({ lateSeedCount: 0 });
+  }
+  return invoke<EventSummary>("host_decide_late_seed", { id, accept, reason });
+}
+
+export async function moveRoundDeadline(
+  roundNo: number,
+  deadlineAt: number,
+  reason: string,
+): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(240);
+    return demoEventSummary({ round: roundNo });
+  }
+  return invoke<EventSummary>("host_move_round_deadline", {
+    roundNo,
+    deadlineAt,
+    reason,
+  });
+}
+
+export async function verifyCommitment(): Promise<CommitmentCheck> {
+  if (isDemoMode()) {
+    await pause(160);
+    return {
+      recipe: "v2",
+      commitment: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      verified: true,
+    };
+  }
+  return invoke<CommitmentCheck>("host_verify_commitment");
+}
+
+function demoEventSummary(
+  overrides: Partial<EventSummary> = {},
+): EventSummary {
+  return {
+    id: "preview-event",
+    name: "Monsquaz Swap",
+    mode: "Classic",
+    stage: "Join phase",
+    participants: 12,
+    seeded: 9,
+    fillIns: 0,
+    tracks: 9,
+    round: 1,
+    rounds: 12,
+    exchangeRounds: 11,
+    seedRoundOpen: true,
+    seedDeadlineAt: null,
+    lateSeedCount: 0,
+    packId: "pack-demo",
+    ...overrides,
+  };
 }

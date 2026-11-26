@@ -3,6 +3,41 @@ Feature: Deadlines, reminders, and extensions
   A deadline is a prompt for the host.
   A deadline is not a silent auto-advance.
 
+  Scenario: One classic round has one shared deadline
+    Given the host opens an exchange round for 24 hours
+    When the round opens
+    Then every offer in the round expires at the same deadline
+    And a claim at any time before the deadline uses the same edit deadline
+    And the bot states the exact local time and the UTC time
+
+  Scenario: The final exchange round uses the final duration
+    Given the host opens the last exchange round
+    Then the round deadline is 48 hours after the open
+    And every offer in that round uses that deadline
+
+  Scenario: The host opens at most one round at a time
+    Given an open round with an active assignment
+    When the host tries to open the next round
+    Then the app refuses the open
+    And the host must resolve the active assignment first
+
+  Scenario: The host moves a whole round deadline
+    Given an open round with offered, claimed, and overdue assignments
+    And one assignment has a later individual extension
+    When the host moves the round deadline forward
+    Then every offered, claimed, and overdue assignment follows the new deadline
+    And overdue returns to claimed
+    And the individual extension is preserved
+    And the app re-arms every reminder
+    And every holder receives one message
+    And the app writes one audit entry
+
+  Scenario: A moved deadline does not reopen submitted work
+    Given a submitted assignment in the open round
+    When the host moves the round deadline
+    Then the submitted assignment stays final
+    And the host can reopen that assignment explicitly
+
   Scenario: A soft deadline does not move a track
     Given a claimed track whose deadline has passed
     When the deadline passes

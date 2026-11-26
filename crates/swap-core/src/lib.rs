@@ -31,7 +31,7 @@ pub use schedule::{
 };
 pub use state::{
     Assignment, AssignmentError, AssignmentStatus, EventState, Membership, Participant, Readiness,
-    Role, StateError, Track, TrackState,
+    Role, RoundKind, RoundStatus, StateError, Track, TrackState,
 };
 
 /// Backwards-compatible name for the ledger error.

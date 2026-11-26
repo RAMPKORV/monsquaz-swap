@@ -96,6 +96,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(setup_host::BotRuntime::new());
     #[cfg(feature = "live")]
@@ -153,6 +154,14 @@ pub fn run() {
             host::host_plan_edit_candidates,
             host::host_edit_plan_assignment,
             host::host_lock_roster,
+            host::host_upload_pack,
+            host::host_open_seed_round,
+            host::host_extend_seed_deadline,
+            host::host_reopen_seed_round,
+            host::host_pending_late_seeds,
+            host::host_decide_late_seed,
+            host::host_move_round_deadline,
+            host::host_verify_commitment,
             host::host_open_round,
             host::host_reveal,
             host::host_reveal_package,

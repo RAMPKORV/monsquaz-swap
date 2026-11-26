@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::{DateTime, Utc};
@@ -9,16 +9,19 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, State};
 
-use swap_core::{EventState, Membership, Role};
+use swap_core::{EventState, Membership, Role, RoundStatus};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeadlineRepo, EventRecord, EventRepo, MetaRepo, ParticipantRepo,
-    PlanRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeadlineRepo, EventRecord, EventRepo, LateSeedRepo, MetaRepo,
+    PackRepo, ParticipantRepo, PlanRepo, RoundRepo, TrackRepo,
 };
 use swap_engine::{
-    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
-    dispatch_async_wave, edit_plan_assignment, generate_schedule, lock_roster, open_round,
-    plan_edit_candidates, redact_track_comment, repair_group_schedule, reveal_package,
-    reveal_with_channel, set_track_title, start_async_event, start_event_with_channel,
+    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, accept_late_seed,
+    add_track_comment, create_event, dispatch_async_wave, edit_plan_assignment,
+    extend_seed_deadline, generate_schedule, lock_roster, move_round_deadline, open_round,
+    open_seed_round, pending_late_seeds, plan_edit_candidates, redact_track_comment,
+    reject_late_seed, reopen_seed_round, repair_group_schedule, reveal_package,
+    reveal_with_channel, set_track_title, start_async_event, start_event_with_channel, upload_pack,
+    verify_commitment,
 };
 
 #[derive(Debug, Serialize)]
@@ -33,6 +36,7 @@ pub struct MissionControlDto {
     timeline: Vec<TimelineStepDto>,
     facts: Vec<EventFactDto>,
     join: JoinInfoDto,
+    late_seeds: Vec<LateSeedDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +59,11 @@ pub struct EventSummaryDto {
     tracks: usize,
     round: u32,
     rounds: u32,
+    exchange_rounds: u32,
+    seed_round_open: bool,
+    seed_deadline_at: Option<i64>,
+    late_seed_count: usize,
+    pack_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,6 +78,33 @@ pub struct RosterLockDto {
 pub struct RoundOpenDto {
     round: u32,
     offers: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackDto {
+    id: String,
+    filename: String,
+    sha256: String,
+    size: u64,
+    locked: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LateSeedDto {
+    id: String,
+    display_name: String,
+    track_code: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyDto {
+    recipe: String,
+    commitment: String,
+    verified: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -403,16 +439,27 @@ pub struct PlanDataDto {
     version: u32,
     commitment: String,
     rounds: u32,
+    exchange_rounds: u32,
+    total_rounds: u32,
     tracks: usize,
     participants: usize,
     committed: bool,
     matrix: Vec<MatrixTrackDto>,
+    seed_owners: Vec<SeedOwnerDto>,
     graph: GraphDto,
     groups: Vec<PlannerGroupDto>,
     phases: Vec<PlannerPhaseDto>,
     warnings: Vec<PlannerWarningDto>,
     fun_score: Option<u32>,
     fun_guardrails: Vec<GuardrailDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SeedOwnerDto {
+    track_code: String,
+    owner_id: String,
+    owner_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -566,6 +613,14 @@ fn open_db(app: &AppHandle) -> Result<Db, String> {
     Db::open(database_path(app)?).map_err(|error| error.to_string())
 }
 
+fn open_store(app: &AppHandle) -> Result<swap_files::BlobStore, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    Ok(swap_files::BlobStore::new(directory.join("files")))
+}
+
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -597,11 +652,22 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
     let plan = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let assignments =
         AssignmentRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
-    let current_round = assignments
+    let current_exchange = assignments
         .iter()
         .map(|assignment| assignment.round + 1)
         .max()
         .unwrap_or(0);
+    let seed_round = RoundRepo::get(db.conn(), &event.id, 1).map_err(|error| error.to_string())?;
+    let seed_round_open = seed_round
+        .as_ref()
+        .is_some_and(|round| round.status == RoundStatus::Open);
+    let seed_deadline_at = seed_round.as_ref().and_then(|round| round.deadline_at);
+    let late_seed_count = LateSeedRepo::list_pending(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?
+        .len();
+    let pack_id = PackRepo::get_for_event(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?
+        .map(|pack| pack.id);
     let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
     let active = participants
         .iter()
@@ -622,11 +688,25 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
                 )
         })
         .count();
-    let rounds = plan
+    let exchange_rounds = plan
         .as_ref()
         .map(|plan| plan.rounds)
         .or(settings.rounds)
         .unwrap_or_else(|| active.saturating_sub(1) as u32);
+    let total_rounds = if exchange_rounds > 0 {
+        exchange_rounds + 1
+    } else if seed_round_open {
+        1
+    } else {
+        0
+    };
+    let round = if seed_round_open {
+        1
+    } else if current_exchange > 0 {
+        current_exchange + 1
+    } else {
+        0
+    };
     Ok(EventSummaryDto {
         id: event.id.clone(),
         name: event.name.clone(),
@@ -635,7 +715,8 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
             Mode::Async => "Async".to_string(),
         },
         stage: match event.state {
-            EventState::Draft | EventState::Signup => "Join phase",
+            EventState::Draft => "Setup",
+            EventState::Signup => "Join phase",
             EventState::ScheduleReview => "Schedule review",
             EventState::Active => "Active",
             EventState::Paused => "Paused",
@@ -646,12 +727,13 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
         seeded: tracks.len(),
         fill_ins,
         tracks: tracks.len(),
-        round: if matches!(event.state, EventState::Active | EventState::Paused) {
-            current_round
-        } else {
-            0
-        },
-        rounds,
+        round,
+        rounds: total_rounds,
+        exchange_rounds,
+        seed_round_open,
+        seed_deadline_at,
+        late_seed_count,
+        pack_id,
     })
 }
 
@@ -789,10 +871,13 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
             version: 0,
             commitment: String::new(),
             rounds: 0,
+            exchange_rounds: 0,
+            total_rounds: 0,
             tracks: 0,
             participants: 0,
             committed: false,
             matrix: Vec::new(),
+            seed_owners: Vec::new(),
             graph: GraphDto {
                 round: 0,
                 edges: Vec::new(),
@@ -813,6 +898,8 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
             version: 0,
             commitment: String::new(),
             rounds: event_rounds(db, &event)?,
+            exchange_rounds: event_rounds(db, &event)?,
+            total_rounds: event_rounds(db, &event)? + 1,
             tracks: TrackRepo::list_for_event(db.conn(), &event.id)
                 .map_err(|error| error.to_string())?
                 .len(),
@@ -821,6 +908,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
                 .len(),
             committed: false,
             matrix: Vec::new(),
+            seed_owners: Vec::new(),
             graph: GraphDto {
                 round: 0,
                 edges: Vec::new(),
@@ -907,16 +995,31 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         event.state,
         EventState::Active | EventState::Paused | EventState::Reveal | EventState::Archived
     );
+    let seed_owners = tracks
+        .iter()
+        .map(|track| SeedOwnerDto {
+            track_code: track.code.clone(),
+            owner_id: track.owner_id.clone(),
+            owner_name: participants
+                .iter()
+                .find(|participant| participant.user_id == track.owner_id)
+                .map(|participant| participant.display_name.clone())
+                .unwrap_or_else(|| track.owner_id.clone()),
+        })
+        .collect();
     Ok(PlanDataDto {
         status: if committed { "Committed" } else { "Draft" }.to_string(),
         event: Some(summary),
         version: plan.version,
         commitment: plan.commitment.clone(),
         rounds: plan.rounds,
+        exchange_rounds: plan.rounds,
+        total_rounds: plan.rounds + 1,
         tracks: tracks.len(),
         participants: participants.len(),
         committed,
         matrix,
+        seed_owners,
         graph: GraphDto { round: 0, edges },
         groups,
         phases,
@@ -1183,6 +1286,9 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
             Mode::Classic
         },
         rounds: draft.rounds,
+        seed_window_secs: 7 * 24 * 60 * 60,
+        final_round_window_secs: 48 * 60 * 60,
+        seed_min: 2,
         claim_window_secs: (draft.claim_window_hours.max(1)) * 3600,
         round_window_secs: (draft.round_window_hours.max(1)) * 3600,
         max_file_bytes: swap_files::DEFAULT_MAX_SIZE,
@@ -1303,6 +1409,139 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
 }
 
 #[tauri::command]
+pub fn host_upload_pack(app: AppHandle, path: String) -> Result<PackDto, String> {
+    let db = open_db(&app)?;
+    let store = open_store(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let source = Path::new(&path);
+    let filename = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "the pack file has no name".to_string())?;
+    let bytes = fs::read(source).map_err(|error| error.to_string())?;
+    let outcome = upload_pack(&db, &store, &event.id, filename, &bytes, now_secs())
+        .map_err(|error| error.to_string())?;
+    Ok(PackDto {
+        id: outcome.id,
+        filename: filename.to_string(),
+        sha256: outcome.sha256,
+        size: outcome.size,
+        locked: false,
+    })
+}
+
+#[tauri::command]
+pub fn host_open_seed_round(
+    app: AppHandle,
+    deadline_at: i64,
+    channel_id: Option<String>,
+) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    open_seed_round(
+        &db,
+        &event.id,
+        deadline_at,
+        channel_id.as_deref(),
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
+}
+
+#[tauri::command]
+pub fn host_extend_seed_deadline(
+    app: AppHandle,
+    deadline_at: i64,
+) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    extend_seed_deadline(&db, &event.id, deadline_at, now_secs())
+        .map_err(|error| error.to_string())?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
+}
+
+#[tauri::command]
+pub fn host_reopen_seed_round(app: AppHandle, deadline_at: i64) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    reopen_seed_round(&db, &event.id, deadline_at, now_secs())
+        .map_err(|error| error.to_string())?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
+}
+
+#[tauri::command]
+pub fn host_pending_late_seeds(app: AppHandle) -> Result<Vec<LateSeedDto>, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    Ok(pending_late_seeds(&db, &event.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|seed| LateSeedDto {
+            id: seed.id,
+            display_name: seed.display_name,
+            track_code: seed.track_code,
+            created_at: seed.created_at,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn host_decide_late_seed(
+    app: AppHandle,
+    id: String,
+    accept: bool,
+    reason: Option<String>,
+) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    if accept {
+        accept_late_seed(&db, &event.id, &id, now_secs()).map_err(|error| error.to_string())?;
+    } else {
+        reject_late_seed(
+            &db,
+            &event.id,
+            &id,
+            reason.as_deref().unwrap_or("not a fit for this event"),
+            now_secs(),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
+}
+
+#[tauri::command]
+pub fn host_move_round_deadline(
+    app: AppHandle,
+    round_no: u32,
+    deadline_at: i64,
+    reason: String,
+) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    move_round_deadline(&db, &event.id, round_no, deadline_at, &reason, now_secs())
+        .map_err(|error| error.to_string())?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
+}
+
+#[tauri::command]
+pub fn host_verify_commitment(app: AppHandle) -> Result<VerifyDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let outcome = verify_commitment(&db, &event.id).map_err(|error| error.to_string())?;
+    Ok(VerifyDto {
+        recipe: outcome.recipe,
+        commitment: outcome.commitment,
+        verified: outcome.verified,
+    })
+}
+
+#[tauri::command]
 pub fn host_lock_roster(app: AppHandle) -> Result<RosterLockDto, String> {
     let db = open_db(&app)?;
     lock_host_roster(&db)
@@ -1312,20 +1551,6 @@ fn lock_host_roster(db: &Db) -> Result<RosterLockDto, String> {
     let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
     let outcome = lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
-    AuditRepo::insert(
-        db.conn(),
-        &event.id,
-        now,
-        "Host",
-        "Roster locked",
-        None,
-        &serde_json::json!({
-            "active": outcome.active,
-            "fillIns": outcome.fill_ins,
-        })
-        .to_string(),
-    )
-    .map_err(|error| error.to_string())?;
     Ok(RosterLockDto {
         active: outcome.active,
         fill_ins: outcome.fill_ins,
@@ -1340,16 +1565,6 @@ pub fn host_open_round(app: AppHandle, round: u32) -> Result<RoundOpenDto, Strin
     let outcome = open_round(&db, &event.id, round, now).map_err(|error| error.to_string())?;
     #[cfg(feature = "live")]
     app.state::<crate::live_runtime::LiveRuntime>().wake();
-    AuditRepo::insert(
-        db.conn(),
-        &event.id,
-        now,
-        "Host",
-        "Round opened",
-        Some(&format!("Round {}", round + 1)),
-        &serde_json::json!({ "offers": outcome.offers }).to_string(),
-    )
-    .map_err(|error| error.to_string())?;
     Ok(RoundOpenDto {
         round,
         offers: outcome.offers,
@@ -1784,6 +1999,7 @@ fn mission_control_with_health(
                     .collect(),
                 max_file_mib: swap_files::DEFAULT_MAX_SIZE / (1024 * 1024),
             },
+            late_seeds: Vec::new(),
         });
     };
     let event_summary = summary(db, &event)?;
@@ -1877,15 +2093,30 @@ fn mission_control_with_health(
         AssignmentRepo::list_active(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let next_action = if matches!(event.state, EventState::Reveal | EventState::Archived) {
         None
+    } else if matches!(event.state, EventState::Draft) {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Open Round 1".to_string(),
+            detail: "Upload the host pack and set the seed deadline. Round 1 is the seed round."
+                .to_string(),
+            action_label: "Set up Round 1".to_string(),
+            secondary_label: None,
+            tone: "attention".to_string(),
+        })
     } else if matches!(event.state, EventState::Active) {
         if !active_assignments.is_empty() {
             None
         } else if event_summary.round < event_summary.rounds {
+            let next_round = if event_summary.round == 0 {
+                2
+            } else {
+                event_summary.round + 1
+            };
             Some(NextActionDto {
                 eyebrow: "Next action".to_string(),
-                title: format!("Open round {}", event_summary.round + 1),
+                title: format!("Open round {next_round}"),
                 detail: "Every track in the current round is resolved. Open the next round when you are ready.".to_string(),
-                action_label: format!("Open Round {}", event_summary.round + 1),
+                action_label: format!("Open Round {next_round}"),
                 secondary_label: None,
                 tone: "attention".to_string(),
             })
@@ -1937,7 +2168,7 @@ fn mission_control_with_health(
             eyebrow: "Next action".to_string(),
             title: "Invite the first people".to_string(),
             detail: "The event exists. Share the join instructions so people can send one seed track to the bot.".to_string(),
-            action_label: "Open event setup".to_string(),
+            action_label: "Set up Round 1".to_string(),
             secondary_label: None,
             tone: "info".to_string(),
         })
@@ -2068,18 +2299,32 @@ fn mission_control_with_health(
             value: format!("{} anonymous tracks", event_summary.tracks),
         },
         EventFactDto {
-            label: "Round length".to_string(),
-            value: format!("{} hours", settings_json.round_window_secs / 3600),
+            label: "Seed round".to_string(),
+            value: format!("{} days (Round 1)", settings_json.seed_window_secs / 86_400),
         },
         EventFactDto {
-            label: "Claim window".to_string(),
-            value: format!("{} hours", settings_json.claim_window_secs / 3600),
+            label: "Exchange round".to_string(),
+            value: format!(
+                "{} hours (final {} hours)",
+                settings_json.round_window_secs / 3600,
+                settings_json.final_round_window_secs / 3600
+            ),
         },
         EventFactDto {
             label: "Timezone".to_string(),
             value: settings.timezone.clone(),
         },
     ];
+    let late_seeds = pending_late_seeds(db, &event.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|seed| LateSeedDto {
+            id: seed.id,
+            display_name: seed.display_name,
+            track_code: seed.track_code,
+            created_at: seed.created_at,
+        })
+        .collect();
     Ok(MissionControlDto {
         first_run: false,
         event: Some(event_summary),
@@ -2093,6 +2338,7 @@ fn mission_control_with_health(
             formats: settings_json.allowed_extensions.clone(),
             max_file_mib: settings_json.max_file_bytes / (1024 * 1024),
         },
+        late_seeds,
     })
 }
 
@@ -2310,6 +2556,7 @@ fn format_local_time(seconds: i64, timezone: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use swap_db::PackRecord;
 
     #[test]
     fn the_default_settings_are_valid() {
@@ -2413,7 +2660,41 @@ mod tests {
         (db, directory)
     }
 
+    fn ensure_seed_round(db: &Db, event_id: &str) {
+        let Ok(event) = EventRepo::get(db.conn(), event_id) else {
+            return;
+        };
+        let Some(event) = event else {
+            return;
+        };
+        if event.state != EventState::Draft {
+            return;
+        }
+        if PackRepo::get_for_event(db.conn(), event_id)
+            .unwrap()
+            .is_none()
+        {
+            PackRepo::insert(
+                db.conn(),
+                &PackRecord {
+                    id: "pack-test".to_string(),
+                    event_id: event_id.to_string(),
+                    filename: "pack.zip".to_string(),
+                    sha256: swap_files::sha256_hex(b"test-pack"),
+                    size: 9,
+                    storage_path: "blobs/test-pack".to_string(),
+                    created_at: 100,
+                    locked_at: None,
+                },
+            )
+            .unwrap();
+        }
+        let now = now_secs();
+        open_seed_round(db, event_id, now + 7 * 24 * 60 * 60, None, now).unwrap();
+    }
+
     fn seed_person(db: &Db, event_id: &str, id: &str, name: &str) {
+        ensure_seed_round(db, event_id);
         ParticipantRepo::upsert(
             db.conn(),
             &swap_db::ParticipantRecord {
@@ -2433,6 +2714,7 @@ mod tests {
     }
 
     fn seed_track(db: &Db, event_id: &str, code: &str, owner: &str) {
+        ensure_seed_round(db, event_id);
         TrackRepo::insert(
             db.conn(),
             &swap_db::TrackRecord {
@@ -2458,7 +2740,7 @@ mod tests {
         };
         let created = create_host_event(&db, draft).unwrap();
         assert_eq!(created.name, "Test Rotation");
-        assert_eq!(created.rounds, 2);
+        assert_eq!(created.rounds, 3);
 
         let setup = setup_data(&db).unwrap();
         assert!(!setup.first_run);
@@ -2753,7 +3035,7 @@ mod tests {
         assert_eq!(mission.facts.len(), 6);
         assert_eq!(
             mission.next_action.as_ref().unwrap().action_label,
-            "Open event setup"
+            "Set up Round 1"
         );
 
         let entries = audit_log(&db, &SettingsDto::default()).unwrap();
@@ -2869,10 +3151,11 @@ mod tests {
         }
 
         let entries = audit_log(&db, &SettingsDto::default()).unwrap();
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.len(), 4);
         assert_eq!(entries[0].action, "Schedule generated");
         assert_eq!(entries[0].subject, "Plan v1");
-        assert_eq!(entries[1].action, "Roster locked");
+        assert_eq!(entries[1].action, "Seed round closed and roster locked");
+        assert_eq!(entries[2].action, "Seed round opened");
 
         let again = generate_host_plan(&db).unwrap();
         assert_eq!(again.status, "Draft");
@@ -2888,7 +3171,7 @@ mod tests {
         let mission = mission_control(&db, &SettingsDto::default()).unwrap();
         assert_eq!(
             mission.next_action.as_ref().unwrap().action_label,
-            "Open Round 1"
+            "Open Round 2"
         );
         assert_eq!(mission.event.as_ref().unwrap().stage, "Active");
         assert_eq!(mission.event.as_ref().unwrap().round, 0);
@@ -2897,7 +3180,7 @@ mod tests {
         open_round(&db, &event.id, 0, now_secs()).unwrap();
         let mission = mission_control(&db, &SettingsDto::default()).unwrap();
         assert!(mission.next_action.is_none());
-        assert_eq!(mission.event.as_ref().unwrap().round, 1);
+        assert_eq!(mission.event.as_ref().unwrap().round, 2);
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

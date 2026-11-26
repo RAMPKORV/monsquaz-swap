@@ -22,6 +22,8 @@ export type Scenario =
   | "round-ready"
   | "reveal-ready"
   | "join-phase"
+  | "join-late"
+  | "seed-setup"
   | "infeasible";
 
 export type MissionControl = {
@@ -34,6 +36,7 @@ export type MissionControl = {
   timeline: TimelineStep[];
   facts: EventFact[];
   join: JoinInfo;
+  lateSeeds: LateSeed[];
 };
 
 export type JoinInfo = {
@@ -45,13 +48,39 @@ export type EventSummary = {
   id: string;
   name: string;
   mode: "Classic" | "Async";
-  stage: "Join phase" | "Schedule review" | "Active" | "Paused" | "Reveal";
+  stage: "Setup" | "Join phase" | "Schedule review" | "Active" | "Paused" | "Reveal";
   participants: number;
   seeded: number;
   fillIns: number;
   tracks: number;
   round: number;
   rounds: number;
+  exchangeRounds: number;
+  seedRoundOpen: boolean;
+  seedDeadlineAt: number | null;
+  lateSeedCount: number;
+  packId: string | null;
+};
+
+export type PackInfo = {
+  id: string;
+  filename: string;
+  sha256: string;
+  size: number;
+  locked: boolean;
+};
+
+export type LateSeed = {
+  id: string;
+  displayName: string;
+  trackCode: string;
+  createdAt: number;
+};
+
+export type CommitmentCheck = {
+  recipe: string;
+  commitment: string;
+  verified: boolean;
 };
 
 export type BotHealth = {
@@ -314,16 +343,25 @@ export type RevealData = {
   tracks: RevealTrack[];
 };
 
+export type SeedOwner = {
+  trackCode: string;
+  ownerId: string;
+  ownerName: string;
+};
+
 export type PlanData = {
   status: "No event" | "No plan" | "Draft" | "Committed" | "Infeasible";
   event: EventSummary | null;
   version: number;
   commitment: string;
   rounds: number;
+  exchangeRounds: number;
+  totalRounds: number;
   tracks: number;
   participants: number;
   committed: boolean;
   matrix: MatrixTrack[];
+  seedOwners: SeedOwner[];
   graph: { round: number; edges: GraphEdge[] };
   groups: PlannerGroup[];
   phases: PlannerPhase[];

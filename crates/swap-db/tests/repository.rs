@@ -67,6 +67,7 @@ fn assignment(
         submitted_at: None,
         created_at: 1_000,
         updated_at: 1_000,
+        extension_secs: 0,
     }
 }
 

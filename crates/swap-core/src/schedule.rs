@@ -554,6 +554,51 @@ fn try_kuhn(
     false
 }
 
+/// Match each track to one person, excluding the `(person, track)` pairs in
+/// `forbidden`. The result is a `person` index for each track. The function is
+/// deterministic for the same input and seed. It is used by the group
+/// scheduler, where a group must avoid own tracks and every track that each
+/// person has seen.
+pub(crate) fn match_round(
+    people: usize,
+    tracks: usize,
+    forbidden: &HashSet<(usize, usize)>,
+    seed: u64,
+) -> Option<Vec<usize>> {
+    if people != tracks || tracks == 0 {
+        return None;
+    }
+    let mut rng = SplitMix64::new(seed);
+    let adjacency: Vec<Vec<usize>> = (0..tracks)
+        .map(|track| {
+            let mut eligible: Vec<usize> = (0..people)
+                .filter(|person| !forbidden.contains(&(*person, track)))
+                .collect();
+            rng.shuffle(&mut eligible);
+            eligible
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..tracks).collect();
+    rng.shuffle(&mut order);
+    let mut match_person: Vec<Option<usize>> = vec![None; people];
+    for track in order {
+        let mut visited = vec![false; people];
+        if !try_kuhn(track, &adjacency, &mut visited, &mut match_person) {
+            return None;
+        }
+    }
+    let mut person_of_track = vec![usize::MAX; tracks];
+    for (person, track) in match_person.iter().enumerate() {
+        if let Some(track) = track {
+            person_of_track[*track] = person;
+        }
+    }
+    if person_of_track.contains(&usize::MAX) {
+        return None;
+    }
+    Some(person_of_track)
+}
+
 #[derive(Debug, Clone)]
 struct FlowEdge {
     to: usize,

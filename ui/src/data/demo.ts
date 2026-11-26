@@ -704,6 +704,7 @@ import type {
   PersonRow,
   PlanData,
   PlannerGroup,
+  PlannerPhase,
   PlannerWarning,
   SetupData,
   SetupWarning,
@@ -988,41 +989,27 @@ export function demoPeople(scenario: Scenario): PeopleData {
 
 function plannerGroups(count: number): PlannerGroup[] {
   const groupCount = count >= 40 ? 4 : 2;
-  const size = Math.ceil(count / groupCount);
-  return Array.from({ length: groupCount }, (_, groupIndex) => ({
-    name: String.fromCharCode(65 + groupIndex),
-    size: Math.min(size, count - groupIndex * size),
-    tracks: Math.min(size, count - groupIndex * size),
-    participants: Array.from(
-      { length: Math.min(size, count - groupIndex * size) },
-      (_, personIndex) => names[(groupIndex * size + personIndex) % names.length]!,
-    ),
-  }));
-}
-
-function seededOrder(count: number, seed: number): number[] {
-  let state = seed >>> 0;
-  const random = () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let value = state;
-    value = Math.imul(value ^ (value >>> 15), value | 1);
-    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-  const order = Array.from({ length: count }, (_, index) => index);
-  for (let index = count - 1; index > 0; index -= 1) {
-    const other = Math.floor(random() * (index + 1));
-    [order[index], order[other]] = [order[other]!, order[index]!];
-  }
-  return order;
-}
-
-function planTrackOrder(count: number): number[] {
-  return seededOrder(count, 0x5eed1234);
-}
-
-function planRoundOffsets(count: number): number[] {
-  return seededOrder(count - 1, 0x0badf00d).map((index) => index + 1);
+  const sizePerGroup = Math.ceil(count / groupCount);
+  return Array.from({ length: groupCount }, (_, groupIndex) => {
+    const groupSize = Math.min(
+      sizePerGroup,
+      count - groupIndex * sizePerGroup,
+    );
+    return {
+      name: String.fromCharCode(65 + groupIndex),
+      size: groupSize,
+      tracks: groupSize,
+      trackCodes: trackCodes.slice(
+        groupIndex * sizePerGroup,
+        groupIndex * sizePerGroup + groupSize,
+      ),
+      participants: Array.from(
+        { length: groupSize },
+        (_, personIndex) =>
+          names[(groupIndex * sizePerGroup + personIndex) % names.length]!,
+      ),
+    };
+  });
 }
 
 export function demoOwnerId(trackCode: string): string | null {
@@ -1030,42 +1017,209 @@ export function demoOwnerId(trackCode: string): string | null {
   return index === -1 ? null : `user-${index.toString().padStart(2, "0")}`;
 }
 
-function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
-  const groupCount = count >= 40 ? 4 : 2;
-  const groupSize = Math.ceil(count / groupCount);
-  const trackOrder = planTrackOrder(count);
-  const offsets = planRoundOffsets(count);
-  return trackOrder.map((trackIndex, position) => ({
-    trackCode: trackCodes[trackIndex % trackCodes.length]!,
-    ownerId: `user-${trackIndex.toString().padStart(2, "0")}`,
-    ownerGroup: String.fromCharCode(65 + Math.floor(trackIndex / groupSize)),
+function matchRound(
+  people: number[],
+  tracks: number[],
+  seen: Set<number>[],
+  salt: number,
+): Map<number, number> | null {
+  if (people.length !== tracks.length || people.length === 0) {
+    return null;
+  }
+  const adjacency = tracks.map((track) => {
+    const eligible = people.filter(
+      (person) => person !== track && !seen[person]!.has(track),
+    );
+    if (eligible.length === 0) {
+      return eligible;
+    }
+    const shift = salt % eligible.length;
+    return [...eligible.slice(shift), ...eligible.slice(0, shift)];
+  });
+  const order = Array.from({ length: tracks.length }, (_, index) => index);
+  const shift = salt % order.length;
+  const trackOrder = [...order.slice(shift), ...order.slice(0, shift)];
+  const personTrack = new Map<number, number>();
+  const trackPerson = new Map<number, number>();
+  const assign = (trackPosition: number, visited: Set<number>): boolean => {
+    for (const person of adjacency[trackPosition]!) {
+      if (visited.has(person)) {
+        continue;
+      }
+      visited.add(person);
+      const current = personTrack.get(person);
+      if (current === undefined || assign(current, visited)) {
+        personTrack.set(person, trackPosition);
+        trackPerson.set(trackPosition, person);
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const trackPosition of trackOrder) {
+    if (!assign(trackPosition, new Set())) {
+      return null;
+    }
+  }
+  const result = new Map<number, number>();
+  for (const [trackPosition, person] of trackPerson) {
+    result.set(tracks[trackPosition]!, person);
+  }
+  return result;
+}
+
+function buildGroupPlan(
+  count: number,
+  rounds: number,
+): { matrix: PlanData["matrix"]; phases: PlannerPhase[] } {
+  const groups = plannerGroups(count);
+  const baseGroups: number[][] = [];
+  let cursor = 0;
+  for (const group of groups) {
+    baseGroups.push(
+      Array.from({ length: group.size }, (_, index) => cursor + index),
+    );
+    cursor += group.size;
+  }
+  const groupOf = Array.from({ length: count }, (_, person) =>
+    baseGroups.findIndex((members) => members.includes(person)),
+  );
+  const groupTracks = baseGroups.map((members) => members.slice());
+  const cadence = Math.max(1, Math.round(rounds / 4));
+  const phaseCount = Math.ceil(rounds / cadence);
+  const seen = Array.from({ length: count }, () => new Set<number>());
+  const byRound: Array<Map<number, number>> = Array.from(
+    { length: rounds },
+    () => new Map<number, number>(),
+  );
+  const phases: PlannerPhase[] = [];
+
+  for (let phase = 0; phase < phaseCount; phase += 1) {
+    const startRound = phase * cadence;
+    const phaseRounds = Math.min(cadence, rounds - startRound);
+    const localRounds: Array<Map<number, number>> = Array.from(
+      { length: phaseRounds },
+      () => new Map<number, number>(),
+    );
+    const localSeen = seen.map((set) => new Set(set));
+    let localOk = true;
+    for (let group = 0; group < baseGroups.length && localOk; group += 1) {
+      const source =
+        (group + baseGroups.length - (phase % baseGroups.length)) %
+        baseGroups.length;
+      const people = baseGroups[source]!;
+      const tracks = groupTracks[group]!;
+      for (let round = 0; round < phaseRounds; round += 1) {
+        const matched = matchRound(
+          people,
+          tracks,
+          localSeen,
+          phase * 1000 + group * 100 + round,
+        );
+        if (!matched) {
+          localOk = false;
+          break;
+        }
+        for (const [track, person] of matched) {
+          localRounds[round]!.set(track, person);
+          localSeen[person]!.add(track);
+        }
+      }
+    }
+    if (localOk) {
+      localRounds.forEach((matched, round) => {
+        for (const [track, person] of matched) {
+          byRound[startRound + round]!.set(track, person);
+        }
+      });
+      seen.splice(0, seen.length, ...localSeen);
+      phases.push({
+        index: phase,
+        startRound,
+        rounds: phaseRounds,
+        globalPool: false,
+      });
+      continue;
+    }
+
+    const globalSeen = seen.map((set) => new Set(set));
+    const globalAssignments: Array<Map<number, number>> = [];
+    let globalOk = true;
+    for (let round = 0; round < phaseRounds; round += 1) {
+      const people = Array.from({ length: count }, (_, index) => index);
+      const tracks = Array.from({ length: count }, (_, index) => index);
+      const matched = matchRound(
+        people,
+        tracks,
+        globalSeen,
+        phase * 1000 + 777 + round,
+      );
+      if (!matched) {
+        globalOk = false;
+        break;
+      }
+      globalAssignments.push(matched);
+      for (const [track, person] of matched) {
+        globalSeen[person]!.add(track);
+      }
+    }
+    if (!globalOk) {
+      // The demo sizes are feasible. Keep the renderer alive if a future
+      // change makes one infeasible.
+      globalAssignments.length = 0;
+      for (let round = 0; round < phaseRounds; round += 1) {
+        const matched = matchRound(
+          Array.from({ length: count }, (_, index) => index),
+          Array.from({ length: count }, (_, index) => index),
+          Array.from({ length: count }, () => new Set<number>()),
+          phase * 1000 + round,
+        );
+        if (matched) {
+          globalAssignments.push(matched);
+        }
+      }
+    }
+    globalAssignments.forEach((matched, index) => {
+      for (const [track, person] of matched) {
+        byRound[startRound + index]!.set(track, person);
+      }
+    });
+    seen.splice(0, seen.length, ...globalSeen);
+    phases.push({
+      index: phase,
+      startRound,
+      rounds: phaseRounds,
+      globalPool: true,
+    });
+  }
+
+  const matrix = Array.from({ length: count }, (_, track) => ({
+    trackCode: trackCodes[track]!,
+    ownerId: `user-${track.toString().padStart(2, "0")}`,
+    ownerGroup: String.fromCharCode(65 + groupOf[track]!),
     cells: Array.from({ length: rounds }, (_, round) => {
-      const offset = offsets[round % offsets.length]!;
-      const person = trackOrder[(position + offset) % count]!;
-      const name = names[person % names.length]!;
+      const person = byRound[round]!.get(track) ?? 0;
       return {
         round,
-        trackCode: trackCodes[trackIndex % trackCodes.length]!,
+        trackCode: trackCodes[track]!,
         participantId: `user-${person.toString().padStart(2, "0")}`,
-        participantName: `${name} ${person + 1}`,
+        participantName: names[person]!,
       };
     }),
   }));
+  return { matrix, phases };
 }
 
-function buildGraph(count: number, round: number): PlanData["graph"] {
-  const trackOrder = planTrackOrder(count);
-  const offsets = planRoundOffsets(count);
+function buildGraph(
+  matrix: PlanData["matrix"],
+  round: number,
+): PlanData["graph"] {
   return {
     round,
-    edges: trackOrder.map((trackIndex, position) => {
-      const offset = offsets[round % offsets.length]!;
-      const person = trackOrder[(position + offset) % count]!;
-      return {
-        trackCode: trackCodes[trackIndex % trackCodes.length]!,
-        participantName: `${names[person % names.length]!} ${person + 1}`,
-      };
-    }),
+    edges: matrix.map((track) => ({
+      trackCode: track.trackCode,
+      participantName: track.cells[round]?.participantName ?? "",
+    })),
   };
 }
 
@@ -1092,6 +1246,7 @@ export function demoPlan(scenario: Scenario): PlanData {
       matrix: [],
       graph: { round: 0, edges: [] },
       groups: [],
+      phases: [],
       warnings: [],
       funScore: null,
       funGuardrails: [],
@@ -1105,6 +1260,7 @@ export function demoPlan(scenario: Scenario): PlanData {
     ...(scenario === "long" ? { name: longEventName } : {}),
   };
   if (scenario === "infeasible") {
+    const groupPlan = buildGroupPlan(count, 3);
     return {
       status: "Infeasible",
       event,
@@ -1114,9 +1270,10 @@ export function demoPlan(scenario: Scenario): PlanData {
       tracks: count,
       participants: count,
       committed: false,
-      matrix: buildMatrix(count, 3),
-      graph: buildGraph(count, 2),
+      matrix: groupPlan.matrix,
+      graph: buildGraph(groupPlan.matrix, 2),
       groups: plannerGroups(count),
+      phases: groupPlan.phases,
       warnings: [
         plannerWarning(
           "plan-infeasible-1",
@@ -1138,6 +1295,7 @@ export function demoPlan(scenario: Scenario): PlanData {
       ],
     };
   }
+  const groupPlan = buildGroupPlan(count, rounds);
   const warnings = dense
     ? [
         plannerWarning(
@@ -1161,6 +1319,21 @@ export function demoPlan(scenario: Scenario): PlanData {
           "After round 8, the planner limits how many people can contribute to each track. No participant receives a track they have seen before.",
         ),
       ];
+  const fallbackPhases = groupPlan.phases.filter((phase) => phase.globalPool);
+  if (fallbackPhases.length > 0) {
+    const label =
+      fallbackPhases.length === 1
+        ? `Phase ${fallbackPhases[0]}`
+        : `Phases ${fallbackPhases.slice(0, -1).join(", ")} and ${fallbackPhases[fallbackPhases.length - 1]}`;
+    warnings.push(
+      plannerWarning(
+        "plan-group-fallback",
+        "warn",
+        "The planner used the global pool",
+        `${label} could not fill inside the groups. The phases use all tracks and preserve the seen ledger. Later phases try groups again.`,
+      ),
+    );
+  }
   return {
     status: "Draft",
     event,
@@ -1170,9 +1343,10 @@ export function demoPlan(scenario: Scenario): PlanData {
     tracks: count,
     participants: count,
     committed: false,
-    matrix: buildMatrix(count, rounds),
-    graph: buildGraph(count, 2),
+    matrix: groupPlan.matrix,
+    graph: buildGraph(groupPlan.matrix, 2),
     groups: plannerGroups(count),
+    phases: groupPlan.phases,
     warnings,
     funScore: dense ? 74 : 82,
     funGuardrails: [

@@ -84,6 +84,9 @@ export function PlannerView({
     : undefined;
   const [editCandidates, setEditCandidates] = useState<PlanEditCandidate[]>([]);
   const [editCandidatesLoading, setEditCandidatesLoading] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("group"),
+  );
 
   useEffect(() => {
     if (!editCell) {
@@ -132,6 +135,12 @@ export function PlannerView({
   );
 
   useEffect(() => {
+    if (viewAsParticipant) {
+      setSelectedGroup(null);
+    }
+  }, [viewAsParticipant]);
+
+  useEffect(() => {
     if (
       new URLSearchParams(window.location.search).get("focus") === "cell"
     ) {
@@ -177,6 +186,22 @@ export function PlannerView({
     (most, track) => Math.max(most, track.cells.length),
     0,
   );
+  const selectedGroupCount = selectedGroup
+    ? data.matrix.filter((track) => track.ownerGroup === selectedGroup).length
+    : 0;
+  const fallbackPhases = data.phases
+    .filter((phase) => phase.globalPool)
+    .map((phase) => phase.index + 1);
+  const fallbackLabel =
+    fallbackPhases.length === 1
+      ? `phase ${fallbackPhases[0]}`
+      : `phases ${fallbackPhases.slice(0, -1).join(", ")} and ${fallbackPhases[fallbackPhases.length - 1]}`;
+  const phaseRanges = data.phases
+    .map(
+      (phase) =>
+        `R${phase.startRound + 1}–${phase.startRound + phase.rounds}`,
+    )
+    .join(" · ");
 
   function moveMatrixFocus(
     event: ReactKeyboardEvent<HTMLButtonElement>,
@@ -284,12 +309,17 @@ export function PlannerView({
               <strong>Draft schedule</strong>
               <span className="card__meta">Plan v{data.version}</span>
               {visibleWarnings.length > 0 ? (
-                <StatusPill tone={warningNeedsAction ? "warn" : "info"}>
-                  {visibleWarnings.length}{" "}
-                  {warningNeedsAction
-                    ? "to review"
-                    : plural(visibleWarnings.length, "note", "notes")}
-                </StatusPill>
+                <>
+                  <StatusPill tone={warningNeedsAction ? "warn" : "info"}>
+                    {visibleWarnings.length}{" "}
+                    {warningNeedsAction
+                      ? "to review"
+                      : plural(visibleWarnings.length, "note", "notes")}
+                  </StatusPill>
+                  <a className="warning-jump" href="#warnings-title">
+                    Review warnings
+                  </a>
+                </>
               ) : null}
             </div>
             <span>
@@ -377,11 +407,22 @@ export function PlannerView({
             <section className="card matrix-card" aria-labelledby="matrix-title">
               <div className="card__header">
                 <div>
-                  <h2 id="matrix-title">Assignment matrix</h2>
+                  <div className="matrix-heading">
+                    <h2 id="matrix-title">Assignment matrix</h2>
+                    <span
+                      className="matrix-filter-status"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {!viewAsParticipant && selectedGroup
+                        ? `Highlighting Group ${selectedGroup} · ${selectedGroupCount} tracks. Other tracks stay visible.`
+                        : ""}
+                    </span>
+                  </div>
                   <p className="card__subtitle">
                     {viewAsParticipant
                       ? "Only the sample participant's assignments are visible."
-                      : "Each cell shows who works on the track in that round. The letter marks the owner group. No one gets their own track or the same track twice."}
+                      : "Each cell shows who works on the track in that round. The group label marks the owner group. No one gets their own track or the same track twice."}
                   </p>
                   {canEdit ? (
                     <p className="field-help matrix-edit-help">
@@ -389,11 +430,66 @@ export function PlannerView({
                       that round swap, and the planner validates the result.
                     </p>
                   ) : null}
-                  <p id="matrix-scroll-help" className="visually-hidden">
-                    Scroll both axes. Tab to the first assignment cell. Use the
-                    arrow keys to move between cells. Press Enter to edit the
-                    focused cell.
-                  </p>
+                  {!viewAsParticipant && data.groups.length > 0 ? (
+                    <>
+                      <div
+                        className="group-filter"
+                        role="group"
+                        aria-label="Highlight tracks by owner group"
+                      >
+                        <button
+                          type="button"
+                          className="chip"
+                          aria-pressed={selectedGroup === null}
+                          onClick={() => setSelectedGroup(null)}
+                        >
+                          All groups
+                        </button>
+                        {data.groups.map((group) => (
+                          <button
+                            key={group.name}
+                            type="button"
+                            className="chip"
+                            aria-pressed={selectedGroup === group.name}
+                            onClick={() => setSelectedGroup(group.name)}
+                          >
+                            Group {group.name}
+                          </button>
+                        ))}
+                      </div>
+                      {data.phases.length > 0 ? (
+                        <p className="field-help group-rotation-summary">
+                          {data.phases.length} phases: {phaseRanges}.{" "}
+                          {fallbackPhases.length > 0
+                            ? `Global pool fallback in ${fallbackLabel}.`
+                            : "All phases run in groups."}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {canEdit ? (
+                    <p id="matrix-scroll-help" className="visually-hidden">
+                      Scroll both axes. Tab to the first assignment cell. Use
+                      the arrow keys to move between cells. Press Enter to edit
+                      the focused cell.
+                    </p>
+                  ) : viewAsParticipant ? (
+                    <p
+                      id="matrix-scroll-help-readonly"
+                      className="visually-hidden"
+                    >
+                      Scroll both axes. This preview shows only the sample
+                      participant's assignments.
+                    </p>
+                  ) : (
+                    <p
+                      id="matrix-scroll-help-locked"
+                      className="visually-hidden"
+                    >
+                      Scroll both axes. This schedule is locked. The
+                      assignments are read-only.
+                    </p>
+                  )}
                 </div>
               </div>
               <div
@@ -401,8 +497,17 @@ export function PlannerView({
                 tabIndex={0}
                 role="group"
                 aria-labelledby="matrix-title"
-                aria-describedby="matrix-scroll-help"
+                aria-describedby={
+                  canEdit
+                    ? "matrix-scroll-help"
+                    : viewAsParticipant
+                      ? "matrix-scroll-help-readonly"
+                      : "matrix-scroll-help-locked"
+                }
                 onKeyDown={(event) => {
+                  if (!canEdit) {
+                    return;
+                  }
                   if (
                     event.target === event.currentTarget &&
                     ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
@@ -432,13 +537,24 @@ export function PlannerView({
                   </thead>
                   <tbody>
                     {data.matrix.map((track, trackIndex) => (
-                      <tr key={track.trackCode}>
+                      <tr
+                        key={track.trackCode}
+                        className={
+                          !viewAsParticipant &&
+                          selectedGroup &&
+                          track.ownerGroup === selectedGroup
+                            ? "matrix__row--match"
+                            : undefined
+                        }
+                      >
                         <th scope="row">
                           <code>{track.trackCode}</code>
                           {viewAsParticipant ? null : (
-                            <small title={`Group ${track.ownerGroup}`}>
-                              <span className="visually-hidden">Group </span>
-                              {track.ownerGroup}
+                            <small
+                              className="matrix__group-name"
+                              title={`Group ${track.ownerGroup}`}
+                            >
+                              Group {track.ownerGroup}
                             </small>
                           )}
                         </th>
@@ -574,9 +690,10 @@ export function PlannerView({
             ) : null}
           </div>
 
-          <aside className="planner-aside" aria-label="Planner details">
+          {!viewAsParticipant ? (
+            <aside className="planner-aside" aria-label="Planner details">
             {!viewAsParticipant ? (
-              <section className="card" aria-labelledby="fun-title">
+              <section className="card fun-card" aria-labelledby="fun-title">
                 <div className="card__header">
                   <div>
                     <h2 id="fun-title">Fun score</h2>
@@ -605,11 +722,42 @@ export function PlannerView({
             ) : null}
 
             {!viewAsParticipant ? (
-              <section className="card" aria-labelledby="groups-title">
+              <section className="card groups-card" aria-labelledby="groups-title">
                 <div className="card__header">
                   <h2 id="groups-title">Groups</h2>
                   <span className="card__meta">{data.groups.length} groups</span>
                 </div>
+                {data.phases.length > 0 ? (
+                  <section className="phase-list" aria-labelledby="phases-title">
+                    <h3 id="phases-title">Rotation</h3>
+                    <ol>
+                      {data.phases.map((phase) => (
+                        <li key={phase.index}>
+                          <span>
+                            Phase {phase.index + 1} · rounds {phase.startRound + 1}
+                            –{phase.startRound + phase.rounds}
+                          </span>
+                          <span
+                            className={
+                              phase.globalPool
+                                ? "phase-list__pool"
+                                : "phase-list__local"
+                            }
+                          >
+                            {phase.globalPool
+                              ? "Global pool (fallback)"
+                              : "In groups"}
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    <p className="field-help">
+                      Phase 1 stays in the base group. Later phases move each
+                      person one group forward. No one receives the same track
+                      twice.
+                    </p>
+                  </section>
+                ) : null}
                 <ul className="group-list">
                   {data.groups.map((group) => (
                     <li key={group.name}>
@@ -623,6 +771,10 @@ export function PlannerView({
                       >
                         {group.participants.join(", ")}
                       </span>
+                      <details className="group-list__tracks">
+                        <summary>Track codes</summary>
+                        <p>{group.trackCodes.join(", ")}</p>
+                      </details>
                     </li>
                   ))}
                 </ul>
@@ -632,7 +784,8 @@ export function PlannerView({
               </section>
             ) : null}
 
-          </aside>
+            </aside>
+          ) : null}
         </div>
       ) : null}
 

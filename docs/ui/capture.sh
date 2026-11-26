@@ -165,6 +165,15 @@ shot plan-participant-view-dark-1280 "view=plan&participant=1" 1280 800
 shot plan-full-dark-1280x1600 "view=plan" 1280 1600
 shot plan-graph-dark-1280x1200 "view=plan" 1280 1200
 shot plan-populated-dark-zoom200 "view=plan" 640 400
+shot plan-groups-dark-1280 "view=plan" 1280 800
+shot plan-groups-dark-1024 "view=plan" 1024 700
+shot plan-groups-light-1280 "view=plan&theme=light" 1280 800
+shot plan-group-filter-dark-1280 "view=plan&group=A" 1280 800
+shot plan-group-filter-dark-1024 "view=plan&group=A" 1024 700
+shot plan-dense-groups-dark-1280 "view=plan&state=dense" 1280 800
+shot plan-dense-groups-dark-1024 "view=plan&state=dense" 1024 700
+shot plan-participant-view-groups-dark-1280 "view=plan&participant=1" 1280 800
+shot plan-participant-view-groups-dark-1024 "view=plan&participant=1" 1024 700
 
 shot settings-first-run-dark-1280 "view=settings&state=empty" 1280 800
 shot settings-populated-dark-1280 "view=settings" 1280 800

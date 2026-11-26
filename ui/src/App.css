@@ -743,7 +743,7 @@ textarea {
 .banner__meta {
   display: block;
   margin-top: 4px;
-  color: var(--faint);
+  color: var(--faint-raised);
   font-size: 11px;
 }
 
@@ -2327,6 +2327,10 @@ select.input {
   gap: 16px;
 }
 
+.planner-aside .fun-card {
+  order: 2;
+}
+
 .planner-empty {
   max-width: 720px;
 }
@@ -2422,7 +2426,7 @@ select.input {
 
 .matrix thead th:first-child,
 .matrix tbody th:first-child {
-  width: 82px;
+  width: 112px;
 }
 
 .matrix thead th {
@@ -2630,6 +2634,117 @@ select.input {
   color: var(--muted);
   font-size: 10.5px;
   line-height: 1.4;
+}
+
+.group-list__tracks {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.group-list__tracks summary {
+  color: var(--faint-raised);
+  cursor: pointer;
+}
+
+.group-list__tracks p {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.matrix-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.matrix-filter-status {
+  color: var(--faint-raised);
+  font-size: 11px;
+}
+
+.group-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.group-filter .chip {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.group-filter .chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.group-rotation-summary {
+  margin: 0 0 8px;
+}
+
+.warning-jump {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.warning-jump:hover {
+  text-decoration: underline;
+}
+
+.matrix tbody tr.matrix__row--match td,
+.matrix tbody tr.matrix__row--match th {
+  background: var(--accent-soft);
+}
+
+.matrix tbody tr.matrix__row--match th {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.matrix__group-name {
+  white-space: nowrap;
+}
+
+.phase-list {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.phase-list h3 {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phase-list ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.phase-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.phase-list__pool {
+  color: var(--warn);
+}
+
+.phase-list__local {
+  color: var(--faint-raised);
 }
 
 .plan-actions {

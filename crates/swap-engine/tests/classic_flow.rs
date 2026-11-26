@@ -1981,6 +1981,70 @@ fn manual_edit_rejects_an_incomplete_plan_and_a_started_event() {
 }
 
 #[test]
+fn group_events_rotate_participants_and_keep_tracks() {
+    use std::collections::{BTreeMap, HashSet};
+
+    let settings = EventSettings {
+        group_mode: Some("Lookup".to_string()),
+        group_count: Some(2),
+        group_size: Some(5),
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(10, 0, settings);
+    let assignments = fixture.lock_and_schedule();
+    assert_eq!(assignments.len(), 90);
+
+    let owners: BTreeMap<String, String> = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+        .unwrap()
+        .into_iter()
+        .map(|track| (track.code, track.owner_id))
+        .collect();
+    let person_group = |user_id: &str| user_id[5..].parse::<usize>().unwrap() / 5;
+    let track_group =
+        |track_code: &str| person_group(owners.get(track_code).expect("the track has an owner"));
+    let mut seen = HashSet::new();
+    for assignment in &assignments {
+        let owner = owners
+            .get(&assignment.track_code)
+            .expect("the track has an owner");
+        assert_ne!(owner, &assignment.participant_id);
+        assert!(
+            seen.insert((
+                assignment.participant_id.clone(),
+                assignment.track_code.clone()
+            )),
+            "repeat for {} on {}",
+            assignment.participant_id,
+            assignment.track_code
+        );
+        if assignment.round < 8 {
+            let phase = (assignment.round / 2) as usize;
+            let expected = (track_group(&assignment.track_code) + 2 - (phase % 2)) % 2;
+            assert_eq!(
+                person_group(&assignment.participant_id),
+                expected,
+                "round {}",
+                assignment.round
+            );
+        }
+    }
+    for round in 0..9 {
+        let people: HashSet<&str> = assignments
+            .iter()
+            .filter(|assignment| assignment.round == round)
+            .map(|assignment| assignment.participant_id.as_str())
+            .collect();
+        let tracks: HashSet<&str> = assignments
+            .iter()
+            .filter(|assignment| assignment.round == round)
+            .map(|assignment| assignment.track_code.as_str())
+            .collect();
+        assert_eq!(people.len(), 10);
+        assert_eq!(tracks.len(), 10);
+    }
+}
+
+#[test]
 fn locking_the_schedule_publishes_the_latest_commitment() {
     let fixture = Fixture::with_settings(
         5,

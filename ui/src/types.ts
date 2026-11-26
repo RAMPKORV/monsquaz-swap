@@ -260,7 +260,15 @@ export type PlannerGroup = {
   name: string;
   size: number;
   tracks: number;
+  trackCodes: string[];
   participants: string[];
+};
+
+export type PlannerPhase = {
+  index: number;
+  startRound: number;
+  rounds: number;
+  globalPool: boolean;
 };
 
 export type PlannerWarning = {
@@ -318,6 +326,7 @@ export type PlanData = {
   matrix: MatrixTrack[];
   graph: { round: number; edges: GraphEdge[] };
   groups: PlannerGroup[];
+  phases: PlannerPhase[];
   warnings: PlannerWarning[];
   funScore: number | null;
   funGuardrails: Array<{ label: string; value: string }>;

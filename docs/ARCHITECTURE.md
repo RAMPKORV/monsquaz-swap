@@ -120,8 +120,13 @@ and 33 to 40. The plan stores the effective count and size. A manual group
 count and size override the lookup. The soft bounds are 5 to 12 people per
 group. A small group, a large group, unequal groups, a cadence outside 3 to 5
 phases, or an exhausted policy that cannot fire produces an information
-warning. A warning does not block the plan. Group rotation and infeasible
-phase fallback are the next slices.
+warning. A warning does not block the plan.
+
+At each phase, participants rotate one group forward and tracks stay in their
+owner group. The default cadence is K about T divided by 4. A matching never
+uses an own track or a track that the person has seen. When a group cannot fill
+a phase, the phase uses the global pool, the host sees a warning, and groups
+return in the next phase. Merge repair is the next slice.
 
 ## Simulation
 

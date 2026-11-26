@@ -56,6 +56,21 @@
       "focus": true
     },
     {
+      "id": "plan-groups",
+      "query": "demo=1&static=1&view=plan",
+      "contrast": true
+    },
+    {
+      "id": "plan-group-filter",
+      "query": "demo=1&static=1&view=plan&group=A",
+      "contrast": true
+    },
+    {
+      "id": "plan-participant",
+      "query": "demo=1&static=1&view=plan&participant=1",
+      "contrast": true
+    },
+    {
       "id": "plan-edit",
       "query": "demo=1&static=1&view=plan&state=dense&dialog=edit"
     },

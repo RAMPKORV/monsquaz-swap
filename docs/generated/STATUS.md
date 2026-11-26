@@ -19,7 +19,7 @@
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 31 |
+| Done | 32 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 

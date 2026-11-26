@@ -478,16 +478,19 @@ impl InboundHandler for InboundService {
 }
 
 const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
+/// The host clock and the Discord clock can differ. Allow a short window so a
+/// real submission right after a claim is not treated as old.
+const CLOCK_SKEW_SECS: i64 = 600;
 
 /// Discord message ids carry a millisecond timestamp. A backfill can return an
 /// attachment from before the current claim. Accept it only when the id is
-/// numeric and not older than the claim.
+/// numeric and not more than the skew window older than the claim.
 fn message_is_current(message_id: &str, cutoff_secs: i64) -> bool {
     let Ok(id) = message_id.parse::<u64>() else {
         return true;
     };
     let millis = (id >> 22) as i64 + DISCORD_EPOCH_MS;
-    millis / 1000 >= cutoff_secs
+    millis / 1000 + CLOCK_SKEW_SECS >= cutoff_secs
 }
 
 fn terminal_submit(error: &EngineError) -> bool {
@@ -552,7 +555,11 @@ mod tests {
     fn a_message_from_before_the_claim_is_not_current() {
         let claimed_at = 1_700_000_000;
         assert!(!message_is_current(
-            &snowflake(claimed_at - 100),
+            &snowflake(claimed_at - CLOCK_SKEW_SECS - 1),
+            claimed_at
+        ));
+        assert!(message_is_current(
+            &snowflake(claimed_at - CLOCK_SKEW_SECS),
             claimed_at
         ));
         assert!(message_is_current(&snowflake(claimed_at), claimed_at));

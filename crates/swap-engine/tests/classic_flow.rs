@@ -1013,7 +1013,7 @@ async fn backfill_ignores_an_attachment_from_before_the_claim() {
         )
         .unwrap();
     DmCursorRepo::upsert(fixture.db.conn(), &user_id, "dm-1", None, T4).unwrap();
-    let old_message = ((((claimed_at - 100) * 1000) - 1_420_070_400_000) as u64) << 22;
+    let old_message = ((((claimed_at - 3_600) * 1000) - 1_420_070_400_000) as u64) << 22;
 
     let discord = Arc::new(swap_discord::FakeDiscord::new());
     let url = "https://cdn.discordapp.com/attachments/1/2/old.it";

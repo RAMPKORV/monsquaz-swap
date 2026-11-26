@@ -105,7 +105,8 @@ the event, seen ledger, files, and pending deliveries.
 
 The outbound DM cursor and the inbound DM cursor are separate columns. A sent DM
 can never move the inbound cursor past an unprocessed attachment. Backfill
-ignores an attachment whose Discord message id is older than the current claim.
+ignores an attachment whose Discord message id is more than ten minutes older
+than the current claim.
 Backfill can only visit a participant who has an inbound cursor. Discord does
 not replay a direct message that arrives while the gateway is offline. A
 first-time submitter must send the file again after the gateway reconnects.

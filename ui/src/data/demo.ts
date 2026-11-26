@@ -14,7 +14,7 @@ import type {
 } from "../types";
 
 const longEventName =
-  "The Extremely Long and Slightly Haunted Midwinter Remix Exchange, Volume Two";
+  "The Extremely Long and Slightly Haunted Midwinter Remix Exchange, Volume Two: A Very Long Subtitle for the Final Cut";
 
 const defaultTimeline: TimelineStep[] = [
   {

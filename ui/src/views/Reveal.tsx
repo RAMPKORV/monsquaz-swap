@@ -374,6 +374,7 @@ export function RevealView({
                   aria-current={
                     track.trackCode === selected?.trackCode ? "true" : undefined
                   }
+                  title={track.title ?? "Untitled"}
                   onClick={() => setSelectedCode(track.trackCode)}
                 >
                   <span className="reveal-album__position">

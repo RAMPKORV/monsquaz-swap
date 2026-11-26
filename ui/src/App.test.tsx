@@ -175,6 +175,16 @@ describe("App", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("keeps the full event name in the topbar title", async () => {
+    setUrl("?demo=1&state=long&view=reveal&stream=0");
+    render(<App />);
+    await screen.findByRole("button", { name: "Stream-safe mode" });
+    const topbar = document.querySelector(".topbar");
+    expect(topbar).not.toBeNull();
+    const title = within(topbar as HTMLElement).getByTitle(/Extremely Long/);
+    expect(title).toHaveTextContent(/Extremely Long/);
+  });
+
   it("saves a title from the reveal show", async () => {
     setUrl("?demo=1&view=reveal&stream=0");
     render(<App />);

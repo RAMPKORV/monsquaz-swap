@@ -8,9 +8,10 @@ use swap_db::{
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
     PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
-    dispatch_pending, event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
-    open_round, redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
-    set_track_title_for_user, signup, skip, start_event, submit,
+    dispatch_pending, edit_plan_assignment, event_status, expire_offer, generate_schedule,
+    join_with_seed, lock_roster, open_round, plan_edit_candidates, redact_track_comment, reveal,
+    reveal_package, reveal_with_channel, set_track_title, set_track_title_for_user, signup, skip,
+    start_event, start_event_with_channel, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -1977,6 +1978,67 @@ fn manual_edit_rejects_an_incomplete_plan_and_a_started_event() {
         ),
         Err(EngineError::WrongEventState { .. })
     ));
+}
+
+#[test]
+fn locking_the_schedule_publishes_the_latest_commitment() {
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let assignments = fixture.lock_and_schedule();
+    let first = PlanRepo::latest(fixture.db.conn(), EVENT).unwrap().unwrap();
+    let (target, candidates) = assignments
+        .iter()
+        .find_map(|assignment| {
+            let candidates =
+                plan_edit_candidates(&fixture.db, EVENT, assignment.round, &assignment.track_code)
+                    .unwrap();
+            (!candidates.is_empty()).then_some((assignment, candidates))
+        })
+        .unwrap();
+    let edited = edit_plan_assignment(
+        &fixture.db,
+        EVENT,
+        target.round,
+        &target.track_code,
+        &candidates[0].participant_id,
+        first.version,
+        T3,
+    )
+    .unwrap();
+    assert_ne!(edited.commitment, first.commitment);
+
+    let outcome = start_event_with_channel(&fixture.db, EVENT, Some("announce"), T5).unwrap();
+    assert_eq!(outcome.commitment, edited.commitment);
+    assert_eq!(outcome.effects.len(), 1);
+    match &outcome.effects[0] {
+        Effect::Channel {
+            channel_id,
+            content,
+        } => {
+            assert_eq!(channel_id, "announce");
+            assert!(content.contains(&edited.commitment[..16]));
+            assert!(!content.contains(&first.commitment[..16]));
+            assert!(!content.contains(&edited.commitment));
+            for index in 0..5 {
+                let file_hash = sha256_hex(&seed_bytes(index));
+                assert!(!content.contains(&file_hash[..16]));
+            }
+        }
+        other => panic!("expected a channel commitment, got {other:?}"),
+    }
+    assert_eq!(
+        PlanRepo::latest(fixture.db.conn(), EVENT)
+            .unwrap()
+            .unwrap()
+            .commitment,
+        edited.commitment
+    );
 }
 
 #[test]

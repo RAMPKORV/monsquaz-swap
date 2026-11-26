@@ -567,7 +567,7 @@ export function previewUrl(fileId: string): string {
   if (isDemoMode()) {
     return "";
   }
-  return convertFileSrc(`file/${fileId}`, "swap-preview");
+  return convertFileSrc(fileId, "swap-preview");
 }
 
 export async function revealEvent(): Promise<RevealData> {

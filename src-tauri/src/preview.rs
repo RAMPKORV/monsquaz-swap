@@ -29,16 +29,14 @@ fn respond<R: Runtime>(app: &AppHandle<R>, request: &Request<Vec<u8>>) -> Respon
     if request.method() != "GET" && request.method() != "HEAD" {
         return error(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
     }
-    let segments = request
-        .uri()
-        .path()
-        .trim_start_matches('/')
-        .split('/')
-        .collect::<Vec<_>>();
-    if segments.len() != 2 || segments[0] != "file" {
+    let Some(file_id) = decode_segment(request.uri().path().trim_start_matches('/')) else {
+        return error(StatusCode::BAD_REQUEST, "invalid preview path");
+    };
+    if file_id.is_empty() || file_id.len() > 128 || file_id.contains('/') || file_id.contains('\\')
+    {
         return error(StatusCode::BAD_REQUEST, "invalid preview path");
     }
-    let file = match preview_file(app, segments[1]) {
+    let file = match preview_file(app, &file_id) {
         Ok(file) => file,
         Err((status, message)) => return error(status, message),
     };
@@ -155,6 +153,27 @@ fn media_response(
     }
 }
 
+fn decode_segment(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return None;
+            }
+            let high = (bytes[index + 1] as char).to_digit(16)?;
+            let low = (bytes[index + 2] as char).to_digit(16)?;
+            decoded.push((high * 16 + low) as u8);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
 fn parse_range(value: &str, total: usize) -> Option<(usize, usize)> {
     let value = value.strip_prefix("bytes=")?;
     let (start, end) = value.split_once('-')?;
@@ -210,6 +229,17 @@ fn error(status: StatusCode, message: &str) -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_ids_are_decoded_and_bounded() {
+        assert_eq!(
+            decode_segment("evt%3AS8G4H%3A2").as_deref(),
+            Some("evt:S8G4H:2")
+        );
+        assert_eq!(decode_segment("plain-id").as_deref(), Some("plain-id"));
+        assert_eq!(decode_segment("bad%2"), None);
+        assert_eq!(decode_segment("bad%zz"), None);
+    }
 
     #[test]
     fn ranges_are_bounded() {

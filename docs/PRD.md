@@ -150,8 +150,10 @@ named command. IDs are stable.
 |---|---|---|---|
 | REQ-SCHED-001 | must | The scheduler SHALL never assign a participant their own track and never assign the same track to the same participant twice. | `scheduling.feature` |
 | REQ-SCHED-002 | must | A full classic event SHALL run N total rounds for N seeded participants: R1 is the seed round and R2..RN are exchange rounds. The planner SHALL warn about overcrowding above 12 participants and allow a cap. | `scheduling.feature` |
-| REQ-SCHED-003 | must | The host SHALL open Round 1 with the pack and a seed deadline. The host SHALL close seed intake softly and lock the roster in one action. At least two seeds are required. | `join_and_seed.feature` |
-| REQ-SCHED-004 | must | One classic round SHALL have one shared deadline. An offer expires at that deadline and a claim uses the same deadline. The default is 24 hours for a normal exchange round and 48 hours for the final exchange round. | `deadlines_and_extensions.feature` |
+| REQ-SCHED-010 | must | The host SHALL open Round 1 with the pack and a seed deadline. The host SHALL close seed intake softly and lock the roster in one action. At least two seeds are required. | `join_and_seed.feature` |
+| REQ-SCHED-011 | must | One classic round SHALL have one shared deadline. An offer expires at that deadline and a claim uses the same deadline. The default is 24 hours for a normal exchange round and 48 hours for the final exchange round. | `deadlines_and_extensions.feature` |
+| REQ-SCHED-012 | must | The host SHALL choose strict full exposure or flexible participation. Strict SHALL refuse a plan when an active handoff cap is below the exchange count. Flexible SHALL give the earliest exchange rounds up to the cap and report coverage gaps. | `participation.feature` |
+| REQ-SCHED-013 | must | The host CAN record an away range for a participant. The planner SHALL skip overlapping projected rounds and report the gaps. History SHALL stay in UTC. | `participation.feature` |
 | REQ-SCHED-003 | must | Each round SHALL assign at most one track per participant and at most one participant per track. | `scheduling.feature` |
 | REQ-SCHED-004 | must | The host SHALL preview, regenerate with a diff, manually edit, validate, lock, and commit the schedule; hard invariants SHALL block invalid edits. | `scheduling.feature` |
 | REQ-SCHED-005 | must | When a schedule is locked, the bot SHALL publish a commit-reveal hash; replans SHALL create a new commitment and be limited to two. | `scheduling.feature` |
@@ -232,7 +234,7 @@ named command. IDs are stable.
 | REQ-ANON-001 | must | Participant-facing surfaces SHALL NOT expose seed owners, contributors, original titles, comments, or the full schedule before reveal. | `anonymity.feature` |
 | REQ-ANON-002 | must | Track codes SHALL be opaque and not derived from owner or submission order; outbound filenames SHALL omit holder and version. | `anonymity.feature` |
 | REQ-ANON-003 | must | Public progress SHALL be status + countdown only before the deadline; no per-person counts. | `anonymity.feature` |
-| REQ-ANON-004 | must | If the visible-schedule option is on, it SHALL expose assignments only, never owners/titles. | `anonymity.feature` |
+| REQ-ANON-004 | must | By default, participants SHALL see only their own assignments. The host CAN choose an open schedule that exposes the full matrix, owners, names, titles, and comments. The join card SHALL disclose the loss of anonymity. | `anonymity.feature` |
 | REQ-ANON-005 | must | Comments/questionnaire SHALL be host+reveal only by default; at reveal they are attributed with host redaction. | `anonymity.feature` |
 | REQ-ANON-006 | must | Skips SHALL be host-only during the event and show as anonymous gaps by default at reveal. | `anonymity.feature` |
 | REQ-ANON-007 | must | Stream-safe mode SHALL hide the mapping and redact IDs for screen sharing. | `anonymity.feature` |

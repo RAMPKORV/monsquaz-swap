@@ -119,10 +119,15 @@ export function MissionControlView({
         </div>
       ) : null}
 
-      <p className="privacy-line">
-        <Icon name="shield" size={16} />
-        Participants are anonymous to each other until the reveal. You can see
-        the mapping.
+      <p
+        className={`privacy-line${
+          event.openSchedule ? " privacy-line--warn" : ""
+        }`}
+      >
+        <Icon name={event.openSchedule ? "eye-off" : "shield"} size={16} />
+        {event.openSchedule
+          ? "Open schedule is on. Everyone can see the matrix, owners, names, titles, and comments. The event has no anonymity."
+          : "Participants are anonymous to each other until the reveal. You can see the mapping."}
       </p>
 
       {event.stage === "Setup" || event.stage === "Join phase" ? (
@@ -143,6 +148,10 @@ export function MissionControlView({
           formats={data.join.formats}
           maxMib={data.join.maxFileMib}
           exampleTimezone={timezone}
+          openSchedule={event.openSchedule}
+          showOpenBanner={false}
+          exchangeRounds={event.exchangeRounds}
+          handoffPolicy={event.handoffPolicy}
         />
       ) : null}
 

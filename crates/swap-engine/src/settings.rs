@@ -33,6 +33,7 @@ pub struct EventSettings {
     pub scheduler: Option<String>,
     pub swap_cadence: Option<String>,
     pub schedule_visibility: Option<String>,
+    pub handoff_policy: Option<String>,
     pub quiet_hours_start: u8,
     pub quiet_hours_end: u8,
 }
@@ -61,6 +62,7 @@ impl Default for EventSettings {
             scheduler: None,
             swap_cadence: None,
             schedule_visibility: None,
+            handoff_policy: None,
             quiet_hours_start: 22,
             quiet_hours_end: 8,
         }
@@ -91,6 +93,8 @@ pub enum SettingsError {
     GroupSize,
     #[error("the scheduler must be balanced, random_matching, or cyclic")]
     Scheduler,
+    #[error("the handoff policy must be Strict or Flexible")]
+    HandoffPolicy,
     #[error("the quiet hours must be between 0 and 23")]
     QuietHours,
 }
@@ -132,6 +136,11 @@ impl EventSettings {
             && swap_core::ScheduleStrategy::parse(scheduler).is_none()
         {
             return Err(SettingsError::Scheduler);
+        }
+        if let Some(policy) = &self.handoff_policy
+            && !matches!(policy.as_str(), "Strict" | "Flexible")
+        {
+            return Err(SettingsError::HandoffPolicy);
         }
         if self.quiet_hours_start > 23 || self.quiet_hours_end > 23 {
             return Err(SettingsError::QuietHours);

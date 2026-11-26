@@ -133,7 +133,7 @@ fn join(db: &Db, store: &BlobStore, index: usize) {
             user_id: &user_id,
             display_name: &format!("Person {index}"),
             timezone: "Europe/Stockholm",
-            max_handoffs: 3,
+            max_handoffs: 20,
             filename: "seed.it",
             bytes: &bytes,
         },

@@ -9,6 +9,10 @@ export function JoinInstructions({
   closed = false,
   preview = false,
   headingLevel = 2,
+  openSchedule = false,
+  showOpenBanner = openSchedule,
+  exchangeRounds = 0,
+  handoffPolicy = "Strict",
 }: {
   formats: string[];
   maxMib: number;
@@ -16,6 +20,10 @@ export function JoinInstructions({
   closed?: boolean;
   preview?: boolean;
   headingLevel?: 2 | 3;
+  openSchedule?: boolean;
+  showOpenBanner?: boolean;
+  exchangeRounds?: number;
+  handoffPolicy?: "Strict" | "Flexible";
 }) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<number | null>(null);
@@ -27,7 +35,19 @@ export function JoinInstructions({
     exampleTimezone?.trim() ||
     Intl.DateTimeFormat().resolvedOptions().timeZone ||
     "Europe/Stockholm";
-  const text = joinInstructions(zone, formats, maxMib);
+  const text = [
+    joinInstructions(zone, formats, maxMib),
+    exchangeRounds > 0
+      ? handoffPolicy === "Strict"
+        ? `For this event, set max_handoffs to at least ${exchangeRounds}. A lower cap blocks the schedule. The command accepts 1 to 20.`
+        : `For this event, choose max_handoffs from 1 to 20. The planner gives you your earliest exchange rounds up to your cap.`
+      : "",
+    openSchedule
+      ? "Open schedule: everyone can see the full matrix, seed owners, editor names, titles, and comments. This event has no anonymity."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const Heading = headingLevel === 3 ? "h3" : "h2";
   const meta = preview
     ? messages.join.preview
@@ -71,6 +91,13 @@ export function JoinInstructions({
         <span className="card__meta">{meta}</span>
       </div>
       <p>{messages.join.detail}</p>
+      {showOpenBanner ? (
+        <div className="banner banner--warn" role="status">
+          This event uses an open schedule. Everyone can see the full matrix,
+          seed owners, editor names, titles, and comments. The event has no
+          anonymity.
+        </div>
+      ) : null}
       {preview ? (
         <p className="field-help">{messages.join.previewHelp}</p>
       ) : closed ? (

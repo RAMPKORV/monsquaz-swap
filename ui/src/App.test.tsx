@@ -895,3 +895,16 @@ describe("classic seed round", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("flexible participation", () => {
+  it("shows the coverage gaps from a flexible plan", async () => {
+    setUrl("?demo=1&state=flexible&view=plan");
+    render(<App />);
+    expect(
+      await screen.findByText("2 assignments are empty."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/A handoff cap is lower than the exchange count./),
+    ).toBeInTheDocument();
+  });
+});

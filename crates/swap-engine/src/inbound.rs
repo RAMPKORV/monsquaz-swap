@@ -21,8 +21,8 @@ use swap_files::BlobStore;
 use crate::clock::Clock;
 use crate::delivery::{DeliveryReport, DeliveryWorker};
 use crate::engine::{
-    EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed, signup, skip,
-    submit_attachment,
+    EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed,
+    participant_schedule, signup, skip, submit_attachment,
 };
 use crate::prepare::DeliveryPreparer;
 use crate::settings::EventSettings;
@@ -447,7 +447,7 @@ impl InboundService {
         let max_handoffs = participant
             .as_ref()
             .map(|participant| participant.max_handoffs)
-            .unwrap_or(4);
+            .unwrap_or(20);
         let db = self.db.clone();
         let store = self.store.clone();
         let preparer = self.preparer.clone();
@@ -822,7 +822,7 @@ impl InboundService {
                         .as_ref()
                         .map(|participant| participant.max_handoffs)
                 })
-                .unwrap_or(4)
+                .unwrap_or(20)
                 .clamp(1, 20);
             let db = self.lock();
             signup(
@@ -984,6 +984,62 @@ impl InboundService {
             .map(|event| event.id))
     }
 
+    async fn handle_schedule(&self, user_id: &str) -> Result<(), String> {
+        let event = {
+            let db = self
+                .db
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            EventRepo::open_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        };
+        let Some(event) = event else {
+            self.notify(user_id, "There is no open swap event for you.")
+                .await;
+            return Ok(());
+        };
+        let view = {
+            let db = self
+                .db
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            participant_schedule(&db, &event.id, user_id).map_err(|error| error.to_string())?
+        };
+        let mut content = String::from("Your assignments:\n");
+        if view.own.is_empty() {
+            content.push_str("No assignment yet. Wait for the next offer.\n");
+        } else {
+            for turn in &view.own {
+                content.push_str(&format!(
+                    "R{} · {} · {:?}\n",
+                    turn.round_no, turn.track_code, turn.status
+                ));
+            }
+        }
+        if view.open
+            && let Some(full) = &view.full
+        {
+            content.push_str("\nOpen schedule:\n");
+            for cell in full.iter().take(30) {
+                content.push_str(&format!(
+                    "R{} · {} · {} · owner {}{}\n",
+                    cell.round_no,
+                    cell.track_code,
+                    cell.participant_name,
+                    cell.owner_name,
+                    cell.title
+                        .as_deref()
+                        .map(|title| format!(" · {title}"))
+                        .unwrap_or_default()
+                ));
+            }
+            if full.len() > 30 {
+                content.push_str("The full matrix is in the host app.\n");
+            }
+        }
+        self.notify(user_id, &content).await;
+        Ok(())
+    }
+
     async fn notify(&self, user_id: &str, content: &str) {
         let _ = self
             .discord
@@ -1117,6 +1173,7 @@ impl InboundService {
                         .await;
                     Ok(())
                 }
+                swap_discord::SlashCommand::Schedule => self.handle_schedule(&user_id.0).await,
                 swap_discord::SlashCommand::Help => {
                     self.notify(
                         &user_id.0,

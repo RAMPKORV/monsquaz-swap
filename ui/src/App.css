@@ -2206,7 +2206,7 @@ select.input {
 }
 
 .people-table .col-action {
-  width: 84px;
+  width: 168px;
   text-align: right;
 }
 
@@ -2875,6 +2875,10 @@ select.input {
   margin-top: 20px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  z-index: 1;
 }
 
 .wizard-note {
@@ -4745,4 +4749,66 @@ select.input {
 
 .seed-round-card .card__subtitle {
   max-width: 72ch;
+}
+
+.away-list {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.away-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.people-table .header-actions {
+  flex-wrap: nowrap;
+}
+
+.person-cell .person-away {
+  display: block;
+  color: var(--warn);
+}
+
+.matrix-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  padding: 2px 6px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--radius-sm);
+  color: var(--warn);
+  font-size: 10.5px;
+}
+
+.person-cell .person-away {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.role {
+  white-space: nowrap;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.privacy-line--warn {
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft, transparent);
+  color: var(--warn);
 }

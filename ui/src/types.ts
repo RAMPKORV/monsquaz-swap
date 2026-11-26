@@ -23,8 +23,10 @@ export type Scenario =
   | "reveal-ready"
   | "join-phase"
   | "join-late"
+  | "join-open"
   | "seed-setup"
-  | "infeasible";
+  | "infeasible"
+  | "flexible";
 
 export type MissionControl = {
   firstRun: boolean;
@@ -60,6 +62,8 @@ export type EventSummary = {
   seedDeadlineAt: number | null;
   lateSeedCount: number;
   packId: string | null;
+  openSchedule: boolean;
+  handoffPolicy: "Strict" | "Flexible";
 };
 
 export type PackInfo = {
@@ -237,7 +241,8 @@ export type EventDraft = {
   groupSize: number;
   rotation: "Participants" | "Track pools" | "Both";
   swapCadence: "K rounds" | "Calendar" | "Host-triggered" | "Exhausted";
-  scheduleVisibility: "Hidden" | "Visible assignments";
+  scheduleVisibility: "Hidden" | "Open";
+  handoffPolicy: "Strict" | "Flexible";
 };
 
 export type SetupData = {
@@ -257,6 +262,14 @@ export type PersonRow = {
   maxHandoffs: number;
   joined: string;
   deliveryRisk: boolean;
+  away: AwayRange[];
+};
+
+export type AwayRange = {
+  id: string;
+  startsAt: number;
+  endsAt: number;
+  note: string | null;
 };
 
 export type PeopleData = {
@@ -357,6 +370,9 @@ export type PlanData = {
   rounds: number;
   exchangeRounds: number;
   totalRounds: number;
+  gaps: number;
+  handoffPolicy: "Strict" | "Flexible";
+  openSchedule: boolean;
   tracks: number;
   participants: number;
   committed: boolean;

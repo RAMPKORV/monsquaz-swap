@@ -8,14 +8,14 @@ use swap_db::{
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, accept_late_seed, add_track_comment, claim, create_event,
-    create_event_with_secret, dispatch, dispatch_async_wave, dispatch_pending,
+    PreparedBytes, SubmitRequest, accept_late_seed, add_availability, add_track_comment, claim,
+    create_event, create_event_with_secret, dispatch, dispatch_async_wave, dispatch_pending,
     edit_plan_assignment, event_status, expire_offer, generate_schedule, join_with_seed,
-    lock_roster, move_round_deadline, open_round, open_seed_round, pending_late_seeds,
-    plan_edit_candidates, redact_track_comment, reveal, reveal_package, reveal_with_channel,
-    set_track_title, set_track_title_for_user, set_track_title_for_user_on_track, signup, skip,
-    start_async_event, start_event, start_event_with_channel, submit, tick_deadlines,
-    verify_commitment,
+    lock_roster, move_round_deadline, open_round, open_seed_round, participant_schedule,
+    pending_late_seeds, plan_edit_candidates, redact_track_comment, reveal, reveal_package,
+    reveal_with_channel, set_track_title, set_track_title_for_user,
+    set_track_title_for_user_on_track, signup, skip, start_async_event, start_event,
+    start_event_with_channel, submit, tick_deadlines, verify_commitment,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -157,7 +157,7 @@ fn join(db: &Db, store: &BlobStore, index: usize) {
             user_id: &user_id,
             display_name: &format!("User {index}"),
             timezone: "Europe/Stockholm",
-            max_handoffs: 3,
+            max_handoffs: 20,
             filename: "seed.it",
             bytes: &bytes,
         },
@@ -233,7 +233,7 @@ fn a_prepared_seed_keeps_the_original_and_delivers_the_scrub() {
                 user_id: &user_id,
                 display_name: &format!("User {index}"),
                 timezone: "Europe/Stockholm",
-                max_handoffs: 3,
+                max_handoffs: 20,
                 filename: "seed.it",
                 bytes: &bytes,
             },
@@ -283,7 +283,7 @@ fn a_failed_preparation_does_not_store_a_seed() {
             user_id: &user_id,
             display_name: "User 1",
             timezone: "Europe/Stockholm",
-            max_handoffs: 3,
+            max_handoffs: 20,
             filename: "seed.it",
             bytes: &bytes,
         },
@@ -628,7 +628,7 @@ fn a_second_seed_replaces_the_first_before_the_deadline() {
             user_id: &user_id,
             display_name: "User 0",
             timezone: "Europe/Stockholm",
-            max_handoffs: 3,
+            max_handoffs: 20,
             filename: "seed.it",
             bytes: &seed_bytes(9),
         },
@@ -3245,7 +3245,7 @@ fn a_late_seed_is_held_and_the_host_can_accept_it() {
             user_id: &user_id,
             display_name: "Late Person",
             timezone: "Europe/Stockholm",
-            max_handoffs: 3,
+            max_handoffs: 20,
             filename: "seed.it",
             bytes: &seed_bytes(22),
         },
@@ -3378,4 +3378,126 @@ fn commitment_v2_covers_the_seed_owner_map() {
         )
         .unwrap();
     assert!(!verify_commitment(&fixture.db, EVENT).unwrap().verified);
+}
+
+#[test]
+fn strict_participation_refuses_a_low_handoff_cap() {
+    let fixture = Fixture::new(5, 0);
+    let mut participant = ParticipantRepo::get(fixture.db.conn(), EVENT, &user(0))
+        .unwrap()
+        .unwrap();
+    participant.max_handoffs = 2;
+    ParticipantRepo::upsert(fixture.db.conn(), &participant).unwrap();
+    lock_roster(&fixture.db, EVENT, T1).unwrap();
+    let error = generate_schedule(&fixture.db, EVENT, T2).unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::InsufficientHandoffs {
+            allowed: 2,
+            required: 4,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn flexible_participation_keeps_earliest_rounds_and_reports_gaps() {
+    let settings = EventSettings {
+        rounds: Some(4),
+        handoff_policy: Some("Flexible".to_string()),
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(5, 0, settings);
+    let mut participant = ParticipantRepo::get(fixture.db.conn(), EVENT, &user(0))
+        .unwrap()
+        .unwrap();
+    participant.max_handoffs = 2;
+    ParticipantRepo::upsert(fixture.db.conn(), &participant).unwrap();
+    lock_roster(&fixture.db, EVENT, T1).unwrap();
+    let schedule = generate_schedule(&fixture.db, EVENT, T2).unwrap();
+    assert_eq!(schedule.gaps, 2);
+    let rounds: Vec<u32> = schedule
+        .assignments
+        .iter()
+        .filter(|assignment| assignment.participant_id == user(0))
+        .map(|assignment| assignment.round)
+        .collect();
+    assert_eq!(rounds, vec![0, 1]);
+    start_event(&fixture.db, EVENT, T3).unwrap();
+}
+
+#[test]
+fn availability_blocks_strict_and_creates_a_flexible_gap() {
+    let settings = EventSettings {
+        rounds: Some(4),
+        handoff_policy: Some("Flexible".to_string()),
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(5, 0, settings);
+    add_availability(
+        &fixture.db,
+        EVENT,
+        &user(0),
+        T2 + 2 * 86_400,
+        T2 + 3 * 86_400,
+        Some("trip"),
+        T1,
+    )
+    .unwrap();
+    lock_roster(&fixture.db, EVENT, T1).unwrap();
+    let schedule = generate_schedule(&fixture.db, EVENT, T2).unwrap();
+    assert_eq!(schedule.gaps, 1);
+    let rounds: Vec<u32> = schedule
+        .assignments
+        .iter()
+        .filter(|assignment| assignment.participant_id == user(0))
+        .map(|assignment| assignment.round)
+        .collect();
+    assert_eq!(rounds, vec![0, 1, 3]);
+
+    let strict = Fixture::new(5, 0);
+    add_availability(
+        &strict.db,
+        EVENT,
+        &user(0),
+        T2 + 2 * 86_400,
+        T2 + 3 * 86_400,
+        None,
+        T1,
+    )
+    .unwrap();
+    lock_roster(&strict.db, EVENT, T1).unwrap();
+    assert!(matches!(
+        generate_schedule(&strict.db, EVENT, T2),
+        Err(EngineError::AvailabilityBlocksStrict { .. })
+    ));
+}
+
+#[test]
+fn participant_schedule_redacts_by_default_and_opens_on_request() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    fixture.open(0);
+    let own = participant_schedule(&fixture.db, EVENT, &user(0)).unwrap();
+    assert!(!own.open);
+    assert!(own.full.is_none());
+    assert_eq!(own.own.len(), 1);
+
+    let open_fixture = Fixture::with_settings(
+        3,
+        0,
+        EventSettings {
+            schedule_visibility: Some("Open".to_string()),
+            ..EventSettings::default()
+        },
+    );
+    open_fixture.lock_and_schedule();
+    open_fixture.start();
+    open_fixture.open(0);
+    let open = participant_schedule(&open_fixture.db, EVENT, &user(0)).unwrap();
+    assert!(open.open);
+    let full = open.full.unwrap();
+    assert_eq!(full.len(), 6);
+    assert!(full.iter().all(|cell| !cell.owner_name.is_empty()));
 }

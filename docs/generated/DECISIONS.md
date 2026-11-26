@@ -15,6 +15,7 @@
 | `D-009` | GitHub Releases, Windows + Linux, unsigned, no updater | accepted | 2026-11-24 |
 | `D-010` | ASD-STE100 for specifications | accepted | 2026-11-24 |
 | `D-011` | Lean tracker with hand-written specs | accepted | 2026-11-24 |
+| `D-029` | Lock the design scales | accepted | 2026-11-26 |
 
 ## `D-001` — Tauri 2 + Rust backend + React/TS UI
 
@@ -202,3 +203,20 @@ Use the SQLite tracker for issues, decisions, evidence, sessions, and the append
 ### Consequences
 
 Durable work memory without scaffold ceremony. Specs stay readable. The tracker remains the evidence source.
+
+## `D-029` — Lock the design scales
+
+- **Status:** accepted
+- **Decided by:** agent · **Date:** 2026-11-26
+
+### Context
+
+The design gate started with locked core rules and advisory spacing, type, and radius scales. The UI had 154 scale findings. The scales must become a contract after the cleanup.
+
+### Decision
+
+Lock the spacing scale 0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64 pixels. Lock the type scale 10, 10.5, 11, 11.5, 12, 13, 14, 16, 18, 20, 24, 30, 44 pixels. Lock the radius scale 0, 4, 6, 8, 12, 16, 999 pixels. The radius tokens are 4, 6, and 8 pixels. Negative spacing is not in the scale. A reviewed exception needs a baseline entry with a reason and an issue or an expiry.
+
+### Consequences
+
+A new off-scale value fails the design gate. A scale change needs a tracker decision or an ADR, a policy diff, a baseline diff, and a gate run. The UI uses the scales at every enforced viewport.

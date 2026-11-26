@@ -216,6 +216,20 @@ describe("App", () => {
     expect(
       screen.queryByRole("button", { name: "Publish reveal" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Stream-safe hides the public credits/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stream-safe mode" }));
+    const off = await screen.findByRole("dialog", {
+      name: "Turn off stream-safe mode?",
+    });
+    expect(within(off).getByText(/published reveal/i)).toBeInTheDocument();
+    fireEvent.click(
+      within(off).getByRole("button", { name: "Turn off stream-safe" }),
+    );
+    expect(
+      screen.getByText("The reveal is public. Share the names."),
+    ).toBeInTheDocument();
   });
 
   it("keeps the publish dialog open when the reveal is blocked", async () => {

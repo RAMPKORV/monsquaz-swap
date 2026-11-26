@@ -174,6 +174,8 @@ shot reveal-populated-light-1024 "view=reveal&stream=0" 1024 700
 shot reveal-dense-dark-1280 "view=reveal&stream=0&state=dense" 1280 800
 shot reveal-dense-dark-1024 "view=reveal&stream=0&state=dense" 1024 700
 shot reveal-long-dark-1280 "view=reveal&stream=0&state=long" 1280 800
+shot reveal-long-dark-1024 "view=reveal&stream=0&state=long" 1024 700
+shot reveal-gap-dark-1280 "view=reveal&stream=0&track=S1P7J&section=lineage" 1280 800
 shot reveal-empty-dark-1280 "view=reveal&state=empty" 1280 800
 shot reveal-loading-dark-1280 "view=reveal&state=loading" 1280 800
 shot reveal-error-dark-1280 "view=reveal&state=error" 1280 800
@@ -188,6 +190,8 @@ shot reveal-publish-dark-1280 "view=reveal&stream=0&dialog=publish" 1280 800
 shot reveal-publish-dark-1024 "view=reveal&stream=0&dialog=publish" 1024 700
 shot reveal-publish-light-1280 "view=reveal&stream=0&dialog=publish" 1280 800
 shot reveal-redact-dark-1280 "view=reveal&stream=0&dialog=redact" 1280 800
+shot reveal-redact-dark-1024 "view=reveal&stream=0&dialog=redact" 1024 700
+shot reveal-blocked-dark-1280 "view=reveal&stream=0&dialog=publish&blocked=1" 1280 800
 shot reveal-published-dark-1280 "view=reveal&stream=0&published=1" 1280 800
 shot reveal-published-light-1280 "view=reveal&stream=0&published=1" 1280 800
 shot reveal-published-dark-1024 "view=reveal&stream=0&published=1" 1024 700

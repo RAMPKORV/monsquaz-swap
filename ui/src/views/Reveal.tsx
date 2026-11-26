@@ -8,7 +8,7 @@ import {
   StatusPill,
 } from "../components";
 import { Icon } from "../icons";
-import { previewUrl } from "../data/client";
+import { isDemoMode, previewUrl } from "../data/client";
 import type {
   RevealAlbumTrack,
   RevealComment,
@@ -72,10 +72,21 @@ export function RevealView({
   onAction: (message: string) => void;
 }) {
   const [selectedCode, setSelectedCode] = useState(
-    () => data.album[0]?.trackCode ?? "",
+    () =>
+      new URLSearchParams(window.location.search).get("track") ??
+      data.album[0]?.trackCode ??
+      "",
   );
   const [confirmStreamOff, setConfirmStreamOff] = useState(false);
-  const [publishBlocked, setPublishBlocked] = useState<string[]>([]);
+  const [publishBlocked, setPublishBlocked] = useState<string[]>(() => {
+    if (
+      isDemoMode() &&
+      new URLSearchParams(window.location.search).get("blocked") === "1"
+    ) {
+      return ["Track S7F3A · round 3"];
+    }
+    return [];
+  });
   const [titleDraft, setTitleDraft] = useState("");
   const [commentBody, setCommentBody] = useState("");
   const [commentKind, setCommentKind] = useState("comment");
@@ -323,9 +334,14 @@ export function RevealView({
 
       {streamSafe ? (
         <p className="reveal-safe-note" role="status">
-          <Icon name="shield" size={16} /> Name labels and the host editing tools
-          are hidden. Comment text is shown as written. Publishing stays
-          available.
+          <Icon name="shield" size={16} />
+          {data.published
+            ? " Stream-safe hides the public credits. Turn it off to show the reveal."
+            : " Name labels and the host editing tools are hidden. Comment text is shown as written. Publishing stays available."}
+        </p>
+      ) : data.published ? (
+        <p className="reveal-public-note" role="status">
+          <Icon name="check" size={16} /> The reveal is public. Share the names.
         </p>
       ) : (
         <p className="reveal-unsafe-note" role="status">
@@ -693,8 +709,9 @@ export function RevealView({
           }
         >
           <p>
-            Participant names and the host editing tools become visible. Only
-            turn this off when the screen is not shared.
+            {data.published
+              ? "Participant names, titles, credits, and comments become visible to the stream. This is the published reveal."
+              : "Participant names and the host editing tools become visible. Only turn this off when the screen is not shared."}
           </p>
         </Dialog>
       ) : null}

@@ -3758,7 +3758,8 @@ select.input {
 }
 
 .reveal-safe-note,
-.reveal-unsafe-note {
+.reveal-unsafe-note,
+.reveal-public-note {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3774,6 +3775,11 @@ select.input {
 .reveal-unsafe-note {
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
   color: var(--danger);
+}
+
+.reveal-public-note {
+  border-color: color-mix(in srgb, var(--mint) 35%, transparent);
+  color: var(--mint);
 }
 
 .button[aria-pressed="true"] {
@@ -4233,7 +4239,7 @@ select.input {
 }
 
 .reveal-audio__note {
-  color: var(--faint);
+  color: var(--faint-raised);
 }
 
 .reveal-audio__error {

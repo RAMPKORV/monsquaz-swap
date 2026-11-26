@@ -64,8 +64,16 @@
       "query": "demo=1&static=1&view=reveal"
     },
     {
+      "id": "reveal-gap",
+      "query": "demo=1&static=1&view=reveal&track=S1P7J&section=lineage&stream=0"
+    },
+    {
       "id": "reveal-publish",
       "query": "demo=1&static=1&view=reveal&dialog=publish&stream=0"
+    },
+    {
+      "id": "reveal-blocked",
+      "query": "demo=1&static=1&view=reveal&dialog=publish&blocked=1&stream=0"
     },
     {
       "id": "reveal-redact",

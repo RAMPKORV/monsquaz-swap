@@ -16,6 +16,7 @@ export function PlannerView({
   onGeneratePlan,
   onEditAssignment,
   onLoadCandidates,
+  onRepairGroups,
   onStartEvent,
   onRedactionChange,
 }: {
@@ -32,6 +33,7 @@ export function PlannerView({
     round: number,
     trackCode: string,
   ) => Promise<PlanEditCandidate[]>;
+  onRepairGroups: () => void;
   onStartEvent: () => void;
   onRedactionChange: (active: boolean) => void;
 }) {
@@ -330,6 +332,19 @@ export function PlannerView({
             </span>
           </div>
           <div className="plan-actions">
+            {data.warnings.some(
+              (warning) =>
+                warning.id === "group-size-small" ||
+                warning.id === "group-size-unequal",
+            ) ? (
+              <Button
+                variant="secondary"
+                icon="users"
+                onClick={onRepairGroups}
+              >
+                Repair groups…
+              </Button>
+            ) : null}
             <Button
               variant="secondary"
               icon="refresh"

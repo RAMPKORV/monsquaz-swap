@@ -402,6 +402,15 @@ export async function generatePlan(): Promise<PlanData> {
   return invoke<PlanData>("host_generate_plan");
 }
 
+export async function repairGroups(): Promise<PlanData> {
+  if (isDemoMode()) {
+    await pause(320);
+    demoPlanState = demoPlanState ?? demoPlan("default");
+    return structuredClone(demoPlanState);
+  }
+  return invoke<PlanData>("host_repair_groups");
+}
+
 function demoSwapValid(
   plan: PlanData,
   round: number,

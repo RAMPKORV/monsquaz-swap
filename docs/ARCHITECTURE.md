@@ -126,7 +126,10 @@ At each phase, participants rotate one group forward and tracks stay in their
 owner group. The default cadence is K about T divided by 4. A matching never
 uses an own track or a track that the person has seen. When a group cannot fill
 a phase, the phase uses the global pool, the host sees a warning, and groups
-return in the next phase. Merge repair is the next slice.
+return in the next phase. Before the event starts, the host can repair a draft
+with an underfilled or unequal group. The repair merges or re-splits the
+groups, writes a new plan version with the reason `group repair`, and records
+an audit entry. A routine plan generation does not merge groups.
 
 ## Simulation
 

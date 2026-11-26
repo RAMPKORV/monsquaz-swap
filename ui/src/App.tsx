@@ -40,6 +40,7 @@ import {
   lockRoster,
   openRound,
   revealEvent,
+  repairGroups,
   startEvent,
   loadAuditLog,
   loadMissionControl,
@@ -433,6 +434,20 @@ export default function App() {
     }
   }
 
+  async function handleRepairGroups() {
+    if (demo) {
+      setToast("Preview: groups would merge or re-split before the plan is locked.");
+      return;
+    }
+    try {
+      const next = await repairGroups();
+      setPlan(next);
+      setToast(`Groups repaired. Plan v${next.version}.`);
+    } catch (error) {
+      setToast(`Could not repair groups. ${errorDetail(error)}`);
+    }
+  }
+
   async function handleEditAssignment(
     round: number,
     trackCode: string,
@@ -664,6 +679,7 @@ export default function App() {
         onGeneratePlan={handleGeneratePlan}
         onEditAssignment={handleEditAssignment}
         onLoadCandidates={loadPlanEditCandidates}
+        onRepairGroups={handleRepairGroups}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
       />

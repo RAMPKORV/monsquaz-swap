@@ -65,11 +65,12 @@ Feature: Classic group swaps
     And the participant does not see a group name or other groups
 
   Scenario: Merge is a repair, not a routine phase
-    Given a group phase that becomes infeasible after two participants leave
-    When the planner repairs the phase
-    Then the planner can merge or re-split groups
-    And the planner records the repair
-    And the planner does not merge groups in a routine phase
+    Given a draft classic plan with an underfilled group after participants leave
+    When the host repairs the groups
+    Then the planner merges or re-splits the groups
+    And the planner writes a new plan version with the reason group repair
+    And the app records the repair in the audit log
+    And a routine plan generation does not merge groups
 
   Scenario: The host sees the fun score
     Given a generated classic plan

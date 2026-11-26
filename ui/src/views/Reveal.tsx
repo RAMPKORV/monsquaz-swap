@@ -49,13 +49,38 @@ export function RevealView({
   const [commentBody, setCommentBody] = useState("");
   const [commentKind, setCommentKind] = useState("comment");
   const [commentAuthor, setCommentAuthor] = useState("");
-  const [redactTarget, setRedactTarget] = useState<RevealComment | null>(null);
+  const [redactTarget, setRedactTarget] = useState<RevealComment | null>(() =>
+    new URLSearchParams(window.location.search).get("dialog") === "redact"
+      ? (data.album[0]?.comments[0] ?? null)
+      : null,
+  );
   const [busy, setBusy] = useState(false);
 
   const selected =
     data.album.find((track) => track.trackCode === selectedCode) ??
     data.album[0];
   const people = useParticipants(data);
+  const trackPeople = useMemo(() => {
+    if (!selected) {
+      return [];
+    }
+    const found = new Map<string, string>();
+    found.set(selected.seedOwnerId, selected.seedOwnerName);
+    for (const credit of selected.credits) {
+      if (credit.participantId) {
+        found.set(credit.participantId, credit.displayName);
+      }
+    }
+    for (const comment of selected.comments) {
+      if (comment.participantId) {
+        found.set(comment.participantId, comment.authorName);
+      }
+    }
+    return Array.from(found, ([id, name]) => ({ id, name })).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    );
+  }, [selected]);
+  const commentChoices = trackPeople.length > 0 ? trackPeople : people;
   const previewOnly = !data.published;
 
   useEffect(() => {
@@ -63,10 +88,19 @@ export function RevealView({
   }, [selected?.trackCode, selected?.title]);
 
   useEffect(() => {
-    if (!people.some((person) => person.id === commentAuthor)) {
-      setCommentAuthor(people[0]?.id ?? "");
+    const section = new URLSearchParams(window.location.search).get("section");
+    if (section) {
+      document
+        .getElementById(`reveal-${section}-title`)
+        ?.scrollIntoView({ block: "start" });
     }
-  }, [commentAuthor, people]);
+  }, [data]);
+
+  useEffect(() => {
+    if (!commentChoices.some((person) => person.id === commentAuthor)) {
+      setCommentAuthor(commentChoices[0]?.id ?? "");
+    }
+  }, [commentAuthor, commentChoices]);
 
   const seedVersion = selected?.versions[0];
   const finalVersion = selected?.versions[selected.versions.length - 1];
@@ -434,7 +468,7 @@ export function RevealView({
                         value={commentAuthor}
                         onChange={(event) => setCommentAuthor(event.target.value)}
                       >
-                        {people.map((person) => (
+                        {commentChoices.map((person) => (
                           <option key={person.id} value={person.id}>
                             {person.name}
                           </option>
@@ -492,7 +526,11 @@ export function RevealView({
               >
                 Cancel
               </Button>
-              <Button variant="danger" onClick={() => void confirmRedact()}>
+              <Button
+                variant="danger"
+                className="dialog__danger-action"
+                onClick={() => void confirmRedact()}
+              >
                 Redact comment
               </Button>
             </>

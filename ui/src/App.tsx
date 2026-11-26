@@ -260,7 +260,7 @@ export default function App() {
   }, [dialogOpen, botDialogOpen, paletteOpen]);
 
   useEffect(() => {
-    if (view !== "mission") {
+    if (view !== "mission" && view !== "reveal") {
       return;
     }
     const timer = window.setInterval(() => {

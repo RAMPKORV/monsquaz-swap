@@ -73,6 +73,9 @@ manual count and size controls are enabled only for the Manual group mode.
 Soft-bound and cadence warnings do not block the plan. Participants rotate one
 group forward at each phase. A group phase that cannot fill uses the global pool
 for that phase and reports a host warning. Groups return in the next phase.
+Before the event starts, the host can repair an underfilled or unequal draft.
+The repair writes a new plan version with the reason `group repair` and an audit
+entry. Active-phase replans are not in v1.
 
 Rules:
 

@@ -17,8 +17,8 @@ use swap_db::{
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
     edit_plan_assignment, generate_schedule, lock_roster, open_round, plan_edit_candidates,
-    redact_track_comment, reveal_package, reveal_with_channel, set_track_title,
-    start_event_with_channel,
+    redact_track_comment, repair_group_schedule, reveal_package, reveal_with_channel,
+    set_track_title, start_event_with_channel,
 };
 
 #[derive(Debug, Serialize)]
@@ -1225,6 +1225,34 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
 pub fn host_generate_plan(app: AppHandle) -> Result<PlanDataDto, String> {
     let db = open_db(&app)?;
     generate_host_plan(&db)
+}
+
+#[tauri::command]
+pub fn host_repair_groups(app: AppHandle) -> Result<PlanDataDto, String> {
+    let db = open_db(&app)?;
+    repair_host_groups(&db)
+}
+
+fn repair_host_groups(db: &Db) -> Result<PlanDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    let outcome = repair_group_schedule(db, &event.id, now).map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now,
+        "Host",
+        "Groups repaired",
+        Some(&format!("Plan v{}", outcome.version)),
+        &serde_json::json!({
+            "from": outcome.previous_sizes,
+            "to": outcome.sizes,
+            "commitment": outcome.commitment
+        })
+        .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    plan_data(db)
 }
 
 fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
@@ -2542,6 +2570,55 @@ mod tests {
             .expect("the small group warning is present");
         assert_eq!(warning.severity, "info");
         assert!(warning.detail.contains("3"));
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn group_repair_merges_the_underfilled_group_and_records_it() {
+        let (db, directory) = test_db("group-repair");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Repair Groups".to_string(),
+                rounds: Some(4),
+                group_mode: "Manual".to_string(),
+                group_count: 2,
+                group_size: 4,
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..10 {
+            let id = format!("u-{index:02}");
+            let name = format!("Person {index:02}");
+            let code = format!("T{index:02}");
+            seed_person(&db, &created.id, &id, &name);
+            seed_track(&db, &created.id, &code, &id);
+        }
+        lock_host_roster(&db).unwrap();
+        let before = generate_host_plan(&db).unwrap();
+        assert_eq!(before.groups.len(), 3);
+
+        let repaired = repair_host_groups(&db).unwrap();
+        assert_eq!(repaired.version, 2);
+        assert_eq!(repaired.groups.len(), 2);
+        assert!(repaired.groups.iter().all(|group| group.size == 5));
+
+        let entries = AuditRepo::list_for_event(db.conn(), &created.id).unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.action == "Groups repaired")
+            .expect("the repair is in the audit log");
+        let detail: serde_json::Value = serde_json::from_str(&entry.detail_json).unwrap();
+        assert_eq!(detail["from"], serde_json::json!([4, 4, 2]));
+        assert_eq!(detail["to"], serde_json::json!([5, 5]));
+
+        assert_eq!(
+            repair_host_groups(&db).unwrap_err(),
+            "the groups do not need repair"
+        );
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

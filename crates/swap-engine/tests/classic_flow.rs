@@ -2045,6 +2045,46 @@ fn group_events_rotate_participants_and_keep_tracks() {
 }
 
 #[test]
+fn group_repair_merges_an_underfilled_group_only_when_needed() {
+    use swap_engine::repair_group_schedule;
+
+    let settings = EventSettings {
+        rounds: Some(4),
+        group_mode: Some("Manual".to_string()),
+        group_count: Some(2),
+        group_size: Some(4),
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(10, 0, settings);
+    fixture.lock_and_schedule();
+    let before = PlanRepo::latest(fixture.db.conn(), EVENT).unwrap().unwrap();
+    let before_settings: EventSettings = serde_json::from_str(&before.settings_json).unwrap();
+    assert_eq!(before_settings.group_count, Some(3));
+
+    let repair = repair_group_schedule(&fixture.db, EVENT, T4).unwrap();
+    assert_eq!(repair.version, 2);
+    assert_eq!(repair.previous_sizes, vec![4, 4, 2]);
+    assert_eq!(repair.sizes, vec![5, 5]);
+    let after = PlanRepo::latest(fixture.db.conn(), EVENT).unwrap().unwrap();
+    assert_eq!(after.version, 2);
+    assert_eq!(after.reason.as_deref(), Some("group repair"));
+    assert_eq!(after.commitment, repair.commitment);
+    let after_settings: EventSettings = serde_json::from_str(&after.settings_json).unwrap();
+    assert_eq!(after_settings.group_count, Some(2));
+    assert_eq!(after_settings.group_size, Some(5));
+    assert_eq!(
+        PlanRepo::list_assignments(fixture.db.conn(), EVENT, 2)
+            .unwrap()
+            .len(),
+        40
+    );
+    assert!(matches!(
+        repair_group_schedule(&fixture.db, EVENT, T5),
+        Err(EngineError::GroupRepairNotNeeded)
+    ));
+}
+
+#[test]
 fn locking_the_schedule_publishes_the_latest_commitment() {
     let fixture = Fixture::with_settings(
         5,

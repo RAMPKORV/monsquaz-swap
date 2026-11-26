@@ -136,6 +136,8 @@ pub enum EngineError {
     CommentNotFound(String),
     #[error(transparent)]
     GroupSchedule(#[from] swap_core::GroupScheduleError),
+    #[error("the groups do not need repair")]
+    GroupRepairNotNeeded,
     #[error("the comment is already redacted")]
     CommentAlreadyRedacted,
     #[error("the participant did not work on this track")]
@@ -202,6 +204,14 @@ pub struct ScheduleOutcome {
     pub commitment: String,
     pub fallback: bool,
     pub assignments: Vec<PlanAssignmentRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRepairOutcome {
+    pub version: u32,
+    pub commitment: String,
+    pub previous_sizes: Vec<u32>,
+    pub sizes: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -623,6 +633,81 @@ pub fn generate_schedule(
     event_id: &str,
     now: i64,
 ) -> Result<ScheduleOutcome, EngineError> {
+    generate_schedule_internal(db, event_id, now, None, None)
+}
+
+/// Merge or re-split groups before the event starts.
+///
+/// The repair runs only when the current plan has a group below the soft
+/// minimum or a size difference larger than one. A routine plan generation
+/// does not merge groups.
+pub fn repair_group_schedule(
+    db: &Db,
+    event_id: &str,
+    now: i64,
+) -> Result<GroupRepairOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "group repair",
+        "schedule review",
+    )?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    let settings: EventSettings = serde_json::from_str(&plan.settings_json).unwrap_or_default();
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let active = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == Readiness::Ready
+        })
+        .count();
+    if active == 0 {
+        return Err(EngineError::NoParticipants);
+    }
+    let count = settings
+        .group_count
+        .unwrap_or(1)
+        .clamp(1, swap_core::MAX_GROUP_COUNT);
+    let previous_sizes = swap_core::group_sizes(active, count, settings.group_size.unwrap_or(0));
+    if previous_sizes.len() <= 1 {
+        return Err(EngineError::GroupRepairNotNeeded);
+    }
+    let smallest = previous_sizes.iter().copied().min().unwrap_or(0);
+    let largest = previous_sizes.iter().copied().max().unwrap_or(0);
+    if smallest >= swap_core::MIN_GROUP_SIZE && largest.saturating_sub(smallest) <= 1 {
+        return Err(EngineError::GroupRepairNotNeeded);
+    }
+    let next_count = if smallest < swap_core::MIN_GROUP_SIZE {
+        count.saturating_sub(1).max(1)
+    } else {
+        count
+    };
+    let sizes = swap_core::group_sizes(active, next_count, 0);
+    let schedule = generate_schedule_internal(
+        db,
+        event_id,
+        now,
+        Some((next_count, 0)),
+        Some("group repair"),
+    )?;
+    Ok(GroupRepairOutcome {
+        version: schedule.version,
+        commitment: schedule.commitment,
+        previous_sizes,
+        sizes,
+    })
+}
+
+fn generate_schedule_internal(
+    db: &Db,
+    event_id: &str,
+    now: i64,
+    group_override: Option<(u32, u32)>,
+    plan_reason: Option<&str>,
+) -> Result<ScheduleOutcome, EngineError> {
     let event = load_event(db, event_id)?;
     require_state(
         &event,
@@ -675,7 +760,12 @@ pub fn generate_schedule(
         ));
     }
     let mut settings = settings;
-    if settings.mode == Mode::Classic {
+    if let Some((count, size)) = group_override {
+        let sizes = swap_core::group_sizes(active.len(), count, size);
+        settings.group_count = Some(sizes.len() as u32);
+        settings.group_size = Some(sizes.iter().copied().max().unwrap_or(0));
+        settings.group_mode = Some("Manual".to_string());
+    } else if settings.mode == Mode::Classic {
         match settings.group_mode.as_deref().unwrap_or("Lookup") {
             "Manual" => {
                 let count = settings
@@ -781,7 +871,7 @@ pub fn generate_schedule(
         settings_json,
         commitment: String::new(),
         committed_at: now,
-        reason: None,
+        reason: plan_reason.map(str::to_string),
     };
     let commitment = plan_commitment(&plan, &planned);
     let plan = PlanRecord {

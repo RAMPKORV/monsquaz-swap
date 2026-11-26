@@ -21,14 +21,14 @@ pub use delivery::{
 pub use effects::{Effect, dispatch};
 pub use engine::{
     ClaimOutcome, CreditEntry, DeadlineDecisionOutcome, DeadlineReport, EngineError, EventStatus,
-    ExpireOutcome, ExtensionOutcome, ExtensionStatus, JoinOutcome, JoinRequest, LockOutcome,
-    OpenRoundOutcome, PlanEditCandidate, RevealComment, RevealOutcome, RevealPackage, RevealStats,
-    RevealTrack, RevealVersion, RevealVersionRole, ScheduleOutcome, SkipOutcome, StartOutcome,
-    SubmissionSource, SubmitOutcome, SubmitRequest, TrackCredits, add_track_comment, claim,
-    create_event, decide_deadline, decide_extension, edit_plan_assignment, event_status,
+    ExpireOutcome, ExtensionOutcome, ExtensionStatus, GroupRepairOutcome, JoinOutcome, JoinRequest,
+    LockOutcome, OpenRoundOutcome, PlanEditCandidate, RevealComment, RevealOutcome, RevealPackage,
+    RevealStats, RevealTrack, RevealVersion, RevealVersionRole, ScheduleOutcome, SkipOutcome,
+    StartOutcome, SubmissionSource, SubmitOutcome, SubmitRequest, TrackCredits, add_track_comment,
+    claim, create_event, decide_deadline, decide_extension, edit_plan_assignment, event_status,
     expire_offer, generate_schedule, join_with_seed, lock_roster, open_decisions, open_round,
-    plan_edit_candidates, redact_track_comment, request_extension, reveal, reveal_package,
-    reveal_with_channel, set_track_title, set_track_title_for_user,
+    plan_edit_candidates, redact_track_comment, repair_group_schedule, request_extension, reveal,
+    reveal_package, reveal_with_channel, set_track_title, set_track_title_for_user,
     set_track_title_for_user_on_track, signup, skip, start_event, start_event_with_channel, submit,
     submit_attachment, tick_deadlines,
 };

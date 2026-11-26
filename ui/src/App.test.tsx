@@ -184,7 +184,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save title" }));
     expect(await screen.findByText("Track title saved.")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { level: 2, name: "New Name" }),
+      await screen.findByRole("heading", { level: 2, name: "New Name" }),
     ).toBeInTheDocument();
   });
 

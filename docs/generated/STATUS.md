@@ -3,23 +3,23 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 15 · **Ready leaves:** 2  
+**Blocked issues:** 13 · **Ready leaves:** 3  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 27
+**Stale scores:** 25
 
 ## Issues by status
 
 | Status | Count |
 |---|---|
-| Triage | 14 |
+| Triage | 13 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 13 |
+| Ready for implementation | 12 |
 | Implementation | 0 |
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 29 |
+| Done | 31 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -28,7 +28,8 @@
 | Rank | Key | Title | Status | Bucket |
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
-| 22 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 11 | `MSW-022` | Async dispatcher, Ready gate, and expiry protection | ready | 2 |
+| 21 | `MSW-044` | Delivery transport dedupe | ready | 1 |
 
 ## Last session
 

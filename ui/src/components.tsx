@@ -318,6 +318,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
+        aria-describedby={`${labelledBy}-body`}
         ref={dialogRef}
       >
         <div className="dialog__header">
@@ -332,7 +333,9 @@ export function Dialog({
             <Icon name="x" size={18} />
           </button>
         </div>
-        <div className="dialog__body">{children}</div>
+        <div className="dialog__body" id={`${labelledBy}-body`}>
+          {children}
+        </div>
         <div className="dialog__footer">{footer}</div>
       </div>
     </div>

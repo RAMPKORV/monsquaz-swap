@@ -106,6 +106,27 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("confirms a missed turn before it changes seen state", async () => {
+    setUrl("?demo=1&state=default&dialog=decision");
+    render(<App />);
+    const review = await screen.findByRole("dialog", {
+      name: "Track S7F3A is overdue",
+    });
+    fireEvent.click(
+      within(review).getByRole("button", { name: "Mark turn missed" }),
+    );
+    const confirm = await screen.findByRole("dialog", {
+      name: "Mark the turn missed?",
+    });
+    expect(document.activeElement).toHaveTextContent("Cancel");
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "Mark turn missed" }),
+    );
+    expect(
+      await screen.findByText(/host action “missed”/i),
+    ).toBeInTheDocument();
+  });
+
   it("shows the first-run state", async () => {
     setUrl("?demo=1&state=empty");
     render(<App />);

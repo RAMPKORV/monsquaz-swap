@@ -33,6 +33,7 @@ pub enum Effect {
         content: String,
     },
     HostAlert {
+        key: String,
         content: String,
     },
 }

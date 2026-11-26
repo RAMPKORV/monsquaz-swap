@@ -72,6 +72,9 @@ export type Decision = {
   assignmentId?: string;
   decisionId?: string;
   requestedHours?: number;
+  deadline?: string;
+  newDeadline?: string;
+  extensionsUsed?: number;
 };
 
 export type ActivityEntry = {

@@ -51,6 +51,7 @@ pub enum PendingDelivery {
         content: String,
     },
     HostAlert {
+        key: String,
         content: String,
     },
 }
@@ -97,7 +98,8 @@ impl PendingDelivery {
                 channel_id: channel_id.clone(),
                 content: content.clone(),
             },
-            Effect::HostAlert { content } => Self::HostAlert {
+            Effect::HostAlert { key, content } => Self::HostAlert {
+                key: key.clone(),
                 content: content.clone(),
             },
         }
@@ -145,8 +147,8 @@ impl PendingDelivery {
                 "channel:{channel_id}:{now}:{}",
                 sha256_hex(content.as_bytes())
             ),
-            Self::HostAlert { content } => {
-                format!("host_alert:{now}:{}", sha256_hex(content.as_bytes()))
+            Self::HostAlert { key, content } => {
+                format!("host_alert:{key}:{now}:{}", sha256_hex(content.as_bytes()))
             }
         }
     }
@@ -355,7 +357,7 @@ impl DeliveryWorker {
                 }
             };
             let result = match &delivery {
-                PendingDelivery::HostAlert { content } => {
+                PendingDelivery::HostAlert { content, .. } => {
                     self.send_host_alert(discord, content).await.map(|()| None)
                 }
                 _ => deliver(&self.store, discord, &delivery).await,
@@ -881,6 +883,7 @@ mod worker_alerts {
             db.conn(),
             "evt-1",
             &PendingDelivery::HostAlert {
+                key: "assignment-1".to_string(),
                 content: "A track deadline needs a host decision.".to_string(),
             },
             10,

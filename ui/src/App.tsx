@@ -284,7 +284,9 @@ export default function App() {
       return;
     }
     if (label === "Review decisions") {
-      document.getElementById("decisions-title")?.scrollIntoView({ block: "start" });
+      const heading = document.getElementById("decisions-title");
+      heading?.scrollIntoView({ block: "start" });
+      heading?.focus();
       setToast("Review the decisions below. Nothing moves until you choose.");
       return;
     }

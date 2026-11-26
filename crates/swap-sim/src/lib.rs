@@ -528,7 +528,7 @@ fn audit_outbound(
             }
             Effect::Dm { content, .. }
             | Effect::Channel { content, .. }
-            | Effect::HostAlert { content } => {
+            | Effect::HostAlert { content, .. } => {
                 if contains_name(content, display_names) {
                     return (false, "a message leaks a participant name".to_string());
                 }

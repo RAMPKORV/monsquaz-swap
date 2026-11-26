@@ -57,11 +57,15 @@ const defaultDecisions: Decision[] = [
   {
     id: "decision-1",
     kind: "Deadline",
-    title: "S7F3A passed its deadline",
+    title: "Track S7F3A is overdue",
     detail:
-      "The current holder still has the track. Other participants cannot see it until the reveal. Decide whether to extend, skip, or wait.",
+      "Noor still holds Track S7F3A. Only the host can see this decision. Extend 6 hours, mark the turn missed, or keep waiting.",
     due: "42 minutes ago",
     actionLabel: "Review",
+    assignmentId: "assignment-1",
+    deadline: "25 Nov, 18:00 CET",
+    newDeadline: "26 Nov, 00:00 CET",
+    extensionsUsed: 0,
   },
   {
     id: "decision-2",
@@ -89,7 +93,7 @@ const defaultActivity: ActivityEntry[] = [
     at: "17:12",
     actor: "Host",
     action: "extended a deadline",
-    subject: "S7F3A, +6 hours",
+    subject: "S9Q1B, +6 hours",
   },
   {
     id: "activity-2",
@@ -316,7 +320,7 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       eyebrow: "Next action",
       title: "Review the extension request",
       detail:
-        "Noor asked for six more hours on S7F3A. The deadline does not move until you decide.",
+        "Noor asked for 6 more hours on Track S7F3A. The deadline does not move until you decide.",
       actionLabel: "Review decisions",
       secondaryLabel: null,
       tone: "attention",
@@ -327,12 +331,15 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         kind: "Extension",
         title: "Noor asked for 6 more hours",
         detail:
-          "Noor has used no extensions. Track S7F3A keeps its holder until the host decides. Approve to move the deadline, or refuse to keep it.",
+          "Noor has used 1 of 2 extensions. This is the second request. Noor keeps Track S7F3A until you decide.",
         due: "Awaiting host",
         actionLabel: "Review",
         assignmentId: "assignment-1",
         decisionId: "decision-1",
         requestedHours: 6,
+        deadline: "26 Nov, 09:00 CET",
+        newDeadline: "26 Nov, 15:00 CET",
+        extensionsUsed: 1,
       },
     ];
     return mission;

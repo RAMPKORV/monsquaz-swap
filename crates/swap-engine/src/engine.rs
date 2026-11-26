@@ -1377,6 +1377,7 @@ pub fn request_extension(
         &transaction,
         event_id,
         &Effect::HostAlert {
+            key: decision_id.clone(),
             content: "A participant requested an extension. Open the host decision card."
                 .to_string(),
         },
@@ -1415,6 +1416,9 @@ pub fn decide_extension(
     if decision.kind != "extension" {
         return Err(EngineError::WrongDecisionKind(decision.kind));
     }
+    let event = EventRepo::get(&transaction, &decision.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(decision.event_id.clone()))?;
+    require_open_event(&event, "extension decision")?;
     let assignment_id = decision
         .assignment_id
         .clone()
@@ -1715,6 +1719,7 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                             &transaction,
                             &event.id,
                             &Effect::HostAlert {
+                                key: assignment.id.clone(),
                                 content: "A track deadline needs a host decision.".to_string(),
                             },
                             now,

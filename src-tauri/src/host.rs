@@ -11,8 +11,8 @@ use tauri::{AppHandle, Manager, State};
 
 use swap_core::{EventState, Membership, Role};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, EventRecord, EventRepo, MetaRepo, ParticipantRepo, PlanRepo,
-    TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeadlineRepo, EventRecord, EventRepo, MetaRepo, ParticipantRepo,
+    PlanRepo, TrackRepo,
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, create_event, generate_schedule,
@@ -119,6 +119,9 @@ struct DecisionDto {
     assignment_id: Option<String>,
     decision_id: Option<String>,
     requested_hours: Option<i64>,
+    deadline: Option<String>,
+    new_deadline: Option<String>,
+    extensions_used: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1349,6 +1352,9 @@ fn mission_control_with_health(
             assignment_id: None,
             decision_id: None,
             requested_hours: None,
+            deadline: None,
+            new_deadline: None,
+            extensions_used: None,
         });
     }
     if let Ok(open) = swap_db::HostDecisionRepo::list_open(db.conn(), &event.id) {
@@ -1390,6 +1396,14 @@ fn mission_control_with_health(
                         .to_string(),
                 )
             };
+            let due_at = assignment.and_then(|assignment| assignment.due_at);
+            let hours = decision.requested_hours.unwrap_or(6);
+            let deadline = due_at.map(|at| format_local_time(at, &settings.timezone));
+            let new_deadline =
+                due_at.map(|at| format_local_time(at + hours * 3_600, &settings.timezone));
+            let extensions_used = assignment
+                .and_then(|assignment| DeadlineRepo::get(db.conn(), &assignment.id).ok().flatten())
+                .map(|deadline| deadline.extension_count);
             decisions.push(DecisionDto {
                 id: format!("host-{}", decision.id),
                 kind: kind.to_string(),
@@ -1400,6 +1414,9 @@ fn mission_control_with_health(
                 assignment_id: decision.assignment_id.clone(),
                 decision_id: Some(decision.id),
                 requested_hours: decision.requested_hours,
+                deadline,
+                new_deadline,
+                extensions_used,
             });
         }
     }

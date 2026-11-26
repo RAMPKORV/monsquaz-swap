@@ -42,18 +42,18 @@
       "description": "A rendered page must declare width=device-width."
     },
     "spacing-scale": {
-      "status": "advisory",
-      "description": "Padding, margin, and gap values should use the spacing scale.",
+      "status": "locked",
+      "description": "Padding, margin, and gap values must use the spacing scale.",
       "scale": [0, 2, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64]
     },
     "type-scale": {
-      "status": "advisory",
-      "description": "Font sizes should use the type scale.",
+      "status": "locked",
+      "description": "Font sizes must use the type scale.",
       "scale": [10, 10.5, 11, 11.5, 12, 13, 14, 16, 18, 20, 24, 30, 44]
     },
     "radius-scale": {
-      "status": "advisory",
-      "description": "Border radii should use the radius scale.",
+      "status": "locked",
+      "description": "Border radii must use the radius scale.",
       "scale": [0, 4, 6, 8, 12, 16, 999]
     },
     "shadow-token": {

@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 13 · **Ready leaves:** 3  
+**Blocked issues:** 13 · **Ready leaves:** 5  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 23
+**Stale scores:** 25
 
 ## Issues by status
 
@@ -14,7 +14,7 @@
 | Triage | 10 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 13 |
+| Ready for implementation | 15 |
 | Implementation | 0 |
 | Reviewing | 0 |
 | Testing | 0 |
@@ -30,6 +30,8 @@
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 22 | `MSW-044` | Delivery transport dedupe | ready | 1 |
 | 23 | `MSW-048` | Localize host UI copy and add copyable join instructions | ready | 1 |
+| 24 | `MSW-049` | Classic deadline tick, reminders, and extensions | ready | 1 |
+| 25 | `MSW-050` | Reveal presenter, credits, and stream-safe mode | ready | 1 |
 
 ## Last session
 

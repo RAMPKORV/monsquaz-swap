@@ -496,7 +496,7 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
         .filter(|participant| {
             matches!(
                 participant.membership,
-                Membership::Seeded | Membership::Active
+                Membership::SignedUp | Membership::Seeded | Membership::Active
             )
         })
         .count();
@@ -857,7 +857,7 @@ fn event_rounds(db: &Db, event: &EventRecord) -> Result<u32, String> {
         .filter(|participant| {
             matches!(
                 participant.membership,
-                Membership::Seeded | Membership::Active
+                Membership::SignedUp | Membership::Seeded | Membership::Active
             )
         })
         .count();
@@ -1253,11 +1253,21 @@ fn mission_control_with_health(
     } else if matches!(event.state, EventState::Paused) {
         None
     } else if !roster_locked && event_summary.tracks > 0 {
+        let missing = event_summary
+            .participants
+            .saturating_sub(event_summary.tracks);
         Some(NextActionDto {
             eyebrow: "Next action".to_string(),
             title: "Lock the roster".to_string(),
-            detail: "Seeds are in. Lock the roster to close seed intake and build the schedule."
-                .to_string(),
+            detail: if missing == 0 {
+                "All seeds are in. Lock the roster to close seed intake and build the schedule."
+                    .to_string()
+            } else {
+                format!(
+                    "{} seeds are in and {} people still need a seed. Locking closes seed intake; those people become fill-ins.",
+                    event_summary.tracks, missing
+                )
+            },
             action_label: "Lock roster".to_string(),
             secondary_label: None,
             tone: "attention".to_string(),
@@ -1314,10 +1324,14 @@ fn mission_control_with_health(
         },
         EventFactDto {
             label: "People".to_string(),
-            value: format!(
-                "{} active, including {} fill-ins",
-                event_summary.participants, event_summary.fill_ins
-            ),
+            value: if roster_locked {
+                format!(
+                    "{} active, including {} fill-ins",
+                    event_summary.participants, event_summary.fill_ins
+                )
+            } else {
+                format!("{} signed up", event_summary.participants)
+            },
         },
         EventFactDto {
             label: "Tracks".to_string(),
@@ -1858,6 +1872,52 @@ mod tests {
         assert_eq!(entries[0].action, "Event created");
         assert_eq!(entries[0].subject, "Live Mission");
 
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_lock_action_counts_signups_without_seeds() {
+        let (db, directory) = test_db("lock-counts");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Locked Soon".to_string(),
+                rounds: Some(2),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..2 {
+            let id = format!("u-seed-{index}");
+            seed_person(&db, &created.id, &id, &format!("Seed {index}"));
+            seed_track(&db, &created.id, &format!("T{index}"), &id);
+        }
+        for index in 0..2 {
+            ParticipantRepo::upsert(
+                db.conn(),
+                &swap_db::ParticipantRecord {
+                    event_id: created.id.clone(),
+                    user_id: format!("u-signup-{index}"),
+                    display_name: format!("Signup {index}"),
+                    role: Role::Participant,
+                    membership: Membership::SignedUp,
+                    readiness: swap_core::Readiness::Ready,
+                    timezone: "UTC".to_string(),
+                    max_handoffs: 3,
+                    created_at: 100,
+                    updated_at: 100,
+                },
+            )
+            .unwrap();
+        }
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        let event = mission.event.unwrap();
+        assert_eq!(event.participants, 4);
+        assert_eq!(event.seeded, 2);
+        let action = mission.next_action.unwrap();
+        assert_eq!(action.action_label, "Lock roster");
+        assert!(action.detail.contains("2 people still need a seed"));
         drop(db);
         fs::remove_dir_all(directory).unwrap();
     }

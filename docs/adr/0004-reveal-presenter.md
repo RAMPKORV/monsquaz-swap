@@ -63,9 +63,11 @@ file bytes or absolute paths. Module files are not playable in a browser.
 - The presenter is useful before the reveal and read-only after it.
 - The host can check the exact audio and credits before the public reveal.
 - A missing final title does not block the reveal. The presenter labels the
-  track "Untitled" and the host can set a title before publish. An automatic
-  fallback to the previous submitter is deferred. The host is the fallback for
-  this version.
+  track "Untitled" and the host can set a title before publish. The bot also
+  asks the previous submitter when the final holder does not name the track.
+  The previous submitter uses `/swap title` with the track code. The final
+  holder keeps priority until a title exists. The app records the fallback in
+  the audit log.
 - The first audio request for a long module can take seconds. The UI shows a
   native audio control and the render is cached for later requests.
 - The preview protocol reads the database per request. This is acceptable for

@@ -110,6 +110,12 @@ Feature: Reveal and album
     When the final submission is accepted
     Then the bot asks for the final title
     And the app stores the title for the reveal
+
+  Scenario: The previous submitter names the final track when the final holder does not
+    Given a final track without a title
     When the final holder does not provide a title
-    Then the host can set the title before the reveal
+    Then the bot asks the previous submitter for the title
+    And the previous submitter can use /swap title with the track code
+    And the app records the fallback in the audit log
+    And the host can set the title before the reveal
     And the app keeps the track code until a title is set

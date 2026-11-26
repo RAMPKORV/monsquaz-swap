@@ -66,6 +66,8 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
     fireEvent.click(screen.getByRole("button", { name: "Lock roster" }));
+    const dialog = await screen.findByRole("dialog", { name: "Lock the roster?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lock roster" }));
     expect(await screen.findByText(/Roster locked\. 12 active/i)).toBeInTheDocument();
   });
 
@@ -74,6 +76,10 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
     fireEvent.click(screen.getByRole("button", { name: "Reveal event" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Reveal the event?",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reveal event" }));
     expect(
       await screen.findByText(/2 track credits are queued/i),
     ).toBeInTheDocument();
@@ -85,7 +91,7 @@ describe("App", () => {
     expect(
       await screen.findByText(/Discord rejected the bot token/i),
     ).toBeInTheDocument();
-    expect(screen.getByText("Offline")).toBeInTheDocument();
+    expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
   });
 
   it("shows the first-run state", async () => {
@@ -471,7 +477,7 @@ describe("App", () => {
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     await screen.findByRole("heading", { level: 1, name: "Settings" });
-    expect(screen.getByText("Configured")).toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reconnect bot" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove connection" }));
     fireEvent.click(

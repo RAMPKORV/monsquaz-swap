@@ -55,6 +55,28 @@ export function SettingsView({
     onSettings({ ...settings, [key]: value });
   }
 
+  const connectionTone = !settings.botConfigured
+    ? ("warn" as const)
+    : settings.gateway?.state === "online"
+      ? ("ok" as const)
+      : settings.gateway?.state === "reconnecting" ||
+          settings.gateway?.state === "starting"
+        ? ("warn" as const)
+        : settings.gateway
+          ? ("danger" as const)
+          : ("muted" as const);
+  const connectionLabel = !settings.botConfigured
+    ? "Not configured"
+    : settings.gateway?.state === "online"
+      ? "Connected"
+      : settings.gateway?.state === "starting"
+        ? "Connecting"
+        : settings.gateway?.state === "reconnecting"
+          ? "Reconnecting"
+          : settings.gateway
+            ? "Offline"
+            : "Token stored";
+
   return (
     <div className="view">
       <form
@@ -117,9 +139,7 @@ export function SettingsView({
                   again after you save it.
                 </p>
               </div>
-              <StatusPill tone={settings.botConfigured ? "ok" : "warn"}>
-                {settings.botConfigured ? "Configured" : "Not configured"}
-              </StatusPill>
+              <StatusPill tone={connectionTone}>{connectionLabel}</StatusPill>
             </div>
 
             <div className="connection-row">
@@ -136,20 +156,24 @@ export function SettingsView({
               </div>
             </div>
 
-            <div className="connection-row" aria-live="polite">
+            <div className="connection-row">
               <span className="connection-row__icon">
                 <Icon name="bot" size={24} />
+              </span>
+              <span className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+                Gateway {connectionLabel}.
               </span>
               <div className="connection-row__copy">
                 <span className="field-label">Gateway</span>
                 <span className="field-help">
                   {settings.gateway
                     ? settings.gateway.state === "online"
-                      ? `Connected${settings.gateway.attempt > 0 ? ` after ${settings.gateway.attempt} retries` : ""}.`
-                      : settings.gateway.state === "reconnecting" ||
-                          settings.gateway.state === "starting"
-                        ? `Reconnecting. Attempt ${settings.gateway.attempt}.${settings.gateway.lastError ? ` ${settings.gateway.lastError}` : ""}`
-                        : `Offline.${settings.gateway.lastError ? ` ${settings.gateway.lastError}` : ""}`
+                      ? `Connected to Discord.${settings.gateway.attempt > 0 ? ` Connected after ${settings.gateway.attempt} ${settings.gateway.attempt === 1 ? "retry" : "retries"}.` : ""}`
+                      : settings.gateway.state === "starting"
+                        ? "Starting the gateway."
+                        : settings.gateway.state === "reconnecting"
+                          ? `Attempt ${settings.gateway.attempt}. Offers and replies wait in the local queue until the gateway reconnects.${settings.gateway.lastError ? ` ${settings.gateway.lastError}` : ""}`
+                          : settings.gateway.lastError ?? "The gateway is not running."
                     : "The gateway is not running."}
                 </span>
               </div>

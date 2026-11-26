@@ -67,6 +67,7 @@ export function initialScenario(): Scenario {
     "dense",
     "offline",
     "reconnecting",
+    "not-started",
     "lock-ready",
     "round-ready",
     "reveal-ready",

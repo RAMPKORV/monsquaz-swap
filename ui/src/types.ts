@@ -9,6 +9,7 @@ export type Scenario =
   | "dense"
   | "offline"
   | "reconnecting"
+  | "not-started"
   | "lock-ready"
   | "round-ready"
   | "reveal-ready"
@@ -39,7 +40,7 @@ export type EventSummary = {
 };
 
 export type BotHealth = {
-  status: "Online" | "Reconnecting" | "Offline" | "Not configured";
+  status: "Online" | "Connecting" | "Reconnecting" | "Offline" | "Not configured";
   label: string;
   detail: string;
   lastSeen: string | null;

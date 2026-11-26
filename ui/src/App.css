@@ -757,6 +757,17 @@ textarea {
   color: var(--danger);
 }
 
+.banner--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+.banner--warn svg {
+  flex: none;
+  color: var(--warn);
+}
+
 .banner--info {
   border-color: var(--line-strong);
   background: var(--info-soft);
@@ -946,8 +957,11 @@ textarea {
 }
 
 .timeline__step--current .timeline__dot {
+  width: 11px;
+  height: 11px;
+  border-width: 3px;
   border-color: var(--accent);
-  background: var(--accent);
+  background: var(--bg);
 }
 
 .timeline__label {
@@ -1439,6 +1453,10 @@ select.input {
 }
 
 .connection-row .field-help {
+  color: var(--faint-raised);
+}
+
+.connection-row .status--muted {
   color: var(--faint-raised);
 }
 

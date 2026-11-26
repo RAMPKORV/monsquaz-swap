@@ -768,9 +768,20 @@ impl InboundService {
             )
             .map_err(|error| error.to_string())?;
         }
+        let settings: EventSettings =
+            serde_json::from_str(&event.settings_json).unwrap_or_default();
+        let formats = settings
+            .allowed_extensions
+            .iter()
+            .map(|extension| format!(".{extension}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let max_mib = settings.max_file_bytes / (1024 * 1024);
         self.notify(
             user_id,
-            "You are signed up. Send one allowed seed file to this direct message. The bot stores the file locally.",
+            &format!(
+                "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. The bot stores the file locally."
+            ),
         )
         .await;
         Ok(())
@@ -997,6 +1008,7 @@ fn terminal_join(error: &EngineError) -> bool {
         error,
         EngineError::AlreadySeeded
             | EngineError::ParticipantLeft
+            | EngineError::WrongEventState { .. }
             | EngineError::File(_)
             | EngineError::Prepare(_)
             | EngineError::Settings(_)
@@ -1007,6 +1019,9 @@ fn join_message(error: &EngineError) -> String {
     match error {
         EngineError::AlreadySeeded => "You already sent a seed.".to_string(),
         EngineError::ParticipantLeft => "You left this event. Ask the host to return.".to_string(),
+        EngineError::WrongEventState { .. } => {
+            "Seed intake is closed. Ask the host about the fill-in path.".to_string()
+        }
         EngineError::File(_) | EngineError::Prepare(_) => {
             "That seed file is not allowed. Check the format and size.".to_string()
         }

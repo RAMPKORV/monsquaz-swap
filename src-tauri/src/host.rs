@@ -927,45 +927,7 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
     let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
     if event.state == EventState::Signup {
-        let participants = ParticipantRepo::list_for_event(db.conn(), &event.id)
-            .map_err(|error| error.to_string())?;
-        let tracks =
-            TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
-        let seeded = participants
-            .iter()
-            .filter(|participant| {
-                matches!(participant.membership, Membership::Seeded)
-                    && tracks
-                        .iter()
-                        .any(|track| track.owner_id == participant.user_id)
-            })
-            .count();
-        let settings: EventSettings =
-            serde_json::from_str(&event.settings_json).unwrap_or_default();
-        if seeded < 2 {
-            return Err("the roster needs at least two seeded participants".to_string());
-        }
-        let max_rounds = seeded.saturating_sub(1) as u32;
-        if settings.rounds.is_some_and(|rounds| rounds > max_rounds) {
-            return Err(format!(
-                "the schedule can run at most {max_rounds} rounds for this roster"
-            ));
-        }
-        let locked = lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
-        AuditRepo::insert(
-            db.conn(),
-            &event.id,
-            now,
-            "Host",
-            "Roster locked",
-            None,
-            &serde_json::json!({
-                "active": locked.active,
-                "fillIns": locked.fill_ins,
-            })
-            .to_string(),
-        )
-        .map_err(|error| error.to_string())?;
+        return Err("Lock the roster before you generate the schedule.".to_string());
     }
     let outcome = generate_schedule(db, &event.id, now).map_err(|error| error.to_string())?;
     AuditRepo::insert(
@@ -985,9 +947,13 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
 #[tauri::command]
 pub fn host_lock_roster(app: AppHandle) -> Result<RosterLockDto, String> {
     let db = open_db(&app)?;
-    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    lock_host_roster(&db)
+}
+
+fn lock_host_roster(db: &Db) -> Result<RosterLockDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
-    let outcome = lock_roster(&db, &event.id, now).map_err(|error| error.to_string())?;
+    let outcome = lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
     AuditRepo::insert(
         db.conn(),
         &event.id,
@@ -1178,7 +1144,10 @@ fn mission_control_with_health(
         })
         .collect();
     let seeded = event_summary.tracks > 0;
-    let roster = event_summary.participants > 0;
+    let roster_locked = ParticipantRepo::list_for_event(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .any(|participant| participant.membership == Membership::Active);
     let planned = plan.is_some();
     let mut timeline = vec![
         TimelineStepDto {
@@ -1198,8 +1167,12 @@ fn mission_control_with_health(
         TimelineStepDto {
             id: "roster".to_string(),
             label: "Roster".to_string(),
-            caption: format!("{} active", event_summary.participants),
-            state: step_state(roster, seeded),
+            caption: if roster_locked {
+                format!("{} active", event_summary.participants)
+            } else {
+                "Not locked".to_string()
+            },
+            state: step_state(roster_locked, seeded),
         },
         TimelineStepDto {
             id: "schedule".to_string(),
@@ -1208,7 +1181,7 @@ fn mission_control_with_health(
                 .as_ref()
                 .map(|plan| format!("Version {}", plan.version))
                 .unwrap_or_else(|| "Not committed".to_string()),
-            state: step_state(planned, roster),
+            state: step_state(planned, roster_locked),
         },
         TimelineStepDto {
             id: "rounds".to_string(),
@@ -1270,7 +1243,7 @@ fn mission_control_with_health(
         }
     } else if matches!(event.state, EventState::Paused) {
         None
-    } else if !roster && event_summary.tracks > 0 {
+    } else if !roster_locked && event_summary.tracks > 0 {
         Some(NextActionDto {
             eyebrow: "Next action".to_string(),
             title: "Lock the roster".to_string(),
@@ -1280,7 +1253,7 @@ fn mission_control_with_health(
             secondary_label: None,
             tone: "attention".to_string(),
         })
-    } else if !roster {
+    } else if !roster_locked {
         Some(NextActionDto {
             eyebrow: "Next action".to_string(),
             title: "Invite the first people".to_string(),
@@ -1309,7 +1282,7 @@ fn mission_control_with_health(
         })
     };
     let mut decisions = Vec::new();
-    if roster && event_summary.tracks < event_summary.participants {
+    if !roster_locked && seeded && event_summary.tracks < event_summary.participants {
         decisions.push(DecisionDto {
             id: "missing-seeds".to_string(),
             kind: "Seeds".to_string(),
@@ -1394,7 +1367,14 @@ fn bot_health(
                 "Online",
                 "Connected to Discord. Offers and receipts can leave the outbox.",
             ),
-            swap_discord::GatewayState::Starting | swap_discord::GatewayState::Reconnecting => (
+            swap_discord::GatewayState::Starting => (
+                "Connecting",
+                health
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("Starting the gateway."),
+            ),
+            swap_discord::GatewayState::Reconnecting => (
                 "Reconnecting",
                 health
                     .last_error
@@ -1894,6 +1874,7 @@ mod tests {
             seed_track(&db, &created.id, code, id);
         }
 
+        lock_host_roster(&db).unwrap();
         let plan = generate_host_plan(&db).unwrap();
         assert_eq!(plan.status, "Draft");
         assert_eq!(plan.matrix.len(), 3);

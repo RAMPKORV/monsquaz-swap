@@ -271,8 +271,13 @@ export default function App() {
       setView("people");
       return;
     }
-    if (label === "Open settings") {
+    if (label === "Open settings" || label === "Test connection" || label === "Reconnect now") {
       setView("settings");
+      return;
+    }
+    if (label === "Review decisions") {
+      document.getElementById("decisions-title")?.scrollIntoView({ block: "start" });
+      setToast("Review the decisions below. Nothing moves until you choose.");
       return;
     }
     if (label === "Lock roster") {
@@ -633,9 +638,13 @@ export default function App() {
             <span className="statusbar__item statusbar__bot">
               {mission?.bot?.status === "Online"
                 ? "Bot online"
-                : mission?.bot?.status === "Offline"
-                  ? "Bot offline"
-                  : "No bot"}
+                : mission?.bot?.status === "Connecting"
+                  ? "Bot connecting"
+                  : mission?.bot?.status === "Reconnecting"
+                    ? "Bot reconnecting"
+                  : mission?.bot?.status === "Offline"
+                    ? "Bot offline"
+                    : "No bot"}
             </span>
             <span className="statusbar__spacer" />
             <span className="statusbar__item">
@@ -860,9 +869,13 @@ function Sidebar({
                 ? "Status unavailable"
                 : bot?.status === "Online"
                   ? "Bot online"
-                  : bot?.status === "Offline"
-                    ? "Bot offline"
-                    : "No bot"}
+                  : bot?.status === "Connecting"
+                    ? "Bot connecting"
+                    : bot?.status === "Reconnecting"
+                      ? "Bot reconnecting"
+                    : bot?.status === "Offline"
+                      ? "Bot offline"
+                      : "No bot"}
           </StatusPill>
           <span className="sidebar-bot__name">
             {status === "loading"

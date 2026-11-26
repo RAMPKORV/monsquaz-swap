@@ -1466,11 +1466,13 @@ fn submit_inner(
             &assignment.track_code,
             assignment.round,
         )?
-        .map(|user_id| Effect::Dm {
+        .map(|(user_id, previous_round)| Effect::Dm {
             user_id,
             content: format!(
-                "Track {} has no title yet. If the final holder does not name it, name it with /swap title title:<name> track:{}.",
-                assignment.track_code, assignment.track_code
+                "You submitted track {} in round {}. It has no final title yet. If the final holder does not name it, name it with /swap title title:<name> track:{}.",
+                assignment.track_code,
+                previous_round + 1,
+                assignment.track_code
             ),
         });
         (Some(final_request), fallback)
@@ -1502,13 +1504,13 @@ fn submit_inner(
 
 /// Return the participant who submitted the same track in the round before
 /// the final round. That person can name the track when the final holder
-/// does not.
+/// does not. The round number gives the recipient context for the track code.
 fn title_fallback_holder(
     conn: &Connection,
     event_id: &str,
     track_code: &str,
     final_round: u32,
-) -> Result<Option<String>, EngineError> {
+) -> Result<Option<(String, u32)>, EngineError> {
     let assignments = AssignmentRepo::list_for_event(conn, event_id)?;
     Ok(assignments
         .into_iter()
@@ -1518,7 +1520,7 @@ fn title_fallback_holder(
                 && assignment.round < final_round
         })
         .max_by_key(|assignment| assignment.round)
-        .map(|assignment| assignment.participant_id))
+        .map(|assignment| (assignment.participant_id, assignment.round)))
 }
 
 pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutcome, EngineError> {

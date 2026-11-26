@@ -2318,6 +2318,8 @@ fn the_final_holder_is_asked_for_a_title_once() {
     assert_ne!(fallback.0, &user_id);
     assert!(fallback.1.contains(&track_code));
     assert!(fallback.1.contains("track:"));
+    assert!(fallback.1.contains("You submitted track"));
+    assert!(fallback.1.contains("round 1"));
     assert!(set_track_title_for_user(&fixture.db, EVENT, &user_id, "Final Name", T7).is_ok());
     let early_user = &first_round[0].0;
     assert!(matches!(

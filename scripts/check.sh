@@ -26,5 +26,6 @@ echo "== rust =="
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test -p swap-discord --features test-proxy --test setup_http
 
 echo "== check OK =="

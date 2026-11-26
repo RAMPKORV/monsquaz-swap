@@ -192,7 +192,7 @@ export function EmptyState({
       <span className="state-panel__icon">
         <Icon name={icon} size={28} />
       </span>
-      <h1 tabIndex={-1}>{title}</h1>
+      <h2 tabIndex={-1}>{title}</h2>
       <p>{detail}</p>
       {action ? <div className="state-panel__action">{action}</div> : null}
     </div>

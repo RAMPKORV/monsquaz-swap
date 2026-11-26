@@ -42,7 +42,7 @@ impl ScheduleStrategy {
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "balanced" => Self::Balanced,
-            "random" | "random_matching" => Self::RandomMatching,
+            "random_matching" => Self::RandomMatching,
             "cyclic" => Self::Cyclic,
             _ => return None,
         })
@@ -65,13 +65,17 @@ pub struct Schedule {
     pub rounds: u32,
     #[serde(default)]
     pub strategy: ScheduleStrategy,
+    /// True when the requested strategy used random matching because its
+    /// primary construction could not complete the roster.
+    #[serde(default)]
+    pub fallback: bool,
     pub assignments: Vec<ScheduledAssignment>,
 }
 
 /// Social-balance measurements for a generated schedule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BalanceReport {
-    /// Pairs that met on more than one handoff.
+    /// Extra handoffs beyond the first for each participant pair.
     pub repeated_handoffs: u32,
     /// Highest number of handoffs for one participant pair.
     pub max_pair_meetings: u32,
@@ -182,20 +186,32 @@ impl Schedule {
             })
             .collect::<Result<_, _>>()?;
 
-        let mut assignments = match strategy {
+        let (mut assignments, fallback) = match strategy {
             ScheduleStrategy::Cyclic => {
                 match cyclic_schedule(&people, &specs, &owners, rounds, seed) {
-                    Some(assignments) => assignments,
-                    None => random_schedule(&people, &specs, &owners, rounds, seed)
-                        .map_err(|round| ScheduleError::Infeasible { round })?,
+                    Some(assignments) => (assignments, false),
+                    None => (
+                        random_schedule(&people, &specs, &owners, rounds, seed)
+                            .map_err(|round| ScheduleError::Infeasible { round })?,
+                        true,
+                    ),
                 }
             }
-            ScheduleStrategy::RandomMatching => {
+            ScheduleStrategy::RandomMatching => (
                 random_schedule(&people, &specs, &owners, rounds, seed)
-                    .map_err(|round| ScheduleError::Infeasible { round })?
+                    .map_err(|round| ScheduleError::Infeasible { round })?,
+                false,
+            ),
+            ScheduleStrategy::Balanced => {
+                match balanced_schedule(&people, &specs, &owners, rounds, seed) {
+                    Ok(assignments) => (assignments, false),
+                    Err(round) => (
+                        random_schedule(&people, &specs, &owners, rounds, seed)
+                            .map_err(|_| ScheduleError::Infeasible { round })?,
+                        true,
+                    ),
+                }
             }
-            ScheduleStrategy::Balanced => balanced_schedule(&people, &specs, &owners, rounds, seed)
-                .map_err(|round| ScheduleError::Infeasible { round })?,
         };
 
         assignments.sort_by(|a, b| {
@@ -208,6 +224,7 @@ impl Schedule {
             seed,
             rounds,
             strategy,
+            fallback,
             assignments,
         })
     }
@@ -324,7 +341,8 @@ fn balanced_schedule(
             Ok(assignments) => {
                 let report = balance_of(&assignments);
                 let replace = best.as_ref().is_none_or(|(current, _)| {
-                    report.repeated_handoffs < current.repeated_handoffs
+                    (report.repeated_handoffs, report.max_pair_meetings)
+                        < (current.repeated_handoffs, current.max_pair_meetings)
                 });
                 if replace {
                     best = Some((report, assignments));
@@ -341,6 +359,7 @@ fn balance_of(assignments: &[ScheduledAssignment]) -> BalanceReport {
         seed: 0,
         rounds: assignments.iter().map(|a| a.round + 1).max().unwrap_or(0),
         strategy: ScheduleStrategy::Balanced,
+        fallback: false,
         assignments: assignments.to_vec(),
     };
     schedule.balance()
@@ -468,9 +487,11 @@ fn attempt_balanced(
             if person == usize::MAX {
                 return Err(round);
             }
-            let pair = ordered_pair(last_holder[track], person);
-            *met.entry(pair).or_default() += 1;
-            recent.insert(pair, round);
+            if round > 0 {
+                let pair = ordered_pair(last_holder[track], person);
+                *met.entry(pair).or_default() += 1;
+                recent.insert(pair, round);
+            }
             history[track].insert(person);
             last_holder[track] = person;
             assignments.push(ScheduledAssignment {
@@ -716,6 +737,7 @@ mod tests {
         assert_valid(&schedule, &people, &tracks);
         assert_eq!(schedule.assignments.len(), 56);
         assert_eq!(schedule.strategy, ScheduleStrategy::Balanced);
+        assert!(!schedule.fallback);
     }
 
     #[test]
@@ -763,6 +785,52 @@ mod tests {
                 Err(ScheduleError::Infeasible { round: 0 })
             );
         }
+    }
+
+    #[test]
+    fn balanced_does_not_fail_when_random_matching_succeeds() {
+        for people_count in 3..9 {
+            let people = people(people_count);
+            for track_count in 1..=people_count {
+                let tracks: Vec<TrackSpec> = (0..track_count)
+                    .map(|index| TrackSpec {
+                        code: TrackCode::new(format!("T{index:02}")),
+                        owner: people[index % people_count].clone(),
+                    })
+                    .collect();
+                let rounds = people_count as u32 - 1;
+                for seed in 0..10 {
+                    let random = Schedule::generate_with(
+                        &people,
+                        &tracks,
+                        rounds,
+                        seed,
+                        ScheduleStrategy::RandomMatching,
+                    );
+                    if random.is_ok() {
+                        assert!(
+                            Schedule::generate_with(
+                                &people,
+                                &tracks,
+                                rounds,
+                                seed,
+                                ScheduleStrategy::Balanced,
+                            )
+                            .is_ok(),
+                            "balanced failed for {people_count} people, {track_count} tracks, seed {seed}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_schedule_without_new_fields_still_decodes() {
+        let schedule: Schedule =
+            serde_json::from_str(r#"{"seed":1,"rounds":0,"assignments":[]}"#).unwrap();
+        assert_eq!(schedule.strategy, ScheduleStrategy::Balanced);
+        assert!(!schedule.fallback);
     }
 
     #[test]
@@ -821,6 +889,16 @@ mod tests {
     }
 
     #[test]
+    fn cyclic_falls_back_for_an_unbalanced_roster() {
+        let people = people(6);
+        let tracks = tracks(&people)[..3].to_vec();
+        let schedule =
+            Schedule::generate_with(&people, &tracks, 5, 7, ScheduleStrategy::Cyclic).unwrap();
+        assert!(schedule.fallback);
+        assert_valid(&schedule, &people, &tracks);
+    }
+
+    #[test]
     fn cyclic_is_not_the_bare_shift() {
         let people = people(8);
         let tracks = tracks(&people);
@@ -843,6 +921,39 @@ mod tests {
             })
             .collect();
         assert!(bare.iter().any(|offset| *offset != 0));
+    }
+
+    #[test]
+    fn balanced_does_not_trail_random_on_the_public_report() {
+        let people = people(4);
+        let tracks = tracks(&people);
+        for seed in 0..5 {
+            let balanced =
+                Schedule::generate_with(&people, &tracks, 3, seed, ScheduleStrategy::Balanced)
+                    .unwrap();
+            let random = Schedule::generate_with(
+                &people,
+                &tracks,
+                3,
+                seed,
+                ScheduleStrategy::RandomMatching,
+            )
+            .unwrap();
+            let balanced_report = balanced.balance();
+            let random_report = random.balance();
+            assert!(
+                balanced_report.repeated_handoffs <= random_report.repeated_handoffs,
+                "seed {seed}: balanced {:?} vs random {:?}",
+                balanced_report,
+                random_report
+            );
+            assert!(
+                balanced_report.max_pair_meetings <= random_report.max_pair_meetings,
+                "seed {seed}: balanced {:?} vs random {:?}",
+                balanced_report,
+                random_report
+            );
+        }
     }
 
     #[test]

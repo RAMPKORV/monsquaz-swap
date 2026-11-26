@@ -103,8 +103,9 @@ three seeded strategies:
   participant pairs that already met, especially in the last two rounds;
 - `random_matching`: randomized row-by-row perfect matching, a partial Latin
   rectangle and a bipartite edge coloring;
-- `cyclic`: a cyclic Latin square with permuted rows, columns, and symbols,
-  which falls back to matching when each participant does not own one track.
+- `cyclic`: a cyclic Latin square with permuted rows and a permuted offset
+  sequence, which permutes columns and symbols together. It falls back to
+  matching when each participant does not own one track.
 
 All strategies avoid the predictability of a bare cyclic shift and are
 deterministic for the same input and seed.
@@ -199,7 +200,8 @@ The event format itself is documented by the Monsquaz Collective:
 
 No official Discord bot emulator exists. Twilight supports a mock HTTP host
 through its proxy setting. `crates/swap-discord/tests/setup_http.rs` uses it
-with Wiremock for the setup, DM, and file serializers. Fake gateway sessions
+with Wiremock for the setup, DM, and file serializers. Run it with
+`cargo test -p swap-discord --features test-proxy --test setup_http`. Fake gateway sessions
 cover the supervisor. Gateway identification, rate limits, and Discord policy
 still need a live test guild and a human.
 

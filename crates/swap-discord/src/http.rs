@@ -34,7 +34,9 @@ impl HttpDiscordPort {
     }
 
     /// Build a port that sends requests through a local Discord API mock.
-    /// The host is `host:port`; the connection uses HTTP.
+    /// The host is `host:port`; the connection uses HTTP. This is a test hook
+    /// and is not part of the production API.
+    #[cfg(feature = "test-proxy")]
     pub fn with_proxy(token: &str, host: impl Into<String>) -> Result<Self, DiscordError> {
         validate_bot_token_shape(token).map_err(|error| DiscordError::Other(error.to_string()))?;
         let http = Client::builder()

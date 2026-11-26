@@ -1,4 +1,4 @@
-#![cfg(feature = "live")]
+#![cfg(all(feature = "live", feature = "test-proxy"))]
 //! Local Discord API mock tests for the live setup and delivery adapters.
 //!
 //! Twilight can route requests to a local HTTP host through its proxy setting.
@@ -95,6 +95,21 @@ fn proxy_host(server: &MockServer) -> String {
     server.address().to_string()
 }
 
+fn assert_bot_auth(requests: &[wiremock::Request], token: &str) {
+    let expected = format!("Bot {token}");
+    for request in requests {
+        assert_eq!(
+            request
+                .headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok()),
+            Some(expected.as_str()),
+            "request {} had the wrong authorization header",
+            request.url.path()
+        );
+    }
+}
+
 async fn mount_json(server: &MockServer, method_name: &str, route: &str, body: &str) {
     Mock::given(method(method_name))
         .and(path(route))
@@ -147,6 +162,13 @@ async fn the_http_port_sends_a_dm_through_the_mock() {
         .await
         .unwrap();
     assert_eq!(id.0, "555");
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_bot_auth(&requests, token);
+    assert_eq!(requests[0].url.path(), "/api/v10/users/@me/channels");
+    assert!(String::from_utf8_lossy(&requests[0].body).contains("\"42\""));
+    assert_eq!(requests[1].url.path(), "/api/v10/channels/100/messages");
+    assert!(String::from_utf8_lossy(&requests[1].body).contains("Monsquaz Swap test message."));
 }
 
 #[tokio::test]
@@ -170,6 +192,14 @@ async fn the_http_port_sends_a_file_through_the_mock() {
         .await
         .unwrap();
     assert_eq!(id.0, "555");
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_bot_auth(&requests, token);
+    assert_eq!(requests[0].url.path(), "/api/v10/users/@me/channels");
+    assert_eq!(requests[1].url.path(), "/api/v10/channels/100/messages");
+    let body = String::from_utf8_lossy(&requests[1].body);
+    assert!(body.contains("S7F3A.it"));
+    assert!(body.contains("Track S7F3A. Your turn."));
 }
 
 #[tokio::test]

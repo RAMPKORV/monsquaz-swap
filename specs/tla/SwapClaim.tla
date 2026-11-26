@@ -1,6 +1,6 @@
 ---------------------------- MODULE SwapClaim ----------------------------
 \* Design model for the classic claim, offer, custody, and expiry rules.
-\* It proves the core safety invariants for a small finite roster. It does
+\* It checks the core safety invariants for a small finite roster. It does
 \* not model files, Discord, SQLite, the UI, or real time.
 EXTENDS Naturals, Integers, FiniteSets, TLC
 
@@ -29,6 +29,8 @@ Offer(t, p) ==
     /\ phase[t][p] = "idle"
     /\ holder[t] = NoOne
     /\ p /= Owner[t]
+    /\ \A other \in Participants : phase[t][other] /= "offered"
+    /\ \A other \in Tracks : phase[other][p] /= "offered"
     /\ <<t, p>> \notin seen
     /\ <<t, p>> \notin banned
     /\ phase' = [phase EXCEPT ![t] = [phase[t] EXCEPT ![p] = "offered"]]
@@ -108,5 +110,25 @@ NoExpiredReoffer ==
     \A t \in Tracks, p \in Participants :
         <<t, p>> \in banned => phase[t][p] /= "offered"
 
-Inv == TypeOK /\ NoRepeat /\ NoOwnTrack /\ OneTrackPerPerson /\ NoExpiredReoffer
+NoOwnOffer ==
+    \A t \in Tracks, p \in Participants :
+        phase[t][p] = "offered" => p /= Owner[t]
+
+AtMostOneOfferPerTrack ==
+    \A t \in Tracks :
+        Cardinality({p \in Participants : phase[t][p] = "offered"}) <= 1
+
+AtMostOneOfferPerPerson ==
+    \A p \in Participants :
+        Cardinality({t \in Tracks : phase[t][p] = "offered"}) <= 1
+
+Inv ==
+    /\ TypeOK
+    /\ NoRepeat
+    /\ NoOwnTrack
+    /\ OneTrackPerPerson
+    /\ NoExpiredReoffer
+    /\ NoOwnOffer
+    /\ AtMostOneOfferPerTrack
+    /\ AtMostOneOfferPerPerson
 =============================================================================

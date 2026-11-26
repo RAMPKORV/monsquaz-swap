@@ -181,6 +181,7 @@ impl StateMachineTest for Concrete {
     fn check_invariants(state: &Self::SystemUnderTest, ref_state: &Reference) {
         assert_eq!(state.participant, ref_state.participant);
         assert_eq!(state.assignment.status, ref_state.status);
+        assert_eq!(state.ledger.len(), ref_state.seen.len());
         assert_eq!(
             state.ledger.has_seen(&state.track, &state.participant),
             ref_state
@@ -205,4 +206,17 @@ impl StateMachineTest for Concrete {
 prop_state_machine! {
     #[test]
     fn assignment_and_ledger_follow_the_rules(sequential 1..40 => Concrete);
+}
+
+#[test]
+fn a_terminal_assignment_refuses_further_transitions() {
+    let mut assignment = Assignment::offered();
+    assignment.claim().unwrap();
+    assignment.submit().unwrap();
+    assert!(assignment.claim().is_err());
+    assert!(assignment.submit().is_err());
+    assert!(assignment.skip().is_err());
+    assert!(assignment.expire().is_err());
+    assert!(assignment.revoke().is_err());
+    assert!(assignment.supersede().is_err());
 }

@@ -231,7 +231,7 @@ describe("App", () => {
       screen.getByRole("button", { name: "Preview participant redaction" }),
     );
     expect(
-      screen.getByText(/planner fields participants must not see/i),
+      screen.getByText(/only this sample participant's assignments are visible/i),
     ).toBeInTheDocument();
     expect(screen.queryByText("Fun score")).not.toBeInTheDocument();
     expect(screen.queryByText("Groups")).not.toBeInTheDocument();

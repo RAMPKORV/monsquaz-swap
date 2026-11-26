@@ -66,7 +66,13 @@ PY
 echo "TLA+ PR model"
 run_tlc specs/tla/SwapClaimPR.cfg specs/tla/SwapClaimPR.tla
 run_mutation "clock leaves the natural numbers" "TypeOK" "now' = now + 1" "now' = -1"
-run_mutation "offer allows own track" "NoOwnTrack" '/\ p /= Owner[t]' '/\ TRUE'
+run_mutation "offer allows own track" "NoOwnOffer" '/\ p /= Owner[t]' '/\ TRUE'
+run_mutation "claim skips the offer guard" "NoOwnTrack" \
+  '/\ phase[t][p] = "offered"' '/\ TRUE'
+run_mutation "offer allows two people for one track" "AtMostOneOfferPerTrack" \
+  '/\ \A other \in Participants : phase[t][other] /= "offered"' '/\ TRUE'
+run_mutation "offer allows two tracks for one person" "AtMostOneOfferPerPerson" \
+  '/\ \A other \in Tracks : phase[other][p] /= "offered"' '/\ TRUE'
 run_mutation "claim allows two held tracks" "OneTrackPerPerson" \
   '/\ \A other \in Tracks : holder[other] /= p' '/\ TRUE'
 run_mutation "claim leaves a seen pair offered" "NoRepeat" \

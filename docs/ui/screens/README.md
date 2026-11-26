@@ -9,6 +9,7 @@ Regenerate:
 
 ```bash
 docs/ui/capture.sh
+ONLY=plan docs/ui/capture.sh   # one view or state
 ```
 
 Requirements: `pnpm`, `chromium`, and `curl`. The script serves the built UI on

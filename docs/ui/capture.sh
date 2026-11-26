@@ -85,13 +85,13 @@ shot() {
     fi
     case "$name" in
       plan-participant-view-*)
-        if [[ "$dom" != *"Redaction preview"* ]]; then
+        if [[ "$dom" != *"Redaction preview</h1>"* ]]; then
           echo "capture $name did not render the redaction preview" >&2
           exit 1
         fi
         ;;
       plan-full-*|plan-graph-*|plan-populated-dark-zoom200)
-        if [[ "$dom" != *"Schedule planner"* ]]; then
+        if [[ "$dom" != *"Schedule planner</h1>"* ]]; then
           echo "capture $name did not render the planner" >&2
           exit 1
         fi

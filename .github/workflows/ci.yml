@@ -100,6 +100,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: cargo test -p swap-discord --features test-proxy --test setup_http
 
   tauri-smoke:
     name: Tauri smoke (${{ matrix.os }})

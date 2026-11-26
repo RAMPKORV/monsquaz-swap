@@ -578,5 +578,33 @@ mod tests {
                 proptest::prop_assert_eq!(scrubbed.bytes.len(), bytes.len());
             }
         }
+
+        #[test]
+        fn a_minimal_it_module_scrubs_instrument_and_sample_names(
+            name in proptest::collection::vec(proptest::prelude::any::<u8>(), 26),
+        ) {
+            let mut bytes = vec![0u8; 0x200];
+            bytes[..4].copy_from_slice(b"IMPM");
+            bytes[0x20..0x22].copy_from_slice(&1u16.to_le_bytes());
+            bytes[0x22..0x24].copy_from_slice(&1u16.to_le_bytes());
+            bytes[0x24..0x26].copy_from_slice(&1u16.to_le_bytes());
+            bytes[0xC1..0xC5].copy_from_slice(&0x100u32.to_le_bytes());
+            bytes[0xC5..0xC9].copy_from_slice(&0x180u32.to_le_bytes());
+            bytes[0x100..0x104].copy_from_slice(b"IMPI");
+            bytes[0x104..0x10D].copy_from_slice(b"secret.it");
+            bytes[0x120..0x13A].copy_from_slice(&name);
+            bytes[0x180..0x184].copy_from_slice(b"IMPS");
+            bytes[0x184..0x18E].copy_from_slice(b"secret2.it");
+            bytes[0x1A0..0x1B6].copy_from_slice(b"Secret Sample Name....");
+            bytes[0x1C0] = 0xAB;
+            let scrubbed = scrub_metadata(&bytes, FileKind::It).unwrap();
+            proptest::prop_assert_eq!(scrubbed.summary.instrument_names, 1);
+            proptest::prop_assert_eq!(scrubbed.summary.sample_names, 1);
+            proptest::prop_assert_eq!(scrubbed.summary.file_names, 2);
+            proptest::prop_assert!(
+                scrubbed.bytes[0x120..0x13A].iter().all(|byte| *byte == 0)
+            );
+            proptest::prop_assert_eq!(scrubbed.bytes[0x1C0], 0xAB);
+        }
     }
 }

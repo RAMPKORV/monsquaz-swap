@@ -62,6 +62,9 @@ social-diversity objective. Optional genre/mood content tags can come later.
 | Unequal groups | Warn and suggest | Warn, hard equal, allow any, auto-rebalance | No |
 | Infeasible phase | Global pool fallback | Fallback, shorten phase, stall, retire | No |
 
+The scheduler setting is available through the event settings API. The event
+wizard selector is a follow-up.
+
 Rules:
 
 - The planner must show the fun estimate and the guardrails. The fun score is

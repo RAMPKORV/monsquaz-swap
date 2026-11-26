@@ -25,6 +25,7 @@ live = [
     "dep:twilight-model",
     "dep:serde_json",
 ]
+test-proxy = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }

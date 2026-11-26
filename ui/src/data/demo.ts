@@ -845,7 +845,10 @@ export function demoPlan(scenario: Scenario): PlanData {
   const dense = scenario === "dense" || scenario === "long";
   const count = dense ? 40 : 12;
   const rounds = dense ? 8 : 11;
-  const event = eventSummary(count, count, rounds);
+  const event = {
+    ...eventSummary(count, count, rounds),
+    ...(scenario === "long" ? { name: longEventName } : {}),
+  };
   if (scenario === "infeasible") {
     return {
       status: "Infeasible",
@@ -867,8 +870,8 @@ export function demoPlan(scenario: Scenario): PlanData {
         plannerWarning(
           "plan-infeasible-2",
           "warn",
-          "A wider pool is available",
-          "The planner can draw from the global pool for this round. No pair is marked as seen until a claim.",
+          "A rebuild can use the full roster",
+          "The planner can rebuild the draft from all active participants. Earlier rounds can change. No pair is marked as seen until a claim.",
         ),
       ],
       funScore: null,
@@ -897,8 +900,8 @@ export function demoPlan(scenario: Scenario): PlanData {
         plannerWarning(
           "plan-1",
           "info",
-          "Round 8 is the last full-exposure round",
-          "After round 8, the planner switches to the capped schedule. No participant receives a track they have seen before.",
+          "Round 8 is the last full round",
+          "After round 8, the planner limits how many people can contribute to each track. No participant receives a track they have seen before.",
         ),
       ];
   return {

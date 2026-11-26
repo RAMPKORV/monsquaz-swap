@@ -54,9 +54,10 @@ must not block for longer than that.
 
 There is no official Discord bot emulator. `crates/swap-discord/tests/setup_http.rs`
 uses Twilight's HTTP proxy setting and a local Wiremock server. It exercises the
-real setup and DM serializers without a token. The mock does not cover gateway
-identification, rate limits, or Discord policy. Use the live smoke test for
-those.
+real setup, DM, and file serializers without a token. Run it with
+`cargo test -p swap-discord --features test-proxy --test setup_http`. The mock
+does not cover gateway identification, rate limits, or Discord policy. Use the
+live smoke test for those.
 
 ## Live smoke test
 

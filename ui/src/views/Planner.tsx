@@ -22,6 +22,7 @@ export function PlannerView({
   );
   const [confirmLock, setConfirmLock] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmRebuild, setConfirmRebuild] = useState(false);
   useEffect(() => {
     onRedactionChange(viewAsParticipant);
     return () => onRedactionChange(false);
@@ -75,6 +76,9 @@ export function PlannerView({
     0,
   );
   const visibleWarnings = infeasible ? data.warnings.slice(1) : data.warnings;
+  const warningNeedsAction = visibleWarnings.some(
+    (warning) => warning.severity !== "info",
+  );
 
   return (
     <div className="view">
@@ -83,7 +87,9 @@ export function PlannerView({
         description={
           viewAsParticipant
             ? "Only the sample participant's assignments are visible. This is not the participant app."
-            : `${data.event?.name ?? "Event"}. The matrix and graph show every assignment.`
+            : infeasible
+              ? `${data.event?.name ?? "Event"}. The matrix shows the assignments that could be placed.`
+              : `${data.event?.name ?? "Event"}. The matrix and graph show every assignment.`
         }
         actions={
           <div className="header-actions">
@@ -119,10 +125,12 @@ export function PlannerView({
         <div className="banner banner--info" role="status">
           <Icon name="eye-off" size={20} />
           <div>
-            <strong>Redaction preview, not the participant app.</strong> These
-            are the planner fields participants must not see. A participant sees
-            only their own offers, the tracks they have seen, and the dates.
-            Sample participant: {viewer ? shortName(viewer.participantName) : "none"}.
+            <strong>Redaction preview, not the participant app.</strong> Only
+            this sample participant's assignments are visible. The participant
+            app also shows dates.
+            <span className="banner__meta">
+              Sample participant: {viewer ? viewer.participantName : "none"}.
+            </span>
           </div>
         </div>
       ) : null}
@@ -143,12 +151,24 @@ export function PlannerView({
       {!noPlan && !infeasible && !viewAsParticipant && !data.committed ? (
         <section className="plan-actionbar" aria-label="Plan actions">
           <div className="plan-actionbar__copy">
-            <strong>Draft schedule</strong>
+            <div className="plan-actionbar__heading">
+              <strong>Draft schedule</strong>
+              {visibleWarnings.length > 0 ? (
+                <StatusPill tone={warningNeedsAction ? "warn" : "info"}>
+                  {visibleWarnings.length}{" "}
+                  {warningNeedsAction
+                    ? "to review"
+                    : visibleWarnings.length === 1
+                      ? "note"
+                      : "notes"}
+                </StatusPill>
+              ) : null}
+            </div>
             <span>
-              Locking posts a fingerprint of this schedule in the announcement
-              channel. People can use it to check that the schedule did not
-              change. A new version replaces this one and is visible to
-              participants.
+              Locking posts a short code, a fingerprint, in the announcement
+              channel. Participants compare the code to confirm the schedule
+              has not changed. They never see the schedule. If you change an
+              assignment later, you must publish a new code.
             </span>
           </div>
           <div className="plan-actions">
@@ -206,13 +226,13 @@ export function PlannerView({
               <Button
                 variant="primary"
                 icon="shuffle"
-                onClick={onGeneratePlan}
+                onClick={() => setConfirmRebuild(true)}
               >
-                Use anyone eligible
+                Rebuild draft…
               </Button>
               <span className="field-help">
-                Draws from the global pool for this round. The no-repeat rule
-                still applies.
+                Rebuilds from the full roster. Earlier rounds can change. The
+                no-repeat rule still applies.
               </span>
             </div>
           </div>
@@ -233,24 +253,17 @@ export function PlannerView({
                   <p className="card__subtitle">
                     {viewAsParticipant
                       ? "Only the sample participant's assignments are visible."
-                      : "Tracks by round. Each cell is the person who holds the track."}
+                      : "Each cell shows who works on the track in that round. The letter marks the owner group. No one gets their own track or the same track twice."}
                   </p>
                   <p id="matrix-scroll-help" className="visually-hidden">
                     Scroll both axes. Use the arrow keys when the matrix has focus.
                   </p>
                 </div>
-                {data.matrix.length > 16 ? (
-                  <span className="card__meta">
-                    Scroll for all {data.matrix.length} tracks
-                  </span>
-                ) : null}
               </div>
               <div
-                className={`matrix-scroll ${
-                  data.matrix.length > 16 ? "matrix-scroll--bounded" : ""
-                }`}
+                className="matrix-scroll"
                 tabIndex={0}
-                role="region"
+                role="group"
                 aria-labelledby="matrix-title"
                 aria-describedby="matrix-scroll-help"
               >
@@ -272,10 +285,8 @@ export function PlannerView({
                         <th scope="row">
                           <code>{track.trackCode}</code>
                           {viewAsParticipant ? null : (
-                            <small
-                              title={`Group ${track.ownerGroup}`}
-                              aria-label={`Group ${track.ownerGroup}`}
-                            >
+                            <small title={`Group ${track.ownerGroup}`}>
+                              <span className="visually-hidden">Group </span>
                               {track.ownerGroup}
                             </small>
                           )}
@@ -317,7 +328,11 @@ export function PlannerView({
             <section className="card graph-card" aria-labelledby="graph-title">
               <div className="card__header">
                 <div>
-                  <h2 id="graph-title">Round {data.graph.round + 1} graph</h2>
+                  <h2 id="graph-title">
+                    {data.committed
+                      ? `Round ${data.graph.round + 1} graph`
+                      : `Preview: round ${data.graph.round + 1}`}
+                  </h2>
                   <p className="card__subtitle">
                     {viewAsParticipant
                       ? "The sample participant's edge only."
@@ -336,8 +351,13 @@ export function PlannerView({
               <section className="card" aria-labelledby="warnings-title">
                 <div className="card__header">
                   <h2 id="warnings-title">Planner warnings</h2>
-                  <StatusPill tone={infeasible ? "danger" : "warn"}>
-                    {visibleWarnings.length} to review
+                  <StatusPill tone={infeasible ? "danger" : warningNeedsAction ? "warn" : "info"}>
+                    {visibleWarnings.length}{" "}
+                    {warningNeedsAction
+                      ? "to review"
+                      : visibleWarnings.length === 1
+                        ? "note"
+                        : "notes"}
                   </StatusPill>
                 </div>
                 <div className="warnings">
@@ -384,7 +404,7 @@ export function PlannerView({
                   {data.funScore === null ? (
                     <span className="fun-score fun-score--empty">Not scored</span>
                   ) : (
-                    <span className="fun-score">{data.funScore}</span>
+                    <span className="fun-score">{data.funScore}/100</span>
                   )}
                 </div>
                 <dl className="facts">
@@ -396,8 +416,9 @@ export function PlannerView({
                   ))}
                 </dl>
                 <p className="field-help">
-                  Not a participant grade. It estimates reach, variety, fairness,
-                  and freshness.
+                  {infeasible
+                    ? "The planner reports why this round is blocked. No score is available."
+                    : "Not a participant grade. It estimates reach, variety, fairness, and freshness."}
                 </p>
               </section>
             ) : null}
@@ -461,7 +482,45 @@ export function PlannerView({
         >
           <p>
             The current draft is discarded. The new draft uses the same roster
-            and rules. Review the matrix before you lock it.
+            and rules with a new seed, so the matrix can change. Review it
+            before you lock.
+          </p>
+        </Dialog>
+      ) : null}
+
+      {confirmRebuild ? (
+        <Dialog
+          title="Rebuild this draft?"
+          onClose={() => setConfirmRebuild(false)}
+          footer={
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setConfirmRebuild(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                icon="shuffle"
+                onClick={() => {
+                  setConfirmRebuild(false);
+                  onGeneratePlan();
+                }}
+              >
+                Rebuild draft
+              </Button>
+            </>
+          }
+        >
+          <p>
+            The current draft is discarded. The new draft uses the full roster
+            and a new seed, so earlier rounds can change. Review the matrix
+            before you lock it.
+          </p>
+          <p className="field-help">
+            The no-repeat and no-own-track rules still apply. No offers are sent
+            and no one is marked as having seen a track.
           </p>
         </Dialog>
       ) : null}
@@ -595,7 +654,7 @@ function PlanGraph({
         {people.map((person) => (
           <text key={person} x="526" y={(personY.get(person) ?? 0) + 4} className="graph-label">
             <title>{person}</title>
-            {shortName(person)}
+            {participantView ? "You" : shortName(person)}
           </text>
         ))}
         <text x="24" y="16" className="graph-caption">

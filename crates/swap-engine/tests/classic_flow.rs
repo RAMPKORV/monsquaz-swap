@@ -574,6 +574,18 @@ fn too_many_rounds_are_refused() {
 }
 
 #[test]
+fn a_replacement_draft_uses_a_new_seed() {
+    let fixture = Fixture::new(8, 0);
+    lock_roster(&fixture.db, EVENT, T1).unwrap();
+    let first = generate_schedule(&fixture.db, EVENT, T2).unwrap();
+    let second = generate_schedule(&fixture.db, EVENT, T3).unwrap();
+    assert_eq!(first.version, 1);
+    assert_eq!(second.version, 2);
+    assert_ne!(first.assignments, second.assignments);
+    assert_ne!(first.commitment, second.commitment);
+}
+
+#[test]
 fn a_committed_plan_is_stored_and_the_state_advances() {
     let fixture = Fixture::new(4, 0);
     fixture.lock_and_schedule();

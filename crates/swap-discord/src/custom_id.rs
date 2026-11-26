@@ -75,15 +75,17 @@ pub enum CustomIdError {
     UnknownAction(String),
     #[error("token contains unsafe characters")]
     InvalidToken,
+    #[error("custom id must be at most 100 characters")]
+    TooLong,
 }
 
 /// Stable button custom id. Never trust a custom id without re-checking the
 /// event state and the actor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomId {
-    pub event_id: String,
-    pub action: Action,
-    pub token: Option<String>,
+    event_id: String,
+    action: Action,
+    token: Option<String>,
 }
 
 impl CustomId {
@@ -102,6 +104,10 @@ impl CustomId {
         {
             return Err(CustomIdError::InvalidToken);
         }
+        let token_length = token.as_deref().map(str::len).unwrap_or(0);
+        if 7 + event_id.len() + action.as_str().len() + token_length > 100 {
+            return Err(CustomIdError::TooLong);
+        }
         Ok(Self {
             event_id,
             action,
@@ -109,7 +115,22 @@ impl CustomId {
         })
     }
 
+    pub fn event_id(&self) -> &str {
+        &self.event_id
+    }
+
+    pub fn action(&self) -> Action {
+        self.action
+    }
+
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+
     pub fn parse(value: &str) -> Result<Self, CustomIdError> {
+        if value.len() > 100 {
+            return Err(CustomIdError::TooLong);
+        }
         let parts: Vec<&str> = value.split(':').collect();
         if parts.len() != 4 || parts[0] != "swap" {
             return Err(CustomIdError::Malformed);
@@ -170,7 +191,7 @@ mod tests {
     fn an_empty_token_is_allowed() {
         let id = CustomId::new("evt-1", Action::Help, None).unwrap();
         assert_eq!(id.to_string(), "swap:evt-1:help:");
-        assert_eq!(CustomId::parse(&id.to_string()).unwrap().token, None);
+        assert_eq!(CustomId::parse(&id.to_string()).unwrap().token(), None);
     }
 
     #[test]
@@ -203,6 +224,20 @@ mod tests {
         assert_eq!(
             CustomId::new("evt-1", Action::Claim, Some("a:b".to_string())),
             Err(CustomIdError::InvalidToken)
+        );
+    }
+
+    #[test]
+    fn ids_over_the_discord_limit_are_refused() {
+        let event = "e".repeat(64);
+        let token = "t".repeat(64);
+        assert_eq!(
+            CustomId::new(event.clone(), Action::Claim, Some(token)),
+            Err(CustomIdError::TooLong)
+        );
+        assert_eq!(
+            CustomId::parse(&format!("swap:{event}:claim:{}", "t".repeat(64))),
+            Err(CustomIdError::TooLong)
         );
     }
 

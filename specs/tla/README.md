@@ -16,6 +16,9 @@ The models describe the event rules, not the implementation. See
 |---|---|---|
 | `NoRepeat` | A seen pair is never offered again. | PRD REQ-SEEN-001 |
 | `NoOwnTrack` | A participant never holds their own track. | PRD REQ-SEEN-002 |
+| `NoOwnOffer` | A participant is never offered their own track. | PRD REQ-SEEN-002 |
+| `AtMostOneOfferPerTrack` | A track has at most one open offer. | one active assignment per track |
+| `AtMostOneOfferPerPerson` | A participant has at most one open offer. | one active assignment per person |
 | `OneTrackPerPerson` | A participant holds at most one track. | DOMAIN custody |
 | `NoExpiredReoffer` | An expired pair is never offered again. | `delivery.feature` |
 | `TypeOK` | Variables have the expected shape. | model hygiene |

@@ -76,7 +76,9 @@ impl TwilightSetup {
         Self { proxy: None }
     }
 
-    /// Use a local Discord API mock through `host:port`.
+    /// Use a local Discord API mock through `host:port`. This is a test hook
+    /// and is not part of the production API.
+    #[cfg(feature = "test-proxy")]
     pub fn with_proxy(host: impl Into<String>) -> Self {
         Self {
             proxy: Some(host.into()),
@@ -171,9 +173,18 @@ impl SetupDirectory for TwilightSetup {
 
     async fn send_test_dm(&self, token: &str, user_id: &str) -> Result<String, SetupError> {
         validate_bot_token_shape(token)?;
-        let port = match &self.proxy {
-            Some(proxy) => HttpDiscordPort::with_proxy(token, proxy.clone()),
-            None => HttpDiscordPort::new(token),
+        let port = {
+            #[cfg(feature = "test-proxy")]
+            {
+                match &self.proxy {
+                    Some(proxy) => HttpDiscordPort::with_proxy(token, proxy.clone()),
+                    None => HttpDiscordPort::new(token),
+                }
+            }
+            #[cfg(not(feature = "test-proxy"))]
+            {
+                HttpDiscordPort::new(token)
+            }
         }
         .map_err(|error| SetupError::Discord(error.to_string()))?;
         let message = OutboundMessage {

@@ -75,6 +75,7 @@ export function initialScenario(): Scenario {
     "extension-ready",
     "round-ready",
     "reveal-ready",
+    "join-phase",
     "infeasible",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";

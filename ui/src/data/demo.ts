@@ -180,6 +180,10 @@ function baseMission(): MissionControl {
     activity: defaultActivity,
     timeline: defaultTimeline,
     facts: defaultFacts(),
+    join: {
+      formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg"],
+      maxFileMib: 20,
+    },
   };
 }
 
@@ -199,10 +203,35 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       activity: [],
       timeline: [],
       facts: [],
+      join: {
+        formats: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg"],
+        maxFileMib: 20,
+      },
     };
   }
 
   const mission = baseMission();
+
+  if (scenario === "join-phase") {
+    mission.event = {
+      ...mission.event!,
+      stage: "Join phase",
+      participants: 9,
+      seeded: 6,
+      fillIns: 0,
+      round: 0,
+    };
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Invite six more people",
+      detail:
+        "Share the join command. Each person sends one seed file in a direct message. Lock the roster when the last seed arrives.",
+      actionLabel: "Open event setup",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    return mission;
+  }
 
   if (scenario === "offline") {
     mission.bot = {

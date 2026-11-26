@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EventDraft, SetupData } from "../types";
 import { Button, Field, PageHeader, Skeleton, StatusPill, Toggle } from "../components";
 import { Icon } from "../icons";
+import { JoinInstructions } from "./JoinInstructions";
 
 const steps = [
   { id: "basics", label: "Basics", detail: "Name, mode, windows" },
@@ -26,7 +27,16 @@ export function SetupView({
   data: SetupData;
   onCreate: (draft: EventDraft) => void;
 }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    const initial = new URLSearchParams(window.location.search).get("step");
+    if (initial === "review") {
+      return 3;
+    }
+    const numeric = Number(initial);
+    return Number.isInteger(numeric) && numeric >= 0 && numeric <= 3
+      ? numeric
+      : 0;
+  });
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const firstStep = useRef(true);
 
@@ -575,6 +585,8 @@ function ReviewStep({ data, draft }: { data: SetupData; draft: EventDraft }) {
           </div>
         ))}
       </div>
+
+      <JoinInstructions formats={draft.allowlist} maxMib={20} />
     </div>
   );
 }

@@ -120,6 +120,13 @@ shot setup-error-dark-1280 "view=setup&state=error" 1280 800
 shot setup-long-dark-1280 "view=setup&state=long" 1280 800
 shot setup-populated-light-1280 "view=setup&theme=light" 1280 800
 shot setup-populated-dark-1024 "view=setup" 1024 700
+shot setup-review-dark-1280 "view=setup&step=review" 1280 800
+shot setup-review-dark-1024 "view=setup&step=review" 1024 700
+shot setup-review-light-1280 "view=setup&step=review&theme=light" 1280 800
+shot setup-review-dark-1280x1400 "view=setup&step=review" 1280 1400
+shot mission-join-dark-1280 "view=mission&state=join-phase" 1280 800
+shot mission-join-dark-1024 "view=mission&state=join-phase" 1024 700
+shot mission-join-light-1280 "view=mission&state=join-phase&theme=light" 1280 800
 
 shot people-empty-dark-1280 "view=people&state=empty" 1280 800
 shot people-loading-dark-1280 "view=people&state=loading" 1280 800

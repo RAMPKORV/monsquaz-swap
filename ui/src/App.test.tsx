@@ -25,6 +25,12 @@ beforeEach(() => {
   window.sessionStorage.clear();
   resetDemoReveal();
   resetDemoPlan();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    },
+  });
   setUrl("?demo=1");
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -308,6 +314,42 @@ describe("App", () => {
     expect(
       within(dialog).getByRole("button", { name: "Save change" }),
     ).toBeDisabled();
+  });
+
+  it("copies the join instructions during the join phase", async () => {
+    setUrl("?demo=1&state=join-phase&view=mission");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Invite participants" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "/swap join timezone:Europe/Stockholm max_handoffs:4",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy join instructions" }),
+    );
+    expect(
+      await screen.findByText("Join instructions copied."),
+    ).toBeInTheDocument();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining(".it, .mptm"),
+    );
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("20 MiB"),
+    );
+  });
+
+  it("shows the join instructions in the setup review", async () => {
+    setUrl("?demo=1&view=setup&step=review");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Invite participants" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy join instructions" }),
+    ).toBeInTheDocument();
   });
 
   it("shows the first-run state", async () => {

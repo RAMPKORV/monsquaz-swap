@@ -640,6 +640,7 @@ export default function App() {
     ) : view === "mission" && mission ? (
       <MissionControlView
         data={mission}
+        timezone={settings?.timezone}
         onAction={notify}
         onDecision={handleDecision}
         onNavigate={(next) => setView(next)}

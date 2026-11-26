@@ -1,10 +1,13 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
-use swap_db::{AssignmentRepo, Db, FileRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo};
+use swap_db::{
+    AssignmentRepo, Db, DeliveryRepo, EventRepo, FileRepo, ParticipantRepo, PlanRepo, SeenRepo,
+    TrackRepo,
+};
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, claim, create_event, dispatch, event_status, expire_offer,
-    generate_schedule, join_with_seed, lock_roster, open_round, reveal, signup, skip, start_event,
-    submit,
+    PreparedBytes, SubmitRequest, claim, create_event, dispatch, dispatch_pending, event_status,
+    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal, signup, skip,
+    start_event, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -674,4 +677,305 @@ fn an_assignment_is_visible_without_an_owner_or_title() {
     assert_eq!(assignment.round, 0);
     assert_eq!(assignment.status, AssignmentStatus::Offered);
     assert!(!assignments.is_empty());
+}
+
+#[tokio::test]
+async fn the_outbox_delivers_offers_and_claimed_files() {
+    use swap_discord::FakeDiscord;
+
+    let fixture = Fixture::new(4, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 4);
+
+    let discord = FakeDiscord::new();
+    let report = dispatch_pending(&fixture.db, &fixture.store, &discord, T5, 100)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 4);
+    assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 0);
+    assert_eq!(discord.sent_dms().len(), 4);
+
+    let (user_id, assignment_id, _) = offers[0].clone();
+    let claimed = claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let expected_bytes = match &claimed.effects[0] {
+        Effect::TrackFile { bytes, .. } => bytes.clone(),
+        other => panic!("expected a file, got {other:?}"),
+    };
+    assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 1);
+    let report = dispatch_pending(&fixture.db, &fixture.store, &discord, T5, 100)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 1);
+    assert_eq!(discord.sent_files().len(), 1);
+    assert_eq!(discord.sent_files()[0].file.bytes, expected_bytes);
+}
+
+#[tokio::test]
+async fn a_restart_preserves_the_event_and_pending_outbox() {
+    use swap_discord::FakeDiscord;
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("event.db");
+    let store = BlobStore::new(directory.path().join("blobs"));
+    {
+        let db = Db::open(&database).unwrap();
+        create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+        for index in 0..3 {
+            join(&db, &store, index);
+        }
+        lock_roster(&db, EVENT, T1).unwrap();
+        generate_schedule(&db, EVENT, T2).unwrap();
+        start_event(&db, EVENT, T3).unwrap();
+        open_round(&db, EVENT, 0, T4).unwrap();
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 3);
+        assert_eq!(
+            EventRepo::get(db.conn(), EVENT).unwrap().unwrap().state,
+            EventState::Active
+        );
+    }
+
+    let db = Db::open(&database).unwrap();
+    let integrity: String = db
+        .conn()
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(integrity, "ok");
+    assert_eq!(
+        EventRepo::get(db.conn(), EVENT).unwrap().unwrap().state,
+        EventState::Active
+    );
+    assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 3);
+    let discord = FakeDiscord::new();
+    let report = dispatch_pending(&db, &store, &discord, T5, 100)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 3);
+    assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+    drop(db);
+
+    let db = Db::open(&database).unwrap();
+    let report = dispatch_pending(&db, &store, &discord, T6, 100)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 0);
+    assert_eq!(discord.sent_dms().len(), 3);
+}
+
+#[tokio::test]
+async fn an_attachment_is_downloaded_stored_and_processed_once() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_db::ProcessedAttachmentRepo;
+    use swap_discord::{
+        DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
+        InboundHandler, MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    for index in 0..3 {
+        join(&db, &store, index);
+    }
+    lock_roster(&db, EVENT, T1).unwrap();
+    generate_schedule(&db, EVENT, T2).unwrap();
+    start_event(&db, EVENT, T3).unwrap();
+    let offers = open_round(&db, EVENT, 0, T4)
+        .unwrap()
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Offer {
+                user_id,
+                assignment_id,
+                track_code,
+                ..
+            } => Some((user_id.clone(), assignment_id.clone(), track_code.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(&db, &store, EVENT, &assignment_id, &user_id, T4).unwrap();
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    let edit = seed_bytes(99);
+    let url = "https://cdn.discordapp.com/attachments/1/2/edit.it";
+    fetcher.add(url, &edit);
+    let db = Arc::new(Mutex::new(db));
+    let service = InboundService::new(
+        db.clone(),
+        store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    let event = InboundEvent::DmAttachment {
+        user_id: DiscordUserId::new(user_id.clone()),
+        channel_id: DiscordChannelId::new("dm-1"),
+        message_id: MessageId::new("m-1"),
+        attachment: DmAttachment {
+            id: "a-1".to_string(),
+            filename: "edit.it".to_string(),
+            size: edit.len() as u64,
+            url: url.to_string(),
+        },
+    };
+    service.handle(event.clone()).await.unwrap();
+
+    let versions = {
+        let db = db.lock().unwrap();
+        FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
+    };
+    assert_eq!(versions.len(), 2);
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|sent| { sent.message.content.contains("Received version 2") })
+    );
+    {
+        let db = db.lock().unwrap();
+        assert!(ProcessedAttachmentRepo::is_processed(db.conn(), &user_id, "m-1", "a-1").unwrap());
+    }
+
+    service.handle(event).await.unwrap();
+    let versions = {
+        let db = db.lock().unwrap();
+        FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
+    };
+    assert_eq!(versions.len(), 2);
+}
+
+#[tokio::test]
+async fn a_claim_command_delivers_the_claimed_file_from_the_outbox() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordUserId, FakeAttachmentFetcher, InboundEvent, InboundHandler, InteractionRef,
+        SlashCommand,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    for index in 0..3 {
+        join(&db, &store, index);
+    }
+    lock_roster(&db, EVENT, T1).unwrap();
+    generate_schedule(&db, EVENT, T2).unwrap();
+    start_event(&db, EVENT, T3).unwrap();
+    let offers = open_round(&db, EVENT, 0, T4).unwrap();
+    let user_id = match &offers.effects[0] {
+        Effect::Offer { user_id, .. } => user_id.clone(),
+        other => panic!("expected an offer, got {other:?}"),
+    };
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let service = InboundService::new(
+        Arc::new(Mutex::new(db)),
+        store,
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        Arc::new(FakeAttachmentFetcher::new()),
+        Arc::new(FixedClock(T5)),
+    );
+    service
+        .handle(InboundEvent::SlashCommand {
+            interaction: InteractionRef::new("i-1", "token"),
+            user_id: DiscordUserId::new(user_id),
+            guild_id: None,
+            command: SlashCommand::Claim,
+            options: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(discord.sent_files().len(), 1);
+}
+
+#[tokio::test]
+async fn backfill_recovers_a_dm_attachment_after_an_outage() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_db::DmCursorRepo;
+    use swap_discord::{DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundDm, MessageId};
+    use swap_engine::{FixedClock, InboundService};
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    for index in 0..3 {
+        join(&db, &store, index);
+    }
+    lock_roster(&db, EVENT, T1).unwrap();
+    generate_schedule(&db, EVENT, T2).unwrap();
+    start_event(&db, EVENT, T3).unwrap();
+    let offers = open_round(&db, EVENT, 0, T4).unwrap();
+    let (user_id, assignment_id, track_code) = match &offers.effects[0] {
+        Effect::Offer {
+            user_id,
+            assignment_id,
+            track_code,
+            ..
+        } => (user_id.clone(), assignment_id.clone(), track_code.clone()),
+        other => panic!("expected an offer, got {other:?}"),
+    };
+    claim(&db, &store, EVENT, &assignment_id, &user_id, T4).unwrap();
+    DmCursorRepo::upsert(db.conn(), &user_id, "dm-1", None, T4).unwrap();
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let edit = seed_bytes(77);
+    let url = "https://cdn.discordapp.com/attachments/1/2/backfill.it";
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    fetcher.add(url, &edit);
+    discord.push_inbound(
+        DiscordUserId::new(user_id.clone()),
+        InboundDm {
+            message_id: MessageId::new("m-backfill"),
+            content: String::new(),
+            attachments: vec![DmAttachment {
+                id: "a-backfill".to_string(),
+                filename: "backfill.it".to_string(),
+                size: edit.len() as u64,
+                url: url.to_string(),
+            }],
+        },
+    );
+    let db = Arc::new(Mutex::new(db));
+    let service = InboundService::new(
+        db.clone(),
+        store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    assert_eq!(service.backfill().await.unwrap(), 1);
+    let versions = {
+        let db = db.lock().unwrap();
+        FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
+    };
+    assert_eq!(versions.len(), 2);
+    let cursor = {
+        let db = db.lock().unwrap();
+        DmCursorRepo::get(db.conn(), &user_id).unwrap().unwrap()
+    };
+    assert_eq!(cursor.last_seen_message_id.as_deref(), Some("m-backfill"));
 }

@@ -5,12 +5,19 @@
 //! command is synchronous and returns the Discord effects to deliver. The live
 //! transport and the UI call the same commands.
 
+pub mod clock;
+pub mod delivery;
 pub mod effects;
 pub mod engine;
 pub mod ids;
+pub mod inbound;
 pub mod prepare;
 pub mod settings;
 
+pub use clock::{Clock, FixedClock, SystemClock};
+pub use delivery::{
+    DeliveryError, DeliveryReport, DeliveryWorker, PendingDelivery, dispatch_pending,
+};
 pub use effects::{Effect, dispatch};
 pub use engine::{
     ClaimOutcome, CreditEntry, EngineError, EventStatus, ExpireOutcome, JoinOutcome, JoinRequest,
@@ -20,6 +27,7 @@ pub use engine::{
     submit,
 };
 pub use ids::{assignment_id, plan_commitment, track_code};
+pub use inbound::InboundService;
 pub use prepare::{
     AB_SECONDS, DeliveryPreparer, OpenMptPreparer, PassthroughPreparer, PreparedBytes,
 };

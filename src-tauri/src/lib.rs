@@ -1,8 +1,9 @@
 // The setup service starts this host after it reads the keychain token.
 #[cfg(feature = "live")]
-#[allow(dead_code)]
 mod gateway_host;
 mod host;
+#[cfg(feature = "live")]
+mod live_runtime;
 mod setup_host;
 
 use serde::Serialize;
@@ -28,7 +29,7 @@ fn health() -> Health {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -37,11 +38,34 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(setup_host::BotRuntime::new())
+        .manage(setup_host::BotRuntime::new());
+    #[cfg(feature = "live")]
+    let builder = builder.manage(live_runtime::LiveRuntime::new());
+    builder
         .setup(|app| {
             setup_host::normalize_stale_session(app.handle());
             if let Err(error) = host::setup_tray(app) {
                 eprintln!("tray unavailable: {error}");
+            }
+            #[cfg(feature = "live")]
+            {
+                let settings = host::read_settings(app.handle()).unwrap_or_default();
+                let token = app
+                    .state::<setup_host::BotRuntime>()
+                    .current_token()
+                    .ok()
+                    .flatten();
+                if let Some(token) = token
+                    && !settings.guild_id.is_empty()
+                    && let Err(error) = app.state::<live_runtime::LiveRuntime>().start(
+                        app.handle(),
+                        token,
+                        settings.guild_id.clone(),
+                        Some(settings.announcement_channel_id.clone()),
+                    )
+                {
+                    eprintln!("Discord gateway did not start: {error}");
+                }
             }
             Ok(())
         })

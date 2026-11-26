@@ -9,6 +9,8 @@ use std::sync::Mutex;
 #[cfg(any(not(feature = "live"), test))]
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "live")]
+use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use swap_discord::{
@@ -152,6 +154,12 @@ impl BotRuntime {
 
     fn clear_session(&self) {
         self.session.clear();
+    }
+
+    /// Read the session token first, then the keychain token.
+    #[cfg(feature = "live")]
+    pub fn current_token(&self) -> Result<Option<String>, String> {
+        self.read_token(&KeychainStore)
     }
 }
 
@@ -505,6 +513,21 @@ pub async fn host_bot_save(
         runtime.clear_session();
         return Err(error);
     }
+    #[cfg(feature = "live")]
+    {
+        let live = app.state::<crate::live_runtime::LiveRuntime>();
+        live.stop().await?;
+        if let Some(token) = runtime.current_token()?
+            && !settings.guild_id.is_empty()
+        {
+            live.start(
+                &app,
+                token,
+                settings.guild_id.clone(),
+                Some(settings.announcement_channel_id.clone()),
+            )?;
+        }
+    }
     Ok(settings)
 }
 
@@ -555,6 +578,12 @@ pub async fn host_bot_clear(
     let keychain = tauri::async_runtime::spawn_blocking(|| KeychainStore.delete())
         .await
         .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    {
+        app.state::<crate::live_runtime::LiveRuntime>()
+            .stop()
+            .await?;
+    }
     apply_clear(keychain, &runtime.session, &mut settings)?;
     host::write_settings(&app, &settings)?;
     Ok(settings)

@@ -58,6 +58,20 @@ Feature: Host operations and recovery
     And the app does not send a duplicate message
     And the app records the recovery
 
+  Scenario: The host restarts during an active event
+    Given an active event with committed assignments
+    When the host closes the app and starts it again
+    Then the event state and the seen ledger are unchanged
+    And the outbox contains every unacknowledged effect
+    And the app retries each unacknowledged effect
+    And the app never loses a committed effect
+
+  Scenario: A failed command does not change state
+    Given a command that changes an assignment and enqueues an effect
+    When the command fails before it commits
+    Then the assignment keeps its previous state
+    And the outbox contains no effect for the failed command
+
   Scenario: A backup can be restored
     Given an automatic backup from before a transition
     When the host restores the backup

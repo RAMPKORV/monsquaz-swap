@@ -13,7 +13,9 @@ dependency, a release artifact, or an architecture driver.
 ## Tools
 
 - **TLA+ 1.8.0 and TLC** for finite design models. The build is pinned by
-  SHA-256 in `scripts/formal/check.sh`. The jar is not committed.
+  SHA-256 in `scripts/formal/check.sh`. The upstream `v1.8.0` asset was
+  rebuilt on 2026-11-26; the pin tracks that build. A mismatch fails the check
+  for review. The jar is not committed.
 - **proptest-state-machine** for model-based tests against the real Rust types
   and engine.
 - **Kani** was spiked for the header parser and custom-ID codec. The current
@@ -50,7 +52,7 @@ describes.
 | Anonymity projections | `swap-sim` outbound audit | partial |
 | Classic schedule | `SwapSchedule.tla` | after planner repair |
 | Async queue | `SwapAsync.tla` | after async queue |
-| Delivery idempotency | `SwapDelivery.tla` | after delivery loop |
+| Delivery idempotency | `specs/tla/SwapDelivery.tla` | implemented |
 | Reveal gate | `SwapReveal.tla` | after reveal presenter |
 
 ## Invariants
@@ -69,15 +71,32 @@ The claim model checks:
 Claim windows use a bounded logical clock. Real time, DST, reminders, SQLite,
 Discord, files, and the UI are outside the model.
 
+The delivery model checks:
+
+- `SentWereEnqueued`: a sent effect was enqueued first.
+- `AckedWereSent`: an acknowledgement refers to a sent effect.
+- `AckedWereEnqueued`: an acknowledgement refers to an enqueued effect.
+- `NoLostEffect`: every enqueued effect is pending or acknowledged.
+- `UniqueKeys`: dedupe keys are unique.
+- `AttemptsBounded`: the attempt counter stays within the bound.
+- `TypeOK`: every variable has the expected shape.
+
+A restart is a stuttering step because the outbox and event state live in
+SQLite. The model proves safety across duplicate sends and lost responses; it
+does not prove wall-clock liveness.
+
 ## Model-checking bounds
 
-| Run | Participants | Tracks | Max ticks | Time budget |
-|---|---|---|---|---|
-| PR | 2 | 2 | 3 | 5 minutes |
-| Nightly | 3 | 3 | 2 | 20 minutes |
+| Run | Model | Bound | Time budget |
+|---|---|---|---|
+| Claim PR | 2 participants × 2 tracks | 3 ticks | 5 minutes |
+| Claim nightly | 3 participants × 3 tracks | 2 ticks | 20 minutes |
+| Delivery PR | 3 effects | 2 attempts | 5 minutes |
+| Delivery nightly | 4 effects | 3 attempts | 20 minutes |
 
-The 2×2 model has 750 distinct states. The 3×3 model is much larger; the
-nightly timeout is a hard ceiling. If a model exceeds its budget, reduce the
+The claim PR model has 750 distinct states and the nightly model has 2,338,158.
+The delivery PR model has 216 distinct states and the nightly model has 4,096.
+The nightly timeout is a hard ceiling. If a model exceeds its budget, reduce the
 scope or use Apalache. A skipped model must be reported, never silently
 ignored.
 
@@ -88,8 +107,9 @@ A property is not covered until a deliberately broken variant makes it fail.
 TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
 `NoOwnTrack`, `NoOwnOffer`, `AtMostOneOfferPerTrack`,
 `AtMostOneOfferPerPerson`, `AtMostOneActivePerPerson`, and
-`NoExpiredReoffer`. A parse error or an unrelated failure is not counted as a
-detected mutation.
+`NoExpiredReoffer`, plus `AckedWereSent`, `SentWereEnqueued`, `UniqueKeys`,
+`NoLostEffect`, `AttemptsBounded`, and the delivery `TypeOK`. A parse error or
+an unrelated failure is not counted as a detected mutation.
 
 ## Conformance
 

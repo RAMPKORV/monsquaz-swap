@@ -106,12 +106,19 @@ next.
 - SQLite with WAL, `foreign_keys=ON`, `synchronous=NORMAL`, `busy_timeout`.
 - Migrations use `user_version`; never edit an applied migration.
 - Tables: events, participants, tracks, versions/files, assignments, seen
-  ledger, offers, extensions, audit, DM cursors, pack reports, comments.
+  ledger, offers, extensions, audit, DM cursors, pack reports, comments, and
+  the delivery outbox.
 - Owner/author data is separate from recipient-facing projections.
 - Discord IDs are 64-bit snowflakes. Store them as TEXT and pass them through
   unchanged; never parse them into a 53-bit JavaScript number.
 - Files live in a user-chosen library. The DB stores hashes, sizes, relative
   paths, and opaque IDs. The UI never sees absolute paths.
+- Every command changes state and enqueues its effects in one transaction. The
+  app commits the transaction before it sends. The app dispatches pending rows
+  after the command and again on startup. A restart or reboot is safe.
+- A crash after Discord accepts a send but before the sent mark can duplicate a
+  send. The delivery id is stable. A future transport nonce or reconciliation
+  step closes that window. The model allows duplicate sends and one ack.
 
 ## Discord
 

@@ -10,8 +10,9 @@ pub mod repos;
 
 pub use db::{Db, DbError};
 pub use repos::{
-    AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo, EventRecord, EventRepo, FileRecord,
-    FileRepo, IdentityCounts, MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord,
-    PlanRecord, PlanRepo, PrivacyRepo, SeenPairRecord, SeenRepo, TrackRecord, TrackRepo,
+    AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo, DeliveryRecord, DeliveryRepo,
+    DmCursorRecord, DmCursorRepo, EventRecord, EventRepo, FileRecord, FileRepo, IdentityCounts,
+    MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
+    PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackRecord, TrackRepo,
 };
 pub use rusqlite::{Connection, Transaction};

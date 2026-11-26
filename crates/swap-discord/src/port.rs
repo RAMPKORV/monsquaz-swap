@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -23,6 +24,73 @@ pub struct InboundDm {
     pub message_id: MessageId,
     pub content: String,
     pub attachments: Vec<DmAttachment>,
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AttachmentError {
+    #[error("the attachment URL is not a Discord CDN URL")]
+    InvalidUrl,
+    #[error("the attachment is larger than the configured limit")]
+    TooLarge,
+    #[error("the attachment download failed: {0}")]
+    Transport(String),
+}
+
+/// Downloads an attachment from a Discord CDN URL. The app calls this on
+/// receipt; it must never forward the URL or store it as the file location.
+#[async_trait]
+pub trait AttachmentFetcher: Send + Sync {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError>;
+}
+
+#[derive(Debug, Default)]
+struct FakeAttachmentState {
+    files: HashMap<String, Vec<u8>>,
+    fail_next: Option<AttachmentError>,
+}
+
+#[derive(Debug, Default)]
+pub struct FakeAttachmentFetcher {
+    state: Mutex<FakeAttachmentState>,
+}
+
+impl FakeAttachmentFetcher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&self, url: &str, bytes: &[u8]) {
+        self.lock().files.insert(url.to_string(), bytes.to_vec());
+    }
+
+    pub fn fail_next(&self, error: AttachmentError) {
+        self.lock().fail_next = Some(error);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, FakeAttachmentState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[async_trait]
+impl AttachmentFetcher for FakeAttachmentFetcher {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError> {
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next.take() {
+            return Err(error);
+        }
+        let bytes = state
+            .files
+            .get(url)
+            .cloned()
+            .ok_or_else(|| AttachmentError::Transport("not found".to_string()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(AttachmentError::TooLarge);
+        }
+        Ok(bytes)
+    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

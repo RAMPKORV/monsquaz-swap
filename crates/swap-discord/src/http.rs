@@ -16,7 +16,10 @@ use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, MessageMarker, UserMarker};
 
 use crate::inbound::DmAttachment;
-use crate::port::{DiscordError, DiscordPort, InboundDm, OutboundFile, OutboundMessage};
+use crate::port::{
+    AttachmentError, AttachmentFetcher, DiscordError, DiscordPort, InboundDm, OutboundFile,
+    OutboundMessage,
+};
 use crate::setup::validate_bot_token_shape;
 use crate::{DiscordChannelId, DiscordUserId, MessageId};
 
@@ -276,6 +279,62 @@ pub fn is_text_channel(kind: ChannelType) -> bool {
         kind,
         ChannelType::GuildText | ChannelType::GuildAnnouncement
     )
+}
+
+/// Downloads Discord CDN attachments for immediate intake.
+pub struct HttpAttachmentFetcher {
+    client: reqwest::Client,
+}
+
+impl HttpAttachmentFetcher {
+    pub fn new() -> Result<Self, AttachmentError> {
+        let client = reqwest::Client::builder()
+            .build()
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
+        Ok(Self { client })
+    }
+}
+
+impl Default for HttpAttachmentFetcher {
+    fn default() -> Self {
+        Self::new().expect("the attachment HTTP client must build")
+    }
+}
+
+#[async_trait]
+impl AttachmentFetcher for HttpAttachmentFetcher {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError> {
+        if !url.starts_with("https://cdn.discordapp.com/")
+            && !url.starts_with("https://media.discordapp.net/")
+        {
+            return Err(AttachmentError::InvalidUrl);
+        }
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AttachmentError::Transport(format!(
+                "Discord CDN returned {}",
+                response.status()
+            )));
+        }
+        if let Some(length) = response.content_length()
+            && length > max_bytes
+        {
+            return Err(AttachmentError::TooLarge);
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(AttachmentError::TooLarge);
+        }
+        Ok(bytes.to_vec())
+    }
 }
 
 #[cfg(test)]

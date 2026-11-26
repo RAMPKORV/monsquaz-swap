@@ -10,6 +10,7 @@ use swap_db::{
 use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
 use thiserror::Error;
 
+use crate::delivery::{DeliveryError, PendingDelivery, enqueue_effect, enqueue_pending};
 use crate::effects::Effect;
 use crate::ids::{assignment_id, plan_commitment, track_code};
 use crate::prepare::{DeliveryPreparer, PreparedBytes};
@@ -31,6 +32,8 @@ pub enum EngineError {
     Settings(#[from] SettingsError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Delivery(#[from] DeliveryError),
     #[error(transparent)]
     State(#[from] StateError),
     #[error("event not found: {0}")]
@@ -644,14 +647,16 @@ pub fn open_round(
             &planned_assignment.track_code,
             TrackState::Offered,
         )?;
-        effects.push(Effect::Offer {
+        let effect = Effect::Offer {
             user_id: planned_assignment.participant_id.clone(),
             event_id: event_id.to_string(),
             assignment_id: id,
             track_code: planned_assignment.track_code.clone(),
             due_at,
             claim_window_secs: settings.claim_window_secs,
-        });
+        };
+        enqueue_effect(&transaction, event_id, &effect, now)?;
+        effects.push(effect);
     }
     commit(transaction)?;
 
@@ -686,6 +691,19 @@ pub fn claim(
         return Err(EngineError::OfferExpired);
     }
     let next_due = now + settings.round_window_secs;
+    let current = latest_file(db, event_id, &assignment.track_code)?;
+    let filename = format!("{}.{}", assignment.track_code, current.extension);
+    let caption = format!(
+        "Track {}. Your turn. Due at {next_due} UTC.",
+        assignment.track_code
+    );
+    let pending = PendingDelivery::File {
+        user_id: user_id.to_string(),
+        track_code: assignment.track_code.clone(),
+        filename: filename.clone(),
+        sha256: current.sha256.clone(),
+        caption: caption.clone(),
+    };
 
     let transaction = begin(db)?;
     AssignmentRepo::claim(&transaction, assignment.id.as_str(), now, next_due, now)?;
@@ -703,20 +721,16 @@ pub fn claim(
         &assignment.track_code,
         TrackState::InCustody,
     )?;
+    enqueue_pending(&transaction, event_id, &pending, now)?;
     commit(transaction)?;
 
-    let current = latest_file(db, event_id, &assignment.track_code)?;
     let bytes = store.read(&current.sha256)?;
-    let filename = format!("{}.{}", assignment.track_code, current.extension);
     let effects = vec![Effect::TrackFile {
         user_id: user_id.to_string(),
         track_code: assignment.track_code.clone(),
         filename: filename.clone(),
         bytes,
-        caption: format!(
-            "Track {}. Your turn. Due at {next_due} UTC.",
-            assignment.track_code
-        ),
+        caption,
     }];
 
     Ok(ClaimOutcome {
@@ -778,6 +792,13 @@ pub fn submit(
         },
         now,
     );
+    let receipt = Effect::Dm {
+        user_id: request.user_id.to_string(),
+        content: format!(
+            "Received version {version} of track {}. SHA-256: {}. Latest version wins.",
+            assignment.track_code, original_blob.sha256
+        ),
+    };
     let transaction = begin(db)?;
     FileRepo::insert(&transaction, &file)?;
     AssignmentRepo::submit(&transaction, &assignment.id, now, now)?;
@@ -795,15 +816,10 @@ pub fn submit(
         &assignment.track_code,
         TrackState::Submitted,
     )?;
+    enqueue_effect(&transaction, request.event_id, &receipt, now)?;
     commit(transaction)?;
 
-    let effects = vec![Effect::Dm {
-        user_id: request.user_id.to_string(),
-        content: format!(
-            "Received version {version} of track {}. SHA-256: {}. Latest version wins.",
-            assignment.track_code, original_blob.sha256
-        ),
-    }];
+    let effects = vec![receipt];
     Ok(SubmitOutcome {
         version,
         sha256: delivery_blob.sha256,
@@ -826,6 +842,13 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
         other => return Err(EngineError::WrongAssignmentState(other)),
     };
 
+    let receipt = Effect::Dm {
+        user_id: user_id.to_string(),
+        content: format!(
+            "You skipped track {}. The track returns to the pool unchanged.",
+            assignment.track_code
+        ),
+    };
     let transaction = begin(db)?;
     AssignmentRepo::update_status(&transaction, &assignment.id, status, now)?;
     if let Some(reason) = seen_reason {
@@ -844,15 +867,10 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
         &assignment.track_code,
         TrackState::Pool,
     )?;
+    enqueue_effect(&transaction, event_id, &receipt, now)?;
     commit(transaction)?;
 
-    let effects = vec![Effect::Dm {
-        user_id: user_id.to_string(),
-        content: format!(
-            "You skipped track {}. The track returns to the pool unchanged.",
-            assignment.track_code
-        ),
-    }];
+    let effects = vec![receipt];
     Ok(SkipOutcome { status, effects })
 }
 

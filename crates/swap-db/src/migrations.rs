@@ -160,6 +160,31 @@ ALTER TABLE files ADD COLUMN original_storage_path TEXT;
 ALTER TABLE files ADD COLUMN audio_verified INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE files ADD COLUMN scrub_summary_json TEXT NOT NULL DEFAULT '{}';
 "#,
+    r#"
+-- Migration 004: durable delivery outbox. The id is the dedupe key.
+CREATE TABLE deliveries (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    sent_at INTEGER,
+    last_error TEXT
+) STRICT;
+
+CREATE INDEX deliveries_pending ON deliveries(status, created_at);
+
+CREATE TABLE processed_attachments (
+    user_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    attachment_id TEXT NOT NULL,
+    processed_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, message_id, attachment_id)
+) STRICT;
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

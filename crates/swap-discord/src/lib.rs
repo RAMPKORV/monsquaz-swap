@@ -24,12 +24,12 @@ pub use gateway::{
     SystemClock, Timer, TokioTimer,
 };
 #[cfg(feature = "live")]
-pub use http::HttpDiscordPort;
+pub use http::{HttpAttachmentFetcher, HttpDiscordPort};
 pub use ids::{DiscordChannelId, DiscordGuildId, DiscordUserId, MessageId};
 pub use inbound::{DmAttachment, InboundEvent, InteractionRef};
 pub use port::{
-    DiscordError, DiscordPort, FakeDiscord, InboundDm, OutboundFile, OutboundMessage, SentDm,
-    SentFile,
+    AttachmentError, AttachmentFetcher, DiscordError, DiscordPort, FakeAttachmentFetcher,
+    FakeDiscord, InboundDm, OutboundFile, OutboundMessage, SentDm, SentFile,
 };
 pub use setup::{
     BotIdentity, ChannelSummary, GuildSummary, RECOMMENDED_PERMISSIONS, SetupDirectory, SetupError,

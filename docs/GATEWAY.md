@@ -91,6 +91,18 @@ cargo test -p swap-discord --no-default-features
 cargo check -p monsquaz-swap --no-default-features
 ```
 
+## Restart and backfill
+
+The app opens the SQLite database when it starts. It dispatches pending outbox
+rows and runs one DM backfill for each recorded cursor. A command commits the
+event state and its outbox rows in one transaction. A restart or reboot keeps
+the event, seen ledger, files, and pending deliveries.
+
+A crash after Discord accepts a send and before the sent mark can duplicate a
+message. The delivery id is stable. A future transport nonce or reconciliation
+step must close that window. The formal delivery model allows duplicate sends
+and one acknowledgement.
+
 ## Deferred work
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and

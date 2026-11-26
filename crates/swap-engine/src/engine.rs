@@ -1293,6 +1293,16 @@ pub fn request_extension(
             decision_id: None,
         });
     }
+    if let Some(open) =
+        HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, "extension")?
+    {
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::PendingHost,
+            due_at: Some(due_at),
+            decision_id: Some(open.id),
+        });
+    }
     if deadline.extension_count == 0 && hours <= 6 {
         let base = due_at.max(now);
         let new_due = base + hours * 3_600;
@@ -1581,6 +1591,9 @@ pub fn decide_deadline(
             })
         }
         "missed" => {
+            if assignment.status != AssignmentStatus::Overdue {
+                return Err(EngineError::WrongAssignmentState(assignment.status));
+            }
             SeenRepo::record(
                 &transaction,
                 &assignment.event_id,

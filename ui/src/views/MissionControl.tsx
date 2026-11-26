@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { Decision, MissionControl, PackInfo } from "../types";
+import type { Decision, FillInCandidate, MissionControl, PackInfo } from "../types";
 import {
   Button,
   Dialog,
@@ -34,6 +34,8 @@ export function MissionControlView({
   onExtendSeedDeadline,
   onDecideLateSeed,
   onMoveRoundDeadline,
+  onLoadFillInCandidates,
+  onAssignFillIn,
 }: {
   data: MissionControl;
   timezone?: string;
@@ -50,12 +52,30 @@ export function MissionControlView({
     deadlineAt: number,
     reason: string,
   ) => Promise<void>;
+  onLoadFillInCandidates: (
+    trackCode: string,
+    roundNo: number,
+  ) => Promise<FillInCandidate[]>;
+  onAssignFillIn: (
+    trackCode: string,
+    roundNo: number,
+    participantId: string,
+  ) => Promise<void>;
 }) {
   const initialDialog = new URLSearchParams(window.location.search).get("dialog");
   const [confirmReveal, setConfirmReveal] = useState(initialDialog === "reveal");
   const [confirmLock, setConfirmLock] = useState(initialDialog === "lock");
   const [moveDeadline, setMoveDeadline] = useState<string | null>(null);
   const [moveReason, setMoveReason] = useState("");
+  const [fillInOpen, setFillInOpen] = useState(
+    () => new URLSearchParams(window.location.search).get("dialog") === "fillin",
+  );
+  const [fillInTrack, setFillInTrack] = useState("");
+  const [fillInRound, setFillInRound] = useState("2");
+  const [fillInCandidates, setFillInCandidates] = useState<FillInCandidate[]>(
+    [],
+  );
+  const [fillInChoice, setFillInChoice] = useState("");
   const [selectedDecision, setSelectedDecision] = useState<Decision | null>(
     initialDialog === "decision" ? (data.decisions[0] ?? null) : null,
   );
@@ -370,21 +390,30 @@ export function MissionControlView({
                       : `Round ${event.round} of ${event.rounds}`}
                 </span>
                 {event.stage === "Active" && event.round >= 2 ? (
-                  <Button
-                    variant="quiet"
-                    icon="clock"
-                    onClick={() => {
-                      const next = new Date(Date.now() + 24 * 60 * 60 * 1000);
-                      const offset = next.getTimezoneOffset() * 60_000;
-                      setMoveDeadline(
-                        new Date(next.getTime() - offset)
-                          .toISOString()
-                          .slice(0, 16),
-                      );
-                    }}
-                  >
-                    Move deadline
-                  </Button>
+                  <>
+                    <Button
+                      variant="quiet"
+                      icon="clock"
+                      onClick={() => {
+                        const next = new Date(Date.now() + 24 * 60 * 60 * 1000);
+                        const offset = next.getTimezoneOffset() * 60_000;
+                        setMoveDeadline(
+                          new Date(next.getTime() - offset)
+                            .toISOString()
+                            .slice(0, 16),
+                        );
+                      }}
+                    >
+                      Move deadline
+                    </Button>
+                    <Button
+                      variant="quiet"
+                      icon="shuffle"
+                      onClick={() => setFillInOpen(true)}
+                    >
+                      Fill-in
+                    </Button>
+                  </>
                 ) : null}
               </div>
             </div>
@@ -781,6 +810,104 @@ export function MissionControlView({
             undone. If the bot is offline, the message waits in the queue. Make
             sure every track is final before you continue.
           </p>
+        </Dialog>
+      ) : null}
+
+      {fillInOpen ? (
+        <Dialog
+          title="Assign a fill-in"
+          onClose={() => setFillInOpen(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setFillInOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={!fillInChoice}
+                onClick={async () => {
+                  await onAssignFillIn(
+                    fillInTrack.trim().toUpperCase(),
+                    Number(fillInRound),
+                    fillInChoice,
+                  );
+                  setFillInOpen(false);
+                  setFillInChoice("");
+                  setFillInCandidates([]);
+                }}
+              >
+                Assign fill-in
+              </Button>
+            </>
+          }
+        >
+          <p>
+            A fill-in covers a stranded track. The person must not own the
+            track and must not have seen it. The handoff cap applies.
+          </p>
+          <Field
+            label="Track code"
+            htmlFor="fill-in-track"
+            helpId="fill-in-track-help"
+            help="Use the code the bot sent. Example: S7F3A."
+          >
+            <input
+              id="fill-in-track"
+              className="input"
+              aria-describedby="fill-in-track-help"
+              value={fillInTrack}
+              onChange={(event) => setFillInTrack(event.target.value)}
+            />
+          </Field>
+          <Field label="Round" htmlFor="fill-in-round">
+            <input
+              id="fill-in-round"
+              className="input"
+              type="number"
+              min={2}
+              max={event.rounds}
+              value={fillInRound}
+              onChange={(event) => setFillInRound(event.target.value)}
+            />
+          </Field>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              setFillInCandidates(
+                await onLoadFillInCandidates(
+                  fillInTrack.trim().toUpperCase(),
+                  Number(fillInRound),
+                ),
+              );
+            }}
+          >
+            Find people
+          </Button>
+          <Field
+            label="Person"
+            htmlFor="fill-in-person"
+            helpId="fill-in-person-help"
+            help="Only eligible people appear. The list shows seen tracks and the handoff cap."
+          >
+            <select
+              id="fill-in-person"
+              className="input"
+              aria-describedby="fill-in-person-help"
+              value={fillInChoice}
+              onChange={(event) => setFillInChoice(event.target.value)}
+            >
+              <option value="">Choose a person</option>
+              {fillInCandidates.map((candidate) => (
+                <option
+                  key={candidate.participantId}
+                  value={candidate.participantId}
+                >
+                  {candidate.displayName} · seen {candidate.seen} · cap{" "}
+                  {candidate.cap}
+                </option>
+              ))}
+            </select>
+          </Field>
         </Dialog>
       ) : null}
 

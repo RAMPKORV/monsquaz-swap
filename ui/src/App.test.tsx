@@ -19,6 +19,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue(null),
+  save: vi.fn().mockResolvedValue(null),
 }));
 
 function setUrl(search: string) {

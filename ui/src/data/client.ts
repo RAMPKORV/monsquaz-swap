@@ -12,6 +12,7 @@ import type {
   ChannelOption,
   EventDraft,
   EventSummary,
+  FillInCandidate,
   GuildOption,
   HostSettings,
   LateSeed,
@@ -806,6 +807,47 @@ export function previewUrl(fileId: string): string {
     return "";
   }
   return convertFileSrc(fileId, "swap-preview");
+}
+
+export async function exportRevealZip(path: string): Promise<string> {
+  if (isDemoMode()) {
+    await pause(260);
+    return path;
+  }
+  return invoke<string>("host_export_reveal_zip", { path });
+}
+
+export async function loadFillInCandidates(
+  trackCode: string,
+  roundNo: number,
+): Promise<FillInCandidate[]> {
+  if (isDemoMode()) {
+    await pause(200);
+    return [
+      { participantId: "user-04", displayName: "Jules", seen: 3, cap: 8 },
+      { participantId: "user-08", displayName: "Tove", seen: 2, cap: 8 },
+    ];
+  }
+  return invoke<FillInCandidate[]>("host_fill_in_candidates", {
+    trackCode,
+    roundNo,
+  });
+}
+
+export async function assignFillIn(
+  trackCode: string,
+  roundNo: number,
+  participantId: string,
+): Promise<void> {
+  if (isDemoMode()) {
+    await pause(220);
+    return;
+  }
+  return invoke<void>("host_assign_fill_in", {
+    trackCode,
+    roundNo,
+    participantId,
+  });
 }
 
 export async function revealEvent(): Promise<RevealData> {

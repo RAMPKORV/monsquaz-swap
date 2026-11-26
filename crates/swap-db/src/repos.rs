@@ -998,6 +998,21 @@ impl FileRepo {
         Ok(())
     }
 
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<FileRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, track_code, version, holder_id, sha256, size,
+                        extension, storage_path, original_sha256, original_storage_path,
+                        audio_verified, scrub_summary_json, created_at
+                 FROM files WHERE id = ?1",
+                params![id],
+                row_to_raw_file,
+            )
+            .optional()?
+            .map(FileRecord::try_from)
+            .transpose()?)
+    }
+
     pub fn list_for_track(
         conn: &Connection,
         event_id: &str,
@@ -1036,6 +1051,160 @@ impl FileRepo {
             .map(FileRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackTitleRecord {
+    pub event_id: String,
+    pub track_code: String,
+    pub title: String,
+    pub set_by: String,
+    pub created_at: i64,
+}
+
+pub struct TrackTitleRepo;
+
+impl TrackTitleRepo {
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        track_code: &str,
+    ) -> Result<Option<TrackTitleRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT event_id, track_code, title, set_by, created_at
+                 FROM track_titles WHERE event_id = ?1 AND track_code = ?2",
+                params![event_id, track_code],
+                row_to_track_title,
+            )
+            .optional()?)
+    }
+
+    pub fn upsert(conn: &Connection, title: &TrackTitleRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO track_titles (event_id, track_code, title, set_by, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(event_id, track_code) DO UPDATE SET
+                title = excluded.title,
+                set_by = excluded.set_by,
+                created_at = excluded.created_at",
+            params![
+                &title.event_id,
+                &title.track_code,
+                &title.title,
+                &title.set_by,
+                title.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<TrackTitleRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT event_id, track_code, title, set_by, created_at
+             FROM track_titles WHERE event_id = ?1 ORDER BY track_code",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_track_title)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+fn row_to_track_title(row: &Row<'_>) -> rusqlite::Result<TrackTitleRecord> {
+    Ok(TrackTitleRecord {
+        event_id: row.get(0)?,
+        track_code: row.get(1)?,
+        title: row.get(2)?,
+        set_by: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackCommentRecord {
+    pub id: String,
+    pub event_id: String,
+    pub track_code: String,
+    pub participant_id: String,
+    pub kind: String,
+    pub body: String,
+    pub redacted_at: Option<i64>,
+    pub created_at: i64,
+}
+
+pub struct TrackCommentRepo;
+
+impl TrackCommentRepo {
+    pub fn insert(conn: &Connection, comment: &TrackCommentRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO track_comments
+                (id, event_id, track_code, participant_id, kind, body, redacted_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &comment.id,
+                &comment.event_id,
+                &comment.track_code,
+                &comment.participant_id,
+                &comment.kind,
+                &comment.body,
+                comment.redacted_at,
+                comment.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<TrackCommentRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT id, event_id, track_code, participant_id, kind, body,
+                        redacted_at, created_at
+                 FROM track_comments WHERE id = ?1",
+                params![id],
+                row_to_track_comment,
+            )
+            .optional()?)
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<TrackCommentRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, track_code, participant_id, kind, body,
+                    redacted_at, created_at
+             FROM track_comments WHERE event_id = ?1 ORDER BY created_at, id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_track_comment)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn redact(conn: &Connection, id: &str, now: i64) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE track_comments SET redacted_at = ?2
+             WHERE id = ?1 AND redacted_at IS NULL",
+            params![id, now],
+        )? > 0)
+    }
+}
+
+fn row_to_track_comment(row: &Row<'_>) -> rusqlite::Result<TrackCommentRecord> {
+    Ok(TrackCommentRecord {
+        id: row.get(0)?,
+        event_id: row.get(1)?,
+        track_code: row.get(2)?,
+        participant_id: row.get(3)?,
+        kind: row.get(4)?,
+        body: row.get(5)?,
+        redacted_at: row.get(6)?,
+        created_at: row.get(7)?,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1226,6 +1395,16 @@ impl PrivacyRepo {
         let plan_assignments = conn.execute(
             "UPDATE plan_assignments SET participant_id = ?1
              WHERE event_id = ?2 AND participant_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        conn.execute(
+            "UPDATE track_comments SET participant_id = ?1
+             WHERE event_id = ?2 AND participant_id = ?3",
+            params![new_id, event_id, old_id],
+        )?;
+        conn.execute(
+            "UPDATE track_titles SET set_by = ?1
+             WHERE event_id = ?2 AND set_by = ?3",
             params![new_id, event_id, old_id],
         )?;
         Ok(IdentityCounts {

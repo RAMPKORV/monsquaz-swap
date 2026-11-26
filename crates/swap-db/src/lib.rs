@@ -14,6 +14,7 @@ pub use repos::{
     DeadlineRepo, DeliveryRecord, DeliveryRepo, DmCursorRecord, DmCursorRepo, EventRecord,
     EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo, IdentityCounts,
     MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackRecord, TrackRepo,
+    PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackCommentRecord,
+    TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo,
 };
 pub use rusqlite::{Connection, Transaction, TransactionBehavior};

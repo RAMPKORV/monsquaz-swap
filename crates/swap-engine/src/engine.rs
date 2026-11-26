@@ -2,13 +2,14 @@ use chrono::{TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use swap_core::{
     AssignmentStatus, EventState, Membership, ParticipantId, Readiness, Role, Schedule, StateError,
-    TrackCode, TrackSpec, TrackState,
+    TrackCode, TrackSpec, TrackState, album_order,
 };
 use swap_db::{
     AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, DbError, DeadlineRepo,
     EventRecord, EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo,
     ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    ProcessedAttachmentRepo, SeenRepo, TrackRecord, TrackRepo, Transaction, TransactionBehavior,
+    ProcessedAttachmentRepo, SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord,
+    TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction, TransactionBehavior,
 };
 use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
 use thiserror::Error;
@@ -115,6 +116,24 @@ pub enum EngineError {
     ExtensionLimit,
     #[error("the assignment has no edit deadline")]
     NoDeadline,
+    #[error("track not found: {0}")]
+    TrackNotFound(String),
+    #[error("the track title is empty")]
+    EmptyTitle,
+    #[error("the track title is longer than 80 characters")]
+    TitleTooLong,
+    #[error("only the latest holder or the host can name this track")]
+    NotTitleHolder,
+    #[error("the comment is empty")]
+    EmptyComment,
+    #[error("the comment is longer than 1000 characters")]
+    CommentTooLong,
+    #[error("the comment kind must be comment or questionnaire")]
+    InvalidCommentKind,
+    #[error("the comment was not found: {0}")]
+    CommentNotFound(String),
+    #[error("the comment is already redacted")]
+    CommentAlreadyRedacted,
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +240,65 @@ pub struct TrackCredits {
 pub struct RevealOutcome {
     pub tracks: Vec<TrackCredits>,
     pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealPackage {
+    pub event_name: String,
+    pub event_state: EventState,
+    pub published: bool,
+    pub album: Vec<RevealTrack>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealTrack {
+    pub position: u32,
+    pub track_code: String,
+    pub title: Option<String>,
+    pub seed_owner_id: String,
+    pub seed_owner_name: String,
+    pub credits: Vec<CreditEntry>,
+    pub comments: Vec<RevealComment>,
+    pub versions: Vec<RevealVersion>,
+    pub stats: RevealStats,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealComment {
+    pub id: String,
+    pub participant_id: String,
+    pub author_name: String,
+    pub kind: String,
+    pub body: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealVersion {
+    pub version: u32,
+    pub holder_id: String,
+    pub holder_name: String,
+    pub role: RevealVersionRole,
+    pub round: Option<u32>,
+    pub file_id: String,
+    pub extension: String,
+    pub created_at: i64,
+    pub playable: bool,
+    pub final_version: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevealVersionRole {
+    Seed,
+    Edit,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RevealStats {
+    pub edits: u32,
+    pub fill_ins: u32,
+    pub skips: u32,
+    pub contributors: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -996,6 +1074,24 @@ fn submit_inner(
         return Err(EngineError::AttachmentAlreadyProcessed);
     }
     enqueue_effect(&transaction, request.event_id, &receipt, now)?;
+    if assignment.status != AssignmentStatus::Submitted
+        && let Some(plan) = PlanRepo::latest(&transaction, request.event_id)?
+        && assignment.round + 1 == plan.rounds
+        && TrackTitleRepo::get(&transaction, request.event_id, &assignment.track_code)?.is_none()
+    {
+        enqueue_effect(
+            &transaction,
+            request.event_id,
+            &Effect::Dm {
+                user_id: request.user_id.to_string(),
+                content: format!(
+                    "Your edit closes track {}. Name the final track with /swap title <title>.",
+                    assignment.track_code
+                ),
+            },
+            now,
+        )?;
+    }
     commit(transaction)?;
 
     let effects = vec![receipt];
@@ -1252,6 +1348,305 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
         }
     }
     bounded
+}
+
+/// Build the host-only reveal package. The package contains names and comments.
+/// It never contains file bytes or absolute paths. Audio is addressed by opaque
+/// file id through the preview protocol.
+pub fn reveal_package(db: &Db, event_id: &str) -> Result<RevealPackage, EngineError> {
+    let event = load_event(db, event_id)?;
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    let titles = TrackTitleRepo::list_for_event(db.conn(), event_id)?;
+    let comments = TrackCommentRepo::list_for_event(db.conn(), event_id)?;
+    let name_of = |user_id: &str| {
+        participants
+            .iter()
+            .find(|participant| participant.user_id == user_id)
+            .map(|participant| participant.display_name.clone())
+            .unwrap_or_else(|| "Removed participant".to_string())
+    };
+    let mut tracks = Vec::new();
+    for track in TrackRepo::list_for_event(db.conn(), event_id)? {
+        let mut credits = Vec::new();
+        let mut stats = RevealStats::default();
+        let mut contributors = std::collections::BTreeSet::new();
+        contributors.insert(track.owner_id.clone());
+        for assignment in assignments
+            .iter()
+            .filter(|assignment| assignment.track_code == track.code)
+        {
+            match assignment.status {
+                AssignmentStatus::Submitted => {
+                    let fill_in = participants
+                        .iter()
+                        .find(|participant| participant.user_id == assignment.participant_id)
+                        .is_some_and(|participant| participant.role == Role::FillIn);
+                    credits.push(CreditEntry {
+                        round: assignment.round,
+                        participant_id: assignment.participant_id.clone(),
+                        display_name: name_of(&assignment.participant_id),
+                        status: assignment.status,
+                        fill_in,
+                    });
+                    stats.edits += 1;
+                    if fill_in {
+                        stats.fill_ins += 1;
+                    }
+                    contributors.insert(assignment.participant_id.clone());
+                }
+                AssignmentStatus::SkippedAfterClaim | AssignmentStatus::SkippedBeforeClaim => {
+                    credits.push(CreditEntry {
+                        round: assignment.round,
+                        participant_id: String::new(),
+                        display_name: "No edit".to_string(),
+                        status: assignment.status,
+                        fill_in: false,
+                    });
+                    stats.skips += 1;
+                }
+                _ => {}
+            }
+        }
+        credits.sort_by_key(|entry| entry.round);
+        stats.contributors = contributors.len() as u32;
+        let track_comments = comments
+            .iter()
+            .filter(|comment| comment.track_code == track.code && comment.redacted_at.is_none())
+            .map(|comment| RevealComment {
+                id: comment.id.clone(),
+                participant_id: comment.participant_id.clone(),
+                author_name: name_of(&comment.participant_id),
+                kind: comment.kind.clone(),
+                body: comment.body.clone(),
+                created_at: comment.created_at,
+            })
+            .collect();
+        let files = FileRepo::list_for_track(db.conn(), event_id, &track.code)?;
+        let final_version = files.last().map(|file| file.version).unwrap_or(0);
+        let versions = files
+            .iter()
+            .map(|file| {
+                let round = assignments
+                    .iter()
+                    .find(|assignment| {
+                        assignment.track_code == track.code
+                            && assignment.participant_id == file.holder_id
+                            && assignment.status == AssignmentStatus::Submitted
+                    })
+                    .map(|assignment| assignment.round);
+                RevealVersion {
+                    version: file.version,
+                    holder_id: file.holder_id.clone(),
+                    holder_name: name_of(&file.holder_id),
+                    role: if file.version == 1 {
+                        RevealVersionRole::Seed
+                    } else {
+                        RevealVersionRole::Edit
+                    },
+                    round,
+                    file_id: file.id.clone(),
+                    extension: file.extension.clone(),
+                    created_at: file.created_at,
+                    playable: is_playable(&file.extension),
+                    final_version: file.version == final_version,
+                }
+            })
+            .collect();
+        tracks.push(RevealTrack {
+            position: 0,
+            track_code: track.code.clone(),
+            title: titles
+                .iter()
+                .find(|title| title.track_code == track.code)
+                .map(|title| title.title.clone()),
+            seed_owner_id: track.owner_id.clone(),
+            seed_owner_name: name_of(&track.owner_id),
+            credits,
+            comments: track_comments,
+            versions,
+            stats,
+        });
+    }
+    let order = album_order(
+        &tracks
+            .iter()
+            .map(|track| track.track_code.clone())
+            .collect::<Vec<_>>(),
+        event.seed,
+    );
+    let mut album = Vec::with_capacity(tracks.len());
+    for (index, code) in order.iter().enumerate() {
+        if let Some(mut track) = tracks
+            .iter()
+            .find(|track| &track.track_code == code)
+            .cloned()
+        {
+            track.position = index as u32 + 1;
+            album.push(track);
+        }
+    }
+    Ok(RevealPackage {
+        event_name: event.name,
+        event_state: event.state,
+        published: matches!(event.state, EventState::Reveal | EventState::Archived),
+        album,
+    })
+}
+
+fn is_playable(extension: &str) -> bool {
+    matches!(
+        extension,
+        "it" | "mptm" | "xm" | "mod" | "s3m" | "mtm" | "669" | "wav" | "flac" | "mp3" | "ogg"
+    )
+}
+
+pub fn set_track_title(
+    db: &Db,
+    event_id: &str,
+    track_code: &str,
+    title: &str,
+    actor_id: &str,
+    now: i64,
+) -> Result<TrackTitleRecord, EngineError> {
+    let event = load_event(db, event_id)?;
+    if !matches!(event.state, EventState::Active | EventState::Paused) {
+        return Err(EngineError::WrongEventState {
+            action: "title",
+            state: event.state,
+            expected: "active or paused",
+        });
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(EngineError::EmptyTitle);
+    }
+    if title.chars().count() > 80 {
+        return Err(EngineError::TitleTooLong);
+    }
+    let transaction = begin(db)?;
+    let track = TrackRepo::get(&transaction, event_id, track_code)?
+        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
+    if actor_id != "host" {
+        let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
+        let latest = assignments
+            .iter()
+            .filter(|assignment| {
+                assignment.track_code == track_code
+                    && assignment.status == AssignmentStatus::Submitted
+            })
+            .max_by_key(|assignment| assignment.round);
+        if latest.map(|assignment| assignment.participant_id.as_str()) != Some(actor_id) {
+            return Err(EngineError::NotTitleHolder);
+        }
+    }
+    let record = TrackTitleRecord {
+        event_id: event_id.to_string(),
+        track_code: track.code,
+        title: title.to_string(),
+        set_by: actor_id.to_string(),
+        created_at: now,
+    };
+    TrackTitleRepo::upsert(&transaction, &record)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Track title set",
+        None,
+        &serde_json::json!({ "trackCode": track_code, "actor": actor_id }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(record)
+}
+
+pub fn add_track_comment(
+    db: &Db,
+    event_id: &str,
+    track_code: &str,
+    participant_id: &str,
+    kind: &str,
+    body: &str,
+    now: i64,
+) -> Result<TrackCommentRecord, EngineError> {
+    let event = load_event(db, event_id)?;
+    if !matches!(event.state, EventState::Active | EventState::Paused) {
+        return Err(EngineError::WrongEventState {
+            action: "comment",
+            state: event.state,
+            expected: "active or paused",
+        });
+    }
+    if !matches!(kind, "comment" | "questionnaire") {
+        return Err(EngineError::InvalidCommentKind);
+    }
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(EngineError::EmptyComment);
+    }
+    if body.chars().count() > 1_000 {
+        return Err(EngineError::CommentTooLong);
+    }
+    let transaction = begin(db)?;
+    TrackRepo::get(&transaction, event_id, track_code)?
+        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
+    ParticipantRepo::get(&transaction, event_id, participant_id)?
+        .ok_or_else(|| EngineError::ParticipantNotFound(participant_id.to_string()))?;
+    let record = TrackCommentRecord {
+        id: crate::ids::comment_id(event_id, track_code, participant_id, kind, body, now),
+        event_id: event_id.to_string(),
+        track_code: track_code.to_string(),
+        participant_id: participant_id.to_string(),
+        kind: kind.to_string(),
+        body: body.to_string(),
+        redacted_at: None,
+        created_at: now,
+    };
+    TrackCommentRepo::insert(&transaction, &record)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Track comment added",
+        None,
+        &serde_json::json!({ "trackCode": track_code, "kind": kind }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(record)
+}
+
+pub fn redact_track_comment(db: &Db, comment_id: &str, now: i64) -> Result<(), EngineError> {
+    let transaction = begin(db)?;
+    let comment = TrackCommentRepo::get(&transaction, comment_id)?
+        .ok_or_else(|| EngineError::CommentNotFound(comment_id.to_string()))?;
+    let event = EventRepo::get(&transaction, &comment.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(comment.event_id.clone()))?;
+    if !matches!(event.state, EventState::Active | EventState::Paused) {
+        return Err(EngineError::WrongEventState {
+            action: "redaction",
+            state: event.state,
+            expected: "active or paused",
+        });
+    }
+    if comment.redacted_at.is_some() {
+        return Err(EngineError::CommentAlreadyRedacted);
+    }
+    if !TrackCommentRepo::redact(&transaction, comment_id, now)? {
+        return Err(EngineError::CommentAlreadyRedacted);
+    }
+    AuditRepo::insert(
+        &transaction,
+        &comment.event_id,
+        now,
+        "Host",
+        "Track comment redacted",
+        None,
+        &serde_json::json!({ "trackCode": comment.track_code }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(())
 }
 
 pub fn request_extension(

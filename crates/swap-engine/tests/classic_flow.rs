@@ -1,13 +1,14 @@
-use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
+use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState, album_order};
 use swap_db::{
     AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
     HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, claim, create_event, dispatch, dispatch_pending, event_status,
-    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal,
-    reveal_with_channel, signup, skip, start_event, submit,
+    PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
+    dispatch_pending, event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    open_round, redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
+    signup, skip, start_event, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -1609,6 +1610,119 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
             .state,
         TrackState::InCustody
     );
+}
+
+#[test]
+fn the_reveal_package_carries_titles_comments_and_credits() {
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let round_zero = fixture.open(0);
+    let (user_id, assignment_id, track_code) = round_zero[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T5,
+    )
+    .unwrap();
+    let bytes = seed_bytes(101);
+    submit(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &SubmitRequest {
+            event_id: EVENT,
+            user_id: &user_id,
+            filename: "edit.it",
+            bytes: &bytes,
+        },
+        T6,
+    )
+    .unwrap();
+
+    let other_user = &round_zero[1].0;
+    assert!(matches!(
+        set_track_title(&fixture.db, EVENT, &track_code, "Stolen", other_user, T6),
+        Err(EngineError::NotTitleHolder)
+    ));
+    set_track_title(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        "  Midnight Draft  ",
+        &user_id,
+        T6,
+    )
+    .unwrap();
+    add_track_comment(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        &user_id,
+        "comment",
+        "  A great bassline.  ",
+        T6,
+    )
+    .unwrap();
+    let redacted = add_track_comment(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        &user_id,
+        "questionnaire",
+        "I used the seed melody.",
+        T6,
+    )
+    .unwrap();
+    redact_track_comment(&fixture.db, &redacted.id, T6).unwrap();
+
+    let package = reveal_package(&fixture.db, EVENT).unwrap();
+    assert!(!package.published);
+    assert_eq!(package.event_state, EventState::Active);
+    assert_eq!(package.album.len(), 3);
+    assert_eq!(
+        package
+            .album
+            .iter()
+            .map(|track| track.position)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    let codes = package
+        .album
+        .iter()
+        .map(|track| track.track_code.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, album_order(&codes, 42));
+    let track = package
+        .album
+        .iter()
+        .find(|track| track.track_code == track_code)
+        .unwrap();
+    assert_eq!(track.title.as_deref(), Some("Midnight Draft"));
+    assert_eq!(
+        track
+            .credits
+            .iter()
+            .filter(|entry| entry.status == AssignmentStatus::Submitted)
+            .count(),
+        1
+    );
+    assert_eq!(track.comments.len(), 1);
+    assert_eq!(track.comments[0].body, "A great bassline.");
+    assert_eq!(track.comments[0].author_name, "User 0");
+    assert!(track.versions.iter().any(|version| {
+        version.version == 2
+            && version.final_version
+            && version.holder_id == user_id
+            && version.playable
+    }));
+    assert!(track.versions.iter().any(|version| {
+        version.version == 1 && version.role == swap_engine::RevealVersionRole::Seed
+    }));
 }
 
 #[test]

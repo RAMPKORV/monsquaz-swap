@@ -126,7 +126,12 @@ fn migration_seven_upgrades_a_version_six_database() {
         })
         .unwrap();
     assert_eq!(name, "Old Swap");
-    for table in ["assignment_deadlines", "host_decisions"] {
+    for table in [
+        "assignment_deadlines",
+        "host_decisions",
+        "track_titles",
+        "track_comments",
+    ] {
         let count: i64 = connection
             .query_row(
                 "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",

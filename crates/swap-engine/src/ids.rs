@@ -25,6 +25,23 @@ pub fn assignment_id(event_id: &str, round: u32, track_code: &str) -> String {
     format!("a{}", &hash[..16])
 }
 
+/// A stable comment identifier. The body and time make two equal comments
+/// distinct while a retry keeps the same id.
+pub fn comment_id(
+    event_id: &str,
+    track_code: &str,
+    participant_id: &str,
+    kind: &str,
+    body: &str,
+    now: i64,
+) -> String {
+    let hash = sha256_hex(
+        format!("msw-comment-v1:{event_id}:{track_code}:{participant_id}:{kind}:{now}:{body}")
+            .as_bytes(),
+    );
+    format!("c{}", &hash[..16])
+}
+
 /// Commitment over the schedule and the locked policy. The commitment never
 /// contains a file hash.
 pub fn plan_commitment(plan: &PlanRecord, assignments: &[PlanAssignmentRecord]) -> String {

@@ -153,8 +153,10 @@ waiting. The tick never moves a track or marks a turn missed.
 
 Reminders follow the 50, 80, and 95 percent ladder and the deadline prompt. A
 reminder row on the assignment prevents a duplicate. A non-urgent reminder waits
-during 22:00 to 08:00 in the participant timezone. The deadline prompt is
-exempt. The first extension of six hours or less is automatic. Later requests
+during the event quiet window in the participant timezone. The default window
+is 22:00 to 08:00. The same start and end hour turns quiet hours off. If
+several ladder steps are pending after the window, the tick sends one reminder
+and marks all the steps. The deadline prompt is exempt. The first extension of six hours or less is automatic. Later requests
 need the host. Two extensions are the maximum. Every decision writes an audit
 entry and a direct message.
 

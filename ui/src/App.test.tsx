@@ -908,3 +908,18 @@ describe("flexible participation", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("async queue", () => {
+  it("shows the queue coverage and dispatches a wave", async () => {
+    setUrl("?demo=1&state=async&view=mission");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Async queue" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/64 of 132/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send offers now" }));
+    expect(
+      await screen.findByText("Wave dispatched. 4 offers queued."),
+    ).toBeInTheDocument();
+  });
+});

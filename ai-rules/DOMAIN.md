@@ -148,12 +148,11 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - Ready gate: offer only to a participant who is Ready. A new participant is
   Ready. An expired offer auto-pauses the participant; they must tap Ready to
   resume.
-- Expiry protection is host-configurable. The recommended policy is: one active
-  offer; expiry gives a strike and a 24h cooldown; two strikes auto-pause and
-  alert the host; three strikes remove the person from the regular rotation
-  (fill-in only). Credits are preserved. Never offer the same track to the same
-  person again after an expiry. The pair does not count as seen. Report the
-  missed exposure as a gap.
+- Expiry protection is host-configurable. The default is: one active offer;
+  the first expiry starts a 24-hour cooldown; the second expiry pauses the
+  participant until `/swap resume` or a host action. Never offer the same track
+  to the same person again after an expiry. The pair does not count as seen.
+  Report the missed exposure as a gap.
 - Dispatch default: deficit-ordered hybrid (most-constrained ready track, then
   the eligible person with the largest remaining quota, with anti-clustering
   and matching repair). Strict queues and an opportunistic pool are
@@ -163,11 +162,12 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   Capped events report coverage and gaps. Edit completeness is not promised
   because a claim-then-skip or a claimed deadline miss counts as seen. Report
   exposure gaps; do not loop forever.
-- Length: N-1 for 12 or fewer participants. Cap at 6–8 rounds above 12. The
-  host can choose full exposure and must see the projected duration. Full
-  exposure takes about 2–3 months at 40 participants.
-- Release: one daily window by default. Run two dispatch waves inside the
-  window (for example, at the start and two hours later). The host can change
+- Length: the host sets expected songs and claims per participant. One track per
+  seeder, so the seeded track count equals the participant count. The app
+  computes editors per track and warns when the value is fractional. Full
+  exposure needs claims equal to tracks minus one.
+- Release: one daily window at 18:00 UTC by default. Run two dispatch waves
+  inside the window (the start and two hours later). The host can change
   the time; unclaimed offers shift, claimed assignments keep their due date.
 - Deadline: 24h from claim by default. A claimed-but-missed track counts as
   seen. At the deadline, notify the host and show a decision card; target a 6h

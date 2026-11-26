@@ -8,12 +8,13 @@ use swap_db::{
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
-    PreparedBytes, SubmitRequest, accept_late_seed, add_availability, add_track_comment, claim,
-    create_event, create_event_with_secret, dispatch, dispatch_async_wave, dispatch_pending,
-    edit_plan_assignment, event_status, expire_offer, generate_schedule, join_with_seed,
-    lock_roster, move_round_deadline, open_round, open_seed_round, participant_schedule,
+    PreparedBytes, SubmitRequest, accept_late_seed, add_availability, add_track_comment,
+    async_coverage, claim, create_event, create_event_with_secret, dispatch,
+    dispatch_async_release, dispatch_async_wave, dispatch_pending, edit_plan_assignment,
+    event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    move_round_deadline, next_async_release, open_round, open_seed_round, participant_schedule,
     pending_late_seeds, plan_edit_candidates, redact_track_comment, reveal, reveal_package,
-    reveal_with_channel, set_track_title, set_track_title_for_user,
+    reveal_with_channel, set_participant_ready, set_track_title, set_track_title_for_user,
     set_track_title_for_user_on_track, signup, skip, start_async_event, start_event,
     start_event_with_channel, submit, tick_deadlines, verify_commitment,
 };
@@ -88,6 +89,10 @@ impl Fixture {
     fn lock_and_schedule(&self) -> Vec<swap_db::PlanAssignmentRecord> {
         lock_roster(&self.db, EVENT, T1).unwrap();
         generate_schedule(&self.db, EVENT, T2).unwrap().assignments
+    }
+
+    fn lock_roster_only(&self) {
+        lock_roster(&self.db, EVENT, T1).unwrap();
     }
 
     fn start(&self) {
@@ -2195,12 +2200,19 @@ fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
     let mut participant = ParticipantRepo::get(fixture.db.conn(), EVENT, &expired.0)
         .unwrap()
         .unwrap();
-    assert_eq!(participant.readiness, Readiness::Paused);
-    participant.readiness = Readiness::Ready;
-    participant.updated_at = T3 + 24 * 60 * 60 + 2;
+    assert_eq!(participant.readiness, Readiness::Ready);
+    assert!(
+        MetaRepo::get(
+            fixture.db.conn(),
+            &format!("async-cooldown:{}:{}", EVENT, expired.0)
+        )
+        .unwrap()
+        .is_some()
+    );
+    participant.updated_at = T3 + 48 * 60 * 60 + 3;
     ParticipantRepo::upsert(fixture.db.conn(), &participant).unwrap();
 
-    let next = dispatch_async_wave(&fixture.db, EVENT, T3 + 24 * 60 * 60 + 2).unwrap();
+    let next = dispatch_async_wave(&fixture.db, EVENT, T3 + 48 * 60 * 60 + 3).unwrap();
     assert!(next.offers >= 1);
     let assignments = AssignmentRepo::list_for_event(fixture.db.conn(), EVENT).unwrap();
     assert!(!assignments.iter().any(|assignment| {
@@ -3479,7 +3491,7 @@ fn participant_schedule_redacts_by_default_and_opens_on_request() {
     fixture.lock_and_schedule();
     fixture.start();
     fixture.open(0);
-    let own = participant_schedule(&fixture.db, EVENT, &user(0)).unwrap();
+    let own = participant_schedule(&fixture.db, EVENT, &user(0), T4).unwrap();
     assert!(!own.open);
     assert!(own.full.is_none());
     assert_eq!(own.own.len(), 1);
@@ -3495,9 +3507,110 @@ fn participant_schedule_redacts_by_default_and_opens_on_request() {
     open_fixture.lock_and_schedule();
     open_fixture.start();
     open_fixture.open(0);
-    let open = participant_schedule(&open_fixture.db, EVENT, &user(0)).unwrap();
+    let open = participant_schedule(&open_fixture.db, EVENT, &user(0), T4).unwrap();
     assert!(open.open);
     let full = open.full.unwrap();
     assert_eq!(full.len(), 6);
     assert!(full.iter().all(|cell| !cell.owner_name.is_empty()));
+}
+
+fn async_fixture(settings: EventSettings) -> Fixture {
+    let fixture = Fixture::with_settings(3, 0, settings);
+    let mut event = EventRepo::get(fixture.db.conn(), EVENT).unwrap().unwrap();
+    event.settings_json = serde_json::to_string(&EventSettings {
+        mode: Mode::Async,
+        ..serde_json::from_str(&event.settings_json).unwrap()
+    })
+    .unwrap();
+    fixture
+        .db
+        .conn()
+        .execute(
+            "UPDATE events SET settings_json = ?2 WHERE id = ?1",
+            [EVENT, &event.settings_json],
+        )
+        .unwrap();
+    fixture.lock_roster_only();
+    start_async_event(&fixture.db, EVENT, T3).unwrap();
+    fixture
+}
+
+#[test]
+fn async_coverage_reports_exposed_pairs_and_expired_gaps() {
+    let fixture = async_fixture(EventSettings {
+        mode: Mode::Async,
+        claim_window_secs: 100,
+        round_window_secs: 86_400,
+        ..EventSettings::default()
+    });
+    let offers = dispatch_async_wave(&fixture.db, EVENT, T4).unwrap();
+    assert_eq!(offers.offers, 3);
+    let (user_id, assignment_id, track_code) = offers
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Offer {
+                user_id,
+                assignment_id,
+                track_code,
+                ..
+            } => Some((user_id.clone(), assignment_id.clone(), track_code.clone())),
+            _ => None,
+        })
+        .unwrap();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4 + 10,
+    )
+    .unwrap();
+    tick_deadlines(&fixture.db, T4 + 101).unwrap();
+    let coverage = async_coverage(&fixture.db, EVENT).unwrap();
+    assert_eq!(coverage.participants, 3);
+    assert_eq!(coverage.tracks, 3);
+    assert_eq!(coverage.exposed_pairs, 1);
+    assert!(coverage.gaps.iter().any(|gap| gap.reason == "expired"));
+    assert!(coverage.gaps.iter().any(|gap| gap.track_code == track_code));
+}
+
+#[test]
+fn async_release_waves_are_daily_and_deduplicated() {
+    let fixture = async_fixture(EventSettings {
+        mode: Mode::Async,
+        async_release_time: Some("00:00".to_string()),
+        ..EventSettings::default()
+    });
+    let day = 40 * 86_400;
+    let first = dispatch_async_release(&fixture.db, EVENT, day).unwrap();
+    assert_eq!(first.offers, 3);
+    let again = dispatch_async_release(&fixture.db, EVENT, day + 60).unwrap();
+    assert_eq!(again.offers, 0);
+    let next = next_async_release(&fixture.db, EVENT, day + 60).unwrap();
+    assert_eq!(next.next_wave, 2);
+    assert_eq!(next.next_at, day + 7_200);
+}
+
+#[test]
+fn a_paused_participant_gets_no_offer_until_ready() {
+    let fixture = async_fixture(EventSettings {
+        mode: Mode::Async,
+        ..EventSettings::default()
+    });
+    set_participant_ready(&fixture.db, EVENT, &user(0), false, T4).unwrap();
+    let offered = dispatch_async_wave(&fixture.db, EVENT, T4).unwrap();
+    assert!(
+        offered.effects.iter().all(|effect| {
+            !matches!(effect, Effect::Offer { user_id, .. } if user_id == &user(0))
+        })
+    );
+    set_participant_ready(&fixture.db, EVENT, &user(0), true, T4 + 10).unwrap();
+    let again = dispatch_async_wave(&fixture.db, EVENT, T4 + 10).unwrap();
+    assert!(
+        again.effects.iter().any(|effect| {
+            matches!(effect, Effect::Offer { user_id, .. } if user_id == &user(0))
+        })
+    );
 }

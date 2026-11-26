@@ -152,10 +152,11 @@ export function MissionControlView({
           showOpenBanner={false}
           exchangeRounds={event.exchangeRounds}
           handoffPolicy={event.handoffPolicy}
+          mode={event.mode}
         />
       ) : null}
 
-      {data.nextAction && event.stage !== "Setup" ? (
+      {data.nextAction && event.stage !== "Setup" && !data.asyncOverview ? (
         <section
           className={`next-action next-action--${data.nextAction.tone}`}
           aria-labelledby="next-action-title"
@@ -202,6 +203,152 @@ export function MissionControlView({
 
       <div className="mission-grid">
         <div className="mission-main">
+          {data.asyncOverview ? (
+            <section className="card" aria-labelledby="async-overview-title">
+              <div className="card__header">
+                <div>
+                  <h2 id="async-overview-title">Async queue</h2>
+                  <p className="card__subtitle">
+                    One global queue. People claim when they are ready. No
+                    rounds and no group labels.
+                  </p>
+                </div>
+                <StatusPill tone="info">Claim-first</StatusPill>
+              </div>
+              {event.stage === "Schedule review" ? (
+                <div className="seed-round-actions">
+                  <p className="field-help">
+                    The roster is locked. Starting freezes the claim and edit
+                    windows and opens the first release wave.
+                  </p>
+                  <Button
+                    variant="primary"
+                    icon="play"
+                    onClick={() => onAction("Start async queue")}
+                  >
+                    Start async queue
+                  </Button>
+                </div>
+              ) : null}
+              <dl className="review-grid review-grid--three">
+                <div>
+                  <dt>Seed tracks</dt>
+                  <dd>
+                    {data.asyncOverview.tracks} of{" "}
+                    {data.asyncOverview.expectedSongs ??
+                      data.asyncOverview.tracks}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Claims</dt>
+                  <dd>
+                    {data.asyncOverview.claimedHandoffs} of{" "}
+                    {data.asyncOverview.targetHandoffs} (
+                    {Math.round(
+                      (data.asyncOverview.claimedHandoffs /
+                        Math.max(1, data.asyncOverview.targetHandoffs)) *
+                        100,
+                    )}
+                    %).{" "}
+                    {Math.max(
+                      0,
+                      data.asyncOverview.targetHandoffs -
+                        data.asyncOverview.claimedHandoffs,
+                    )}{" "}
+                    remain.{" "}
+                    {Number.isInteger(
+                      data.asyncOverview.targetHandoffs /
+                        Math.max(1, data.asyncOverview.tracks),
+                    )
+                      ? data.asyncOverview.targetHandoffs /
+                        Math.max(1, data.asyncOverview.tracks)
+                      : (
+                          data.asyncOverview.targetHandoffs /
+                          Math.max(1, data.asyncOverview.tracks)
+                        ).toFixed(1)}{" "}
+                    editors per track.
+                  </dd>
+                </div>
+                <div>
+                  <dt>Pairs</dt>
+                  <dd>
+                    {data.asyncOverview.exposedPairs} of{" "}
+                    {data.asyncOverview.possiblePairs} possible
+                  </dd>
+                </div>
+              </dl>
+              <p className="visually-hidden" aria-live="polite">
+                Wave {data.asyncOverview.nextWave}.{" "}
+                {data.asyncOverview.claimedHandoffs} of{" "}
+                {data.asyncOverview.targetHandoffs} claims.{" "}
+                {data.asyncOverview.gapCount} pairs not exposed.
+              </p>
+              <div className="seed-round-row">
+                <p className="field-help" id="async-next-wave">
+                  Next wave {data.asyncOverview.nextWave} ·{" "}
+                  {formatDeadline(data.asyncOverview.nextReleaseAt, timezone)}
+                  {timezone ? ` (${timezone})` : ""}
+                </p>
+                {event.stage === "Active" ? (
+                  <Button
+                    variant="primary"
+                    icon="refresh"
+                    describedBy="async-next-wave"
+                    onClick={() => onAction("Dispatch async wave")}
+                  >
+                    Send offers now
+                  </Button>
+                ) : null}
+              </div>
+              <div className="async-gap-summary">
+                <h3 id="async-gaps-title">
+                  {data.asyncOverview.gapCount} pairs not exposed
+                </h3>
+                {data.asyncOverview.paused > 0 ? (
+                  <p className="field-help">
+                    {data.asyncOverview.paused} paused. They get no offers until
+                    they use /swap resume, or you resume them on Participants.
+                  </p>
+                ) : null}
+                <ul
+                  className="seed-band__list"
+                  role="list"
+                  aria-labelledby="async-gaps-title"
+                >
+                  {data.asyncOverview.gapReasons.map((gap) => (
+                    <li key={gap.reason}>
+                      <span>
+                        {gap.reason.charAt(0).toUpperCase() + gap.reason.slice(1)}:
+                      </span>
+                      <code>{gap.count}</code>
+                    </li>
+                  ))}
+                </ul>
+                {data.asyncOverview.gaps.length > 0 ? (
+                  <details>
+                    <summary>
+                      Show {Math.min(20, data.asyncOverview.gaps.length)} of{" "}
+                      {data.asyncOverview.gapCount} pairs
+                    </summary>
+                    <ul
+                      className="seed-band__list"
+                      role="list"
+                      aria-label="Gap pairs"
+                    >
+                      {data.asyncOverview.gaps.slice(0, 20).map((gap) => (
+                        <li key={`${gap.trackCode}-${gap.participantId}`}>
+                          <code>{gap.trackCode}</code>
+                          <span>{gap.participantId}</span>
+                          <small>{gap.reason}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          {!data.asyncOverview ? (
           <section className="card" aria-labelledby="round-progress-title">
             <div className="card__header">
               <div>
@@ -276,6 +423,7 @@ export function MissionControlView({
               ))}
             </ol>
           </section>
+          ) : null}
 
           <section className="card" aria-labelledby="decisions-title">
             <div className="card__header">
@@ -296,11 +444,13 @@ export function MissionControlView({
                 icon="check"
                 title="No decisions waiting"
                 detail={
-                  event.stage === "Active" &&
-                  event.round > 0 &&
-                  event.round >= event.rounds
-                    ? "Every round is complete. Reveal when the stream ends."
-                    : "The round is healthy. Reminders and deadlines run on their own."
+                  data.asyncOverview
+                    ? "No host decisions. Waves and reminders run on their own."
+                    : event.stage === "Active" &&
+                        event.round > 0 &&
+                        event.round >= event.rounds
+                      ? "Every round is complete. Reveal when the stream ends."
+                      : "The round is healthy. Reminders and deadlines run on their own."
                 }
               />
             ) : (
@@ -984,19 +1134,23 @@ function SeedRoundCard({
   }
 
   const ready = pack !== null || event.packId !== null;
+  const asyncMode = event.mode === "Async";
 
   return (
     <section className="card seed-round-card" aria-labelledby="seed-round-title">
       <div className="card__header">
         <div>
           <h2 id="seed-round-title" tabIndex={-1}>
-            Round 1 · Seed round
+            {asyncMode ? "Seed intake" : "Round 1 · Seed round"}
           </h2>
           <p className="card__subtitle">
-            Every participant makes one track from the host pack. Round 1 is the
-            seed round and counts in the event length: {event.participants || "N"}{" "}
-            participants make {event.rounds || "N"} rounds. Rounds 2 to{" "}
-            {event.rounds || "N"} are exchanges.
+            {asyncMode
+              ? "Each participant makes one track from the host pack. When intake closes, the roster locks and the queue opens."
+              : `Every participant makes one track from the host pack. Round 1 is the seed round and counts in the event length: ${
+                  event.participants || "N"
+                } participants make ${event.rounds || "N"} rounds. Rounds 2 to ${
+                  event.rounds || "N"
+                } are exchanges.`}
           </p>
         </div>
         <StatusPill tone={event.seedRoundOpen ? "ok" : "info"}>
@@ -1068,7 +1222,7 @@ function SeedRoundCard({
               disabled={busy || !ready}
               describedBy={!ready ? "seed-open-help" : undefined}
             >
-              Open Round 1
+              {asyncMode ? "Open seed intake" : "Open Round 1"}
             </Button>
           </div>
           {deadlineError ? (
@@ -1135,7 +1289,9 @@ function SeedRoundCard({
                       : undefined
                 }
               >
-                Close seed round and lock roster
+                {asyncMode
+                  ? "Close seed intake and lock roster"
+                  : "Close seed round and lock roster"}
               </Button>
               <Button
                 id="extend-seed-deadline"
@@ -1149,8 +1305,10 @@ function SeedRoundCard({
             </div>
           )}
           <p className="field-help">
-            Closing stops seed intake and locks the roster. New participants
-            cannot join. Rounds 2 to {event.rounds} start when you continue.
+            Closing stops seed intake and locks the roster.{" "}
+            {asyncMode
+              ? "The queue can start after the roster is locked."
+              : `New participants cannot join. Rounds 2 to ${event.rounds} start when you continue.`}
           </p>
           {event.seeded < 2 ? (
             <p className="field-help" id="seed-minimum-help">
@@ -1217,7 +1375,7 @@ function SeedRoundCard({
 
       {confirmClose ? (
         <Dialog
-          title="Close the seed round?"
+          title={asyncMode ? "Close seed intake?" : "Close the seed round?"}
           onClose={() => setConfirmClose(false)}
           footer={
             <>

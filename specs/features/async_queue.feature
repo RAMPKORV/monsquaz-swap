@@ -23,7 +23,7 @@ Feature: Async per-person queue
     When the claim window ends
     Then the track returns to the pool
     And the app does not mark the pair as seen
-    And the app applies the configured expiry protection
+    And the app starts a 24-hour cooldown
     And the app never offers that track to that participant again in this event
 
   Scenario: The bot reminds the participant to claim
@@ -33,10 +33,19 @@ Feature: Async per-person queue
     And the bot does not send another claim reminder
 
   Scenario: The Ready gate prevents a loop
-    Given a participant who is paused after an expired offer
-    When the scheduler looks for a recipient
-    Then the scheduler does not offer a track to the paused participant
-    And the participant must tap Ready to resume
+    Given a participant with a first expired offer
+    Then the queue waits for the cooldown
+    When a second offer expires
+    Then the queue pauses the participant
+    And the participant must use /swap resume to return
+    And the queue sends no offer while the participant is paused
+
+  Scenario: The host starts and stops the queue explicitly
+    Given a locked async roster that reaches the expected song count
+    When the host starts the queue
+    Then the app freezes the claim and edit windows
+    And the app opens the first release wave
+    And no timer changes the roster or the policy
 
   Scenario: The global queue prefers social diversity
     Given an idle participant and two eligible tracks

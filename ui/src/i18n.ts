@@ -14,12 +14,16 @@ export const messages = {
     command: "/swap join",
     options:
       "Choose your timezone (for example {timezone}) and max_handoffs (the number of exchange tracks you will edit, 1 to 20). The seed is not an edit.",
+    asyncOptions:
+      "Choose your timezone (for example {timezone}). The host sets the number of tracks you claim. You do not choose a handoff cap. The seed is not an edit.",
     seedLabel:
       "Make one track from the host pack and send it to the bot in a direct message before the seed deadline.",
     seedHelp: "A seed is a track you made. Round 1 is the seed round.",
     formats: "Allowed formats:",
     size: "Maximum size: {size} MiB.",
     next: "The host closes the seed round, locks the roster, and opens the exchange rounds.",
+    asyncNext:
+      "The host closes seed intake, locks the roster, and opens the queue.",
     copy: "Copy join instructions",
     copied: "Join instructions copied.",
     copyFailed: "Could not copy. Select the text below and copy it.",
@@ -78,14 +82,19 @@ export function joinInstructions(
   exampleTimezone: string,
   formats: string[],
   maxMib: number,
+  mode: "Classic" | "Async" = "Classic",
 ): string {
+  const asyncMode = mode === "Async";
   return [
     messages.join.intro,
     `1. ${messages.join.commandLabel}`,
-    `2. ${format(messages.join.options, { timezone: exampleTimezone })}`,
+    `2. ${format(
+      asyncMode ? messages.join.asyncOptions : messages.join.options,
+      { timezone: exampleTimezone },
+    )}`,
     `3. ${messages.join.seedLabel} ${messages.join.seedHelp}`,
     `${messages.join.formats} ${formats.map((item) => `.${item}`).join(", ")}`,
     format(messages.join.size, { size: maxMib }),
-    messages.join.next,
+    asyncMode ? messages.join.asyncNext : messages.join.next,
   ].join("\n");
 }

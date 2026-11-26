@@ -203,6 +203,13 @@ pub struct ScheduleOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanEditCandidate {
+    pub participant_id: String,
+    pub participant_name: String,
+    pub current_track: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenRoundOutcome {
     pub round: u32,
     pub offers: usize,
@@ -730,34 +737,40 @@ pub fn generate_schedule(
     })
 }
 
-/// Change one assignment before the event starts.
-///
-/// The incoming participant and the current holder swap their tracks in this
-/// round. The whole plan is validated and a new plan version with a new
-/// commitment is written. The old version stays in the database.
-pub fn edit_plan_assignment(
-    db: &Db,
-    event_id: &str,
+type PlanRoster = (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeMap<String, String>,
+    std::collections::BTreeMap<String, String>,
+);
+
+fn plan_roster(conn: &Connection, event_id: &str) -> Result<PlanRoster, EngineError> {
+    let participants = ParticipantRepo::list_for_event(conn, event_id)?;
+    let active = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == Readiness::Ready
+        })
+        .map(|participant| participant.user_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let names = participants
+        .into_iter()
+        .map(|participant| (participant.user_id, participant.display_name))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let owners = TrackRepo::list_for_event(conn, event_id)?
+        .into_iter()
+        .map(|track| (track.code, track.owner_id))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    Ok((active, owners, names))
+}
+
+fn swapped_assignments(
+    assignments: &[PlanAssignmentRecord],
     round: u32,
     track_code: &str,
     participant_id: &str,
-    now: i64,
-) -> Result<ScheduleOutcome, EngineError> {
-    let event = load_event(db, event_id)?;
-    require_state(
-        &event,
-        EventState::ScheduleReview,
-        "schedule edit",
-        "schedule review",
-    )?;
-    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
-    if round >= plan.rounds {
-        return Err(EngineError::RoundOutOfRange {
-            round,
-            rounds: plan.rounds,
-        });
-    }
-    let mut assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+) -> Result<Vec<PlanAssignmentRecord>, EngineError> {
     let target = assignments
         .iter()
         .find(|assignment| assignment.round == round && assignment.track_code == track_code)
@@ -769,44 +782,59 @@ pub fn edit_plan_assignment(
     if target.participant_id == participant_id {
         return Err(EngineError::PlanNoChange);
     }
-    if !assignments
+    let incoming = assignments
         .iter()
-        .any(|assignment| assignment.round == round && assignment.participant_id == participant_id)
-    {
-        return Err(EngineError::PlanParticipantNotInRound);
-    }
-    let displaced = target.participant_id.clone();
-    for assignment in &mut assignments {
+        .find(|assignment| assignment.round == round && assignment.participant_id == participant_id)
+        .cloned()
+        .ok_or(EngineError::PlanParticipantNotInRound)?;
+    let displaced = target.participant_id;
+    let mut swapped = assignments.to_vec();
+    for assignment in &mut swapped {
         if assignment.round == round
             && assignment.track_code == track_code
             && assignment.participant_id == displaced
         {
             assignment.participant_id = participant_id.to_string();
-        } else if assignment.round == round && assignment.participant_id == participant_id {
+        } else if assignment.round == round
+            && assignment.track_code == incoming.track_code
+            && assignment.participant_id == participant_id
+        {
             assignment.participant_id = displaced.clone();
         }
     }
-    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
-    let active = participants
+    Ok(swapped)
+}
+
+fn validate_plan_assignments(
+    assignments: &[PlanAssignmentRecord],
+    rounds: u32,
+    active: &std::collections::BTreeSet<String>,
+    owners: &std::collections::BTreeMap<String, String>,
+) -> Result<(), EngineError> {
+    let active_tracks = owners
         .iter()
-        .filter(|participant| {
-            participant.membership == Membership::Active && participant.role == Role::Participant
-        })
-        .map(|participant| participant.user_id.as_str())
+        .filter(|(_, owner)| active.contains(*owner))
+        .map(|(track, _)| track.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let owners = TrackRepo::list_for_event(db.conn(), event_id)?
-        .into_iter()
-        .map(|track| (track.code, track.owner_id))
-        .collect::<std::collections::BTreeMap<_, _>>();
+    if active.is_empty() || active_tracks.is_empty() {
+        return Err(EngineError::NoParticipants);
+    }
     let mut pairs = std::collections::BTreeSet::new();
-    let mut round_people = std::collections::BTreeSet::new();
-    let mut round_tracks = std::collections::BTreeSet::new();
-    for assignment in &assignments {
+    for assignment in assignments {
         let owner = owners
             .get(&assignment.track_code)
             .ok_or_else(|| EngineError::TrackNotFound(assignment.track_code.clone()))?;
-        if !active.contains(assignment.participant_id.as_str()) {
-            return Err(EngineError::PlanParticipantNotInRound);
+        if !active.contains(&assignment.participant_id) {
+            return Err(EngineError::PlanInvalid(format!(
+                "{} is not active and ready",
+                assignment.participant_id
+            )));
+        }
+        if !active.contains(owner) {
+            return Err(EngineError::PlanInvalid(format!(
+                "track {} belongs to an inactive participant",
+                assignment.track_code
+            )));
         }
         if owner == &assignment.participant_id {
             return Err(EngineError::PlanOwnTrack {
@@ -823,19 +851,138 @@ pub fn edit_plan_assignment(
                 track: assignment.track_code.clone(),
             });
         }
-        if !round_people.insert((assignment.round, assignment.participant_id.clone())) {
+    }
+    for round in 0..rounds {
+        let people = assignments
+            .iter()
+            .filter(|assignment| assignment.round == round)
+            .map(|assignment| assignment.participant_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let tracks = assignments
+            .iter()
+            .filter(|assignment| assignment.round == round)
+            .map(|assignment| assignment.track_code.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        if people.len() != active.len() || tracks.len() != active_tracks.len() {
             return Err(EngineError::PlanInvalid(format!(
-                "two tracks for {} in round {}",
-                assignment.participant_id, assignment.round
+                "round {round} does not cover every active person and track"
             )));
         }
-        if !round_tracks.insert((assignment.round, assignment.track_code.clone())) {
+        if !active.iter().all(|person| people.contains(person.as_str())) {
             return Err(EngineError::PlanInvalid(format!(
-                "two holders for track {} in round {}",
-                assignment.track_code, assignment.round
+                "round {round} is missing an active person"
+            )));
+        }
+        if !active_tracks
+            .iter()
+            .all(|track| tracks.contains(track.as_str()))
+        {
+            return Err(EngineError::PlanInvalid(format!(
+                "round {round} is missing an active track"
             )));
         }
     }
+    Ok(())
+}
+
+/// List the people in this round who can take the track without breaking a
+/// rule. The list is empty when no single-cell swap is valid.
+pub fn plan_edit_candidates(
+    db: &Db,
+    event_id: &str,
+    round: u32,
+    track_code: &str,
+) -> Result<Vec<PlanEditCandidate>, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "schedule edit",
+        "schedule review",
+    )?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    if round >= plan.rounds {
+        return Err(EngineError::RoundOutOfRange {
+            round,
+            rounds: plan.rounds,
+        });
+    }
+    let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+    let (active, owners, names) = plan_roster(db.conn(), event_id)?;
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    let target = assignments
+        .iter()
+        .find(|assignment| assignment.round == round && assignment.track_code == track_code)
+        .ok_or_else(|| EngineError::PlanCellNotFound {
+            round,
+            track: track_code.to_string(),
+        })?;
+    let mut candidates = Vec::new();
+    for assignment in assignments.iter().filter(|assignment| {
+        assignment.round == round && assignment.participant_id != target.participant_id
+    }) {
+        let swapped =
+            swapped_assignments(&assignments, round, track_code, &assignment.participant_id)?;
+        if validate_plan_assignments(&swapped, plan.rounds, &active, &owners).is_ok() {
+            candidates.push(PlanEditCandidate {
+                participant_id: assignment.participant_id.clone(),
+                participant_name: names
+                    .get(&assignment.participant_id)
+                    .cloned()
+                    .unwrap_or_else(|| assignment.participant_id.clone()),
+                current_track: assignment.track_code.clone(),
+            });
+        }
+    }
+    candidates.sort_by(|left, right| left.participant_name.cmp(&right.participant_name));
+    Ok(candidates)
+}
+
+/// Change one assignment before the event starts.
+///
+/// The incoming participant and the current holder swap their tracks in this
+/// round. The whole plan is validated and a new plan version with a new
+/// commitment is written. The old version stays in the database.
+pub fn edit_plan_assignment(
+    db: &Db,
+    event_id: &str,
+    round: u32,
+    track_code: &str,
+    participant_id: &str,
+    expected_version: u32,
+    now: i64,
+) -> Result<ScheduleOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "schedule edit",
+        "schedule review",
+    )?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    if plan.version != expected_version {
+        return Err(EngineError::PlanChanged);
+    }
+    if round >= plan.rounds {
+        return Err(EngineError::RoundOutOfRange {
+            round,
+            rounds: plan.rounds,
+        });
+    }
+    let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+    let (active, owners, _) = plan_roster(db.conn(), event_id)?;
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    let target = assignments
+        .iter()
+        .find(|assignment| assignment.round == round && assignment.track_code == track_code)
+        .cloned()
+        .ok_or_else(|| EngineError::PlanCellNotFound {
+            round,
+            track: track_code.to_string(),
+        })?;
+    let displaced = target.participant_id.clone();
+    let mut assignments = swapped_assignments(&assignments, round, track_code, participant_id)?;
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
 
     let version = plan.version + 1;
     for assignment in &mut assignments {
@@ -917,9 +1064,10 @@ pub fn start_event(db: &Db, event_id: &str, now: i64) -> Result<(), EngineError>
             expected: "schedule review",
         });
     }
-    if PlanRepo::latest(&transaction, event_id)?.is_none() {
-        return Err(EngineError::NoPlan);
-    }
+    let plan = PlanRepo::latest(&transaction, event_id)?.ok_or(EngineError::NoPlan)?;
+    let assignments = PlanRepo::list_assignments(&transaction, event_id, plan.version)?;
+    let (active, owners, _) = plan_roster(&transaction, event_id)?;
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
     let next = current.state.transition_to(EventState::Active)?;
     EventRepo::set_state(&transaction, event_id, next, now)?;
     commit(transaction)?;

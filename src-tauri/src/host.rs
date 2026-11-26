@@ -16,8 +16,8 @@ use swap_db::{
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
-    edit_plan_assignment, generate_schedule, lock_roster, open_round, redact_track_comment,
-    reveal_package, reveal_with_channel, set_track_title, start_event,
+    edit_plan_assignment, generate_schedule, lock_roster, open_round, plan_edit_candidates,
+    redact_track_comment, reveal_package, reveal_with_channel, set_track_title, start_event,
 };
 
 #[derive(Debug, Serialize)]
@@ -391,6 +391,8 @@ struct PersonRowDto {
 pub struct PlanDataDto {
     status: String,
     event: Option<EventSummaryDto>,
+    version: u32,
+    commitment: String,
     rounds: u32,
     tracks: usize,
     participants: usize,
@@ -407,8 +409,17 @@ pub struct PlanDataDto {
 #[serde(rename_all = "camelCase")]
 struct MatrixTrackDto {
     track_code: String,
+    owner_id: String,
     owner_group: String,
     cells: Vec<PlanCellDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanEditCandidateDto {
+    participant_id: String,
+    participant_name: String,
+    current_track: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -755,6 +766,8 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         return Ok(PlanDataDto {
             status: "No event".to_string(),
             event: None,
+            version: 0,
+            commitment: String::new(),
             rounds: 0,
             tracks: 0,
             participants: 0,
@@ -776,6 +789,8 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         return Ok(PlanDataDto {
             status: "No plan".to_string(),
             event: Some(summary),
+            version: 0,
+            commitment: String::new(),
             rounds: event_rounds(db, &event)?,
             tracks: TrackRepo::list_for_event(db.conn(), &event.id)
                 .map_err(|error| error.to_string())?
@@ -820,6 +835,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         .iter()
         .map(|track| MatrixTrackDto {
             track_code: track.code.clone(),
+            owner_id: track.owner_id.clone(),
             owner_group: group_for(&track.owner_id),
             cells: (0..plan.rounds)
                 .map(|round| {
@@ -855,6 +871,8 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
     Ok(PlanDataDto {
         status: if committed { "Committed" } else { "Draft" }.to_string(),
         event: Some(summary),
+        version: plan.version,
+        commitment: plan.commitment.clone(),
         rounds: plan.rounds,
         tracks: tracks.len(),
         participants: participants.len(),
@@ -1318,11 +1336,34 @@ pub fn host_decide_deadline(
 }
 
 #[tauri::command]
+pub fn host_plan_edit_candidates(
+    app: AppHandle,
+    round: u32,
+    track_code: String,
+) -> Result<Vec<PlanEditCandidateDto>, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    plan_edit_candidates(&db, &event.id, round, &track_code)
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|candidate| PlanEditCandidateDto {
+                    participant_id: candidate.participant_id,
+                    participant_name: candidate.participant_name,
+                    current_track: candidate.current_track,
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn host_edit_plan_assignment(
     app: AppHandle,
     round: u32,
     track_code: String,
     participant_id: String,
+    expected_version: u32,
 ) -> Result<PlanDataDto, String> {
     let db = open_db(&app)?;
     let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
@@ -1332,10 +1373,47 @@ pub fn host_edit_plan_assignment(
         round,
         &track_code,
         &participant_id,
+        expected_version,
         now_secs(),
     )
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| friendly_plan_error(&db, &event.id, error))?;
     plan_data(&db)
+}
+
+fn friendly_plan_error(db: &Db, event_id: &str, error: EngineError) -> String {
+    let name = |user_id: &str| {
+        ParticipantRepo::get(db.conn(), event_id, user_id)
+            .ok()
+            .flatten()
+            .map(|participant| participant.display_name)
+            .unwrap_or_else(|| user_id.to_string())
+    };
+    match error {
+        EngineError::PlanOwnTrack { participant, track } => {
+            format!(
+                "{} seeded track {track}. Choose another person.",
+                name(&participant)
+            )
+        }
+        EngineError::PlanRepeat { participant, track } => format!(
+            "{} already worked on track {track} in another round. Choose another person.",
+            name(&participant)
+        ),
+        EngineError::PlanParticipantNotInRound => {
+            "That person is not active and ready in this round.".to_string()
+        }
+        EngineError::PlanChanged => {
+            "The plan changed. Close this dialog and try again.".to_string()
+        }
+        EngineError::PlanInvalid(_) => {
+            "The plan is incomplete. Replace the draft before you edit it.".to_string()
+        }
+        EngineError::PlanNoChange => "That person already holds this track.".to_string(),
+        EngineError::PlanCellNotFound { .. } => {
+            "That assignment is no longer in the plan. Reload the planner.".to_string()
+        }
+        other => other.to_string(),
+    }
 }
 
 #[tauri::command]

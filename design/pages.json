@@ -45,6 +45,10 @@
       "query": "demo=1&static=1&view=plan&state=dense&dialog=edit"
     },
     {
+      "id": "plan-edit-no-swap",
+      "query": "demo=1&static=1&view=plan&state=dense&dialog=edit&nocandidates=1"
+    },
+    {
       "id": "plan-light",
       "query": "demo=1&static=1&view=plan&state=dense&theme=light",
       "contrast": true

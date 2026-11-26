@@ -21,12 +21,17 @@ track.
    takes the new holder's track in the same round. Each person keeps exactly one
    assignment in the round.
 2. **The whole plan is validated.** The engine checks own tracks, repeated
-   pairs, duplicate people in a round, duplicate tracks in a round, and active
-   membership. A failed check writes nothing.
+   pairs, duplicate people in a round, duplicate tracks in a round, full
+   per-round coverage of every active ready person and track, and active
+   membership. A failed check writes nothing. The candidate list uses the same
+   validation, so the UI offers only valid swaps. A paused or removed
+   participant invalidates the plan until the host fixes the roster or drafts
+   again.
 3. **The edit creates a new plan version.** The old version stays. The new
    version has the same seed and rounds, a new commitment, and the reason
    `manual edit`. The audit entry records the round, track, previous holder,
-   new holder, and commitment.
+   new holder, and commitment. The host sends the expected plan version. A
+   stale edit is refused with `PlanChanged`.
 4. **A complete plan can have no valid single-cell swap.** A classic plan with
    full exposure already uses every legal person-and-track pairing. The UI
    reports that no valid swap exists and offers Replace draft or a shorter plan.

@@ -17,6 +17,7 @@ import type {
   MissionControl,
   PeopleData,
   PlanData,
+  PlanEditCandidate,
   RevealData,
   RevealPackage,
   RevealTrack,
@@ -400,15 +401,134 @@ export async function generatePlan(): Promise<PlanData> {
   return invoke<PlanData>("host_generate_plan");
 }
 
+function demoSwapValid(
+  plan: PlanData,
+  round: number,
+  trackCode: string,
+  participantId: string,
+): boolean {
+  const track = plan.matrix.find((item) => item.trackCode === trackCode);
+  const target = track?.cells.find((cell) => cell.round === round);
+  if (!track || !target || target.participantId === participantId) {
+    return false;
+  }
+  const current = plan.matrix
+    .flatMap((item) => item.cells)
+    .find(
+      (cell) =>
+        cell.round === round && cell.participantId === participantId,
+    );
+  if (!current) {
+    return false;
+  }
+  if (track.ownerId === participantId) {
+    return false;
+  }
+  const currentTrack = plan.matrix.find(
+    (item) => item.trackCode === current.trackCode,
+  );
+  if (!currentTrack || currentTrack.ownerId === target.participantId) {
+    return false;
+  }
+  const candidateSawTarget = plan.matrix.some(
+    (item) =>
+      item.trackCode === trackCode &&
+      item.cells.some(
+        (cell) =>
+          cell.round !== round &&
+          cell.participantId === participantId,
+      ),
+  );
+  if (candidateSawTarget) {
+    return false;
+  }
+  const displacedSawCurrent = plan.matrix.some(
+    (item) =>
+      item.trackCode === current.trackCode &&
+      item.cells.some(
+        (cell) =>
+          cell.round !== round &&
+          cell.participantId === target.participantId,
+      ),
+  );
+  return !displacedSawCurrent;
+}
+
+export async function loadPlanEditCandidates(
+  round: number,
+  trackCode: string,
+): Promise<PlanEditCandidate[]> {
+  if (isDemoMode()) {
+    await pause(160);
+    if (!demoPlanState) {
+      demoPlanState = demoPlan("default");
+    }
+    if (
+      new URLSearchParams(window.location.search).get("nocandidates") === "1"
+    ) {
+      return [];
+    }
+    const plan = demoPlanState;
+    const target = plan.matrix
+      .find((item) => item.trackCode === trackCode)
+      ?.cells.find((cell) => cell.round === round);
+    if (!target) {
+      return [];
+    }
+    const people = new Map<string, string>();
+    for (const track of plan.matrix) {
+      for (const cell of track.cells) {
+        if (cell.round === round && cell.participantId) {
+          people.set(cell.participantId, cell.participantName);
+        }
+      }
+    }
+    return [...people]
+      .filter(
+        ([participantId]) =>
+          participantId !== target.participantId &&
+          demoSwapValid(plan, round, trackCode, participantId),
+      )
+      .map(([participantId, participantName]) => ({
+        participantId,
+        participantName,
+        currentTrack:
+          plan.matrix
+            .flatMap((item) => item.cells)
+            .find(
+              (cell) =>
+                cell.round === round &&
+                cell.participantId === participantId,
+            )?.trackCode ?? "",
+      }))
+      .sort((left, right) =>
+        left.participantName.localeCompare(right.participantName),
+      );
+  }
+  return invoke<PlanEditCandidate[]>("host_plan_edit_candidates", {
+    round,
+    trackCode,
+  });
+}
+
 export async function editPlanAssignment(
   round: number,
   trackCode: string,
   participantId: string,
+  expectedVersion: number,
 ): Promise<PlanData> {
   if (isDemoMode()) {
     await pause(260);
     if (!demoPlanState) {
       demoPlanState = demoPlan("default");
+    }
+    if (demoPlanState.version !== expectedVersion) {
+      throw new Error("The plan changed. Close this dialog and try again.");
+    }
+    if (!demoSwapValid(demoPlanState, round, trackCode, participantId)) {
+      throw new Error(
+        "That person cannot take this track without breaking a rule.",
+      );
     }
     const track = demoPlanState.matrix.find(
       (item) => item.trackCode === trackCode,
@@ -420,7 +540,7 @@ export async function editPlanAssignment(
         (cell) =>
           cell.round === round && cell.participantId === participantId,
       );
-    if (!target || !current || target.participantId === participantId) {
+    if (!target || !current) {
       throw new Error("That assignment cannot be changed.");
     }
     const previous = {
@@ -431,12 +551,15 @@ export async function editPlanAssignment(
     target.participantName = current.participantName;
     current.participantId = previous.participantId;
     current.participantName = previous.participantName;
+    demoPlanState.version += 1;
+    demoPlanState.commitment = `demo-commit-${demoPlanState.version}`;
     return structuredClone(demoPlanState);
   }
   return invoke<PlanData>("host_edit_plan_assignment", {
     round,
     trackCode,
     participantId,
+    expectedVersion,
   });
 }
 

@@ -148,6 +148,7 @@ pub fn run() {
             host::host_set_participant_paused,
             host::host_plan,
             host::host_generate_plan,
+            host::host_plan_edit_candidates,
             host::host_edit_plan_assignment,
             host::host_lock_roster,
             host::host_open_round,

@@ -2451,19 +2451,27 @@ select.input {
 
 .matrix-edit {
   width: 100%;
-  padding: 2px 4px;
+  min-height: 24px;
+  padding: 4px 4px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
+  text-decoration: underline dotted var(--faint);
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
 .matrix-edit:hover {
   background: var(--surface-3);
   color: var(--text);
+  text-decoration-color: var(--accent);
+}
+
+.matrix-edit-help {
+  color: var(--faint-raised);
 }
 
 .matrix-edit:focus-visible {

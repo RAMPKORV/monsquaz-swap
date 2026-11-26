@@ -36,6 +36,7 @@ import {
   decideExtension,
   editPlanAssignment,
   generatePlan,
+  loadPlanEditCandidates,
   lockRoster,
   openRound,
   revealEvent,
@@ -436,20 +437,16 @@ export default function App() {
     round: number,
     trackCode: string,
     participantId: string,
+    expectedVersion: number,
   ) {
-    try {
-      setPlan(await editPlanAssignment(round, trackCode, participantId));
-      setToast("Schedule saved as a new version.");
-    } catch (error) {
-      const detail =
-        typeof error === "string"
-          ? error
-          : error instanceof Error
-            ? error.message
-            : "The change would break a schedule rule.";
-      setToast(`Could not change the assignment. ${detail}`);
-      throw error;
-    }
+    const next = await editPlanAssignment(
+      round,
+      trackCode,
+      participantId,
+      expectedVersion,
+    );
+    setPlan(next);
+    setToast("Schedule saved as a new version.");
   }
 
   async function handleSetPaused(userId: string, paused: boolean) {
@@ -661,6 +658,7 @@ export default function App() {
         onAction={notify}
         onGeneratePlan={handleGeneratePlan}
         onEditAssignment={handleEditAssignment}
+        onLoadCandidates={loadPlanEditCandidates}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
       />

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import {
   Button,
@@ -46,10 +47,12 @@ import {
   moveRoundDeadline,
   openRound,
   revealEvent,
+  exportRevealZip,
   repairGroups,
   startAsyncEvent,
   startEvent,
   loadAuditLog,
+  loadFillInCandidates,
   loadMissionControl,
   loadPeople,
   loadPlan,
@@ -60,6 +63,7 @@ import {
   setParticipantPaused,
   setTrackTitle,
   addAvailability,
+  assignFillIn,
   removeAvailability,
   addTrackComment,
   redactTrackComment,
@@ -555,6 +559,27 @@ export default function App() {
     }
   }
 
+  async function handleLoadFillInCandidates(
+    trackCode: string,
+    roundNo: number,
+  ) {
+    return loadFillInCandidates(trackCode, roundNo);
+  }
+
+  async function handleAssignFillIn(
+    trackCode: string,
+    roundNo: number,
+    participantId: string,
+  ) {
+    try {
+      await assignFillIn(trackCode, roundNo, participantId);
+      setToast("Fill-in assigned. The offer is queued.");
+      reloadView();
+    } catch (error) {
+      setToast(`Could not assign the fill-in. ${errorDetail(error)}`);
+    }
+  }
+
   async function handleDecision(decision: Decision, action: string) {
     if (demo) {
       setToast(`Preview: the host action “${action}” is applied to this decision.`);
@@ -614,6 +639,22 @@ export default function App() {
             ? error.message
             : "Check the roster and schedule.";
       setToast(`Could not start the event. ${detail}`);
+    }
+  }
+
+  async function handleExportReveal() {
+    const path = await saveDialog({
+      defaultPath: "monsquaz-reveal.zip",
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    if (!path) {
+      return;
+    }
+    try {
+      await exportRevealZip(path);
+      setToast(`Reveal ZIP saved to ${path}.`);
+    } catch (error) {
+      setToast(`Could not export the reveal. ${errorDetail(error)}`);
     }
   }
 
@@ -791,6 +832,8 @@ export default function App() {
         onExtendSeedDeadline={handleExtendSeedDeadline}
         onDecideLateSeed={handleDecideLateSeed}
         onMoveRoundDeadline={handleMoveRoundDeadline}
+        onLoadFillInCandidates={handleLoadFillInCandidates}
+        onAssignFillIn={handleAssignFillIn}
       />
     ) : view === "setup" && setup ? (
       <SetupView
@@ -824,6 +867,7 @@ export default function App() {
         streamSafe={streamSafe}
         onStreamSafeChange={setStreamSafe}
         onAction={setToast}
+        onExport={handleExportReveal}
         onSetTitle={async (trackCode, title) => {
           try {
             setRevealPackage(await setTrackTitle(trackCode, title));

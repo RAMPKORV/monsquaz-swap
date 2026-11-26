@@ -104,6 +104,8 @@ pub enum EngineError {
     LateSeedNotPending,
     #[error("the availability range is invalid")]
     InvalidAvailability,
+    #[error("the participant cannot take this fill-in: {0}")]
+    FillInNotEligible(String),
     #[error("strict participation cannot honor {count} away ranges; use flexible participation")]
     AvailabilityBlocksStrict { count: usize },
     #[error("the event needs at least two active participants to schedule a round")]
@@ -144,6 +146,8 @@ pub enum EngineError {
     FormatChange { current: String, submitted: String },
     #[error("the reveal is blocked by {count} active assignments")]
     PendingAssignments { count: usize, ids: Vec<String> },
+    #[error("the reveal package could not be built: {0}")]
+    RevealZip(String),
     #[error("the attachment was already processed")]
     AttachmentAlreadyProcessed,
     #[error("an extension must be between 1 and 12 hours")]
@@ -3141,6 +3145,197 @@ pub fn move_round_deadline(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FillInCandidate {
+    pub participant_id: String,
+    pub display_name: String,
+    pub seen: usize,
+    pub cap: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FillInOutcome {
+    pub assignment_id: String,
+    pub track_code: String,
+}
+
+/// List the active people who can take a stranded track in an open round.
+pub fn fill_in_candidates(
+    db: &Db,
+    event_id: &str,
+    track_code: &str,
+    round_no: u32,
+) -> Result<Vec<FillInCandidate>, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "fill-in candidates")?;
+    let round = RoundRepo::get(db.conn(), event_id, round_no)?
+        .ok_or(EngineError::RoundNotOpen { round: round_no })?;
+    if round.status != RoundStatus::Open {
+        return Err(EngineError::RoundNotOpen { round: round_no });
+    }
+    let track = TrackRepo::get(db.conn(), event_id, track_code)?
+        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let seen = SeenRepo::list_for_event(db.conn(), event_id)?;
+    let active_people: HashSet<String> = AssignmentRepo::list_active(db.conn(), event_id)?
+        .iter()
+        .map(|assignment| assignment.participant_id.clone())
+        .collect();
+    let mut candidates = Vec::new();
+    for participant in participants {
+        if participant.membership != Membership::Active
+            || participant.readiness != Readiness::Ready
+            || participant.user_id == track.owner_id
+            || active_people.contains(&participant.user_id)
+        {
+            continue;
+        }
+        if seen
+            .iter()
+            .any(|pair| pair.track_code == track_code && pair.participant_id == participant.user_id)
+        {
+            continue;
+        }
+        let seen_count = seen
+            .iter()
+            .filter(|pair| pair.participant_id == participant.user_id)
+            .count();
+        if participant.max_handoffs > 0 && seen_count as u32 >= participant.max_handoffs {
+            continue;
+        }
+        candidates.push(FillInCandidate {
+            participant_id: participant.user_id.clone(),
+            display_name: participant.display_name,
+            seen: seen_count,
+            cap: participant.max_handoffs,
+        });
+    }
+    candidates.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    Ok(candidates)
+}
+
+/// Assign a stranded track to one eligible person in an open round. The person
+/// must not own the track and must not have seen it. The handoff cap applies.
+pub fn assign_fill_in(
+    db: &Db,
+    event_id: &str,
+    track_code: &str,
+    round_no: u32,
+    user_id: &str,
+    now: i64,
+) -> Result<FillInOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "fill-in assignment")?;
+    if round_no < 2 {
+        return Err(EngineError::RoundNotOpen { round: round_no });
+    }
+    let transaction = begin(db)?;
+    let round = RoundRepo::get(&transaction, event_id, round_no)?
+        .ok_or(EngineError::RoundNotOpen { round: round_no })?;
+    if round.status != RoundStatus::Open {
+        return Err(EngineError::RoundNotOpen { round: round_no });
+    }
+    let deadline = round
+        .deadline_at
+        .ok_or(EngineError::RoundDeadlineMissing { round: round_no })?;
+    let track = TrackRepo::get(&transaction, event_id, track_code)?
+        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
+    if AssignmentRepo::list_active(&transaction, event_id)?
+        .iter()
+        .any(|assignment| assignment.track_code == track_code)
+    {
+        return Err(EngineError::FillInNotEligible(
+            "the track has an active holder".to_string(),
+        ));
+    }
+    let mut participant = ParticipantRepo::get(&transaction, event_id, user_id)?
+        .ok_or_else(|| EngineError::ParticipantNotFound(user_id.to_string()))?;
+    if participant.membership != Membership::Active {
+        return Err(EngineError::FillInNotEligible(
+            "the person is not active".to_string(),
+        ));
+    }
+    if AssignmentRepo::list_active(&transaction, event_id)?
+        .iter()
+        .any(|assignment| assignment.participant_id == user_id)
+    {
+        return Err(EngineError::FillInNotEligible(
+            "the person already holds a track".to_string(),
+        ));
+    }
+    if track.owner_id == user_id {
+        return Err(EngineError::FillInNotEligible(
+            "the person owns the track".to_string(),
+        ));
+    }
+    if SeenRepo::has(&transaction, event_id, track_code, user_id)? {
+        return Err(EngineError::FillInNotEligible(
+            "the person has seen the track".to_string(),
+        ));
+    }
+    let seen_count = SeenRepo::list_for_participant(&transaction, event_id, user_id)?.len();
+    if participant.max_handoffs > 0 && seen_count as u32 >= participant.max_handoffs {
+        return Err(EngineError::FillInNotEligible(
+            "the person reached the handoff cap".to_string(),
+        ));
+    }
+    participant.readiness = Readiness::Ready;
+    participant.updated_at = now;
+    ParticipantRepo::upsert(&transaction, &participant)?;
+    let index = round_no - 2;
+    let id = format!(
+        "{}-{}",
+        assignment_id(event_id, index, track_code),
+        &swap_files::sha256_hex(format!("fill-in:{event_id}:{user_id}").as_bytes())[..8]
+    );
+    AssignmentRepo::insert(
+        &transaction,
+        &AssignmentRecord {
+            id: id.clone(),
+            event_id: event_id.to_string(),
+            track_code: track_code.to_string(),
+            participant_id: user_id.to_string(),
+            round: index,
+            status: AssignmentStatus::Offered,
+            offered_at: now,
+            claimed_at: None,
+            due_at: Some(deadline),
+            submitted_at: None,
+            created_at: now,
+            updated_at: now,
+            extension_secs: 0,
+        },
+    )?;
+    move_track(&transaction, event_id, track_code, TrackState::Offered)?;
+    let effect = Effect::Offer {
+        user_id: user_id.to_string(),
+        event_id: event_id.to_string(),
+        assignment_id: id.clone(),
+        track_code: track_code.to_string(),
+        due_at: deadline,
+        claim_window_secs: (deadline - now).max(1),
+    };
+    enqueue_effect(&transaction, event_id, &effect, now)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Fill-in assigned",
+        Some(track_code),
+        &serde_json::json!({
+            "round": round_no,
+            "participantId": user_id,
+        })
+        .to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(FillInOutcome {
+        assignment_id: id,
+        track_code: track_code.to_string(),
+    })
+}
+
 pub fn claim(
     db: &Db,
     store: &BlobStore,
@@ -3916,6 +4111,69 @@ fn is_playable(extension: &str) -> bool {
         extension,
         "it" | "mptm" | "xm" | "mod" | "s3m" | "mtm" | "669" | "wav" | "flac" | "mp3" | "ogg"
     )
+}
+
+/// Build the reveal ZIP: one final audio file per track plus a credits JSON.
+pub fn reveal_zip(db: &Db, store: &BlobStore, event_id: &str) -> Result<Vec<u8>, EngineError> {
+    let package = reveal_package(db, event_id)?;
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let mut manifest = Vec::new();
+    for track in &package.album {
+        let final_version = track
+            .versions
+            .iter()
+            .find(|version| version.final_version)
+            .or_else(|| track.versions.last());
+        let Some(version) = final_version else {
+            continue;
+        };
+        let file = FileRepo::get(db.conn(), &version.file_id)?
+            .ok_or_else(|| EngineError::NoFile(track.track_code.clone()))?;
+        let bytes = store.read(&file.sha256)?;
+        let name = format!(
+            "{:02}_{}.{}",
+            track.position, track.track_code, version.extension
+        );
+        writer
+            .start_file(&name, options)
+            .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+        std::io::Write::write_all(&mut writer, &bytes)
+            .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+        manifest.push(serde_json::json!({
+            "position": track.position,
+            "trackCode": track.track_code,
+            "title": track.title,
+            "seedOwner": track.seed_owner_name,
+            "file": name,
+            "credits": track.credits.iter().map(|credit| serde_json::json!({
+                "round": credit.round,
+                "name": credit.display_name,
+                "status": format!("{:?}", credit.status),
+                "fillIn": credit.fill_in,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+    writer
+        .start_file("README.txt", options)
+        .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+    let readme = format!(
+        "{}\n\nFinal tracks and credits from Monsquaz Swap.\n",
+        package.event_name
+    );
+    std::io::Write::write_all(&mut writer, readme.as_bytes())
+        .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+    writer
+        .start_file("credits.json", options)
+        .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+    let body = serde_json::to_vec_pretty(&manifest)?;
+    std::io::Write::write_all(&mut writer, &body)
+        .map_err(|error| EngineError::RevealZip(error.to_string()))?;
+    writer
+        .finish()
+        .map(|cursor| cursor.into_inner())
+        .map_err(|error| EngineError::RevealZip(error.to_string()))
 }
 
 pub fn set_track_title(

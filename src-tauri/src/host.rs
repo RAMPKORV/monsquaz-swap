@@ -16,12 +16,13 @@ use swap_db::{
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, accept_late_seed,
-    add_availability, add_track_comment, async_coverage, create_event, dispatch_async_wave,
-    edit_plan_assignment, extend_seed_deadline, generate_schedule, lock_roster,
-    move_round_deadline, next_async_release, open_round, open_seed_round, pending_late_seeds,
-    plan_edit_candidates, redact_track_comment, reject_late_seed, remove_availability,
-    reopen_seed_round, repair_group_schedule, reveal_package, reveal_with_channel, set_track_title,
-    start_async_event, start_event_with_channel, upload_pack, verify_commitment,
+    add_availability, add_track_comment, assign_fill_in, async_coverage, create_event,
+    dispatch_async_wave, edit_plan_assignment, extend_seed_deadline, fill_in_candidates,
+    generate_schedule, lock_roster, move_round_deadline, next_async_release, open_round,
+    open_seed_round, pending_late_seeds, plan_edit_candidates, redact_track_comment,
+    reject_late_seed, remove_availability, reopen_seed_round, repair_group_schedule,
+    reveal_package, reveal_with_channel, reveal_zip, set_track_title, start_async_event,
+    start_event_with_channel, upload_pack, verify_commitment,
 };
 
 #[derive(Debug, Serialize)]
@@ -1552,6 +1553,66 @@ pub fn host_start_async_event(app: AppHandle) -> Result<EventSummaryDto, String>
     start_async_event(&db, &event.id, now_secs()).map_err(|error| error.to_string())?;
     let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
     summary(&db, &event)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillInCandidateDto {
+    participant_id: String,
+    display_name: String,
+    seen: usize,
+    cap: u32,
+}
+
+#[tauri::command]
+pub fn host_fill_in_candidates(
+    app: AppHandle,
+    track_code: String,
+    round_no: u32,
+) -> Result<Vec<FillInCandidateDto>, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    Ok(fill_in_candidates(&db, &event.id, &track_code, round_no)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|candidate| FillInCandidateDto {
+            participant_id: candidate.participant_id,
+            display_name: candidate.display_name,
+            seen: candidate.seen,
+            cap: candidate.cap,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn host_assign_fill_in(
+    app: AppHandle,
+    track_code: String,
+    round_no: u32,
+    participant_id: String,
+) -> Result<(), String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    assign_fill_in(
+        &db,
+        &event.id,
+        &track_code,
+        round_no,
+        &participant_id,
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn host_export_reveal_zip(app: AppHandle, path: String) -> Result<String, String> {
+    let db = open_db(&app)?;
+    let store = open_store(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let bytes = reveal_zip(&db, &store, &event.id).map_err(|error| error.to_string())?;
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    Ok(path)
 }
 
 #[tauri::command]

@@ -105,6 +105,13 @@ export type CommitmentCheck = {
   verified: boolean;
 };
 
+export type FillInCandidate = {
+  participantId: string;
+  displayName: string;
+  seen: number;
+  cap: number;
+};
+
 export type BotHealth = {
   status: "Online" | "Connecting" | "Reconnecting" | "Offline" | "Not configured";
   label: string;

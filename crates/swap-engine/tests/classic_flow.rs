@@ -9,14 +9,14 @@ use swap_db::{
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
     PreparedBytes, SubmitRequest, accept_late_seed, add_availability, add_track_comment,
-    async_coverage, claim, create_event, create_event_with_secret, dispatch,
+    assign_fill_in, async_coverage, claim, create_event, create_event_with_secret, dispatch,
     dispatch_async_release, dispatch_async_wave, dispatch_pending, edit_plan_assignment,
-    event_status, expire_offer, generate_schedule, join_with_seed, lock_roster,
+    event_status, expire_offer, fill_in_candidates, generate_schedule, join_with_seed, lock_roster,
     move_round_deadline, next_async_release, open_round, open_seed_round, participant_schedule,
     pending_late_seeds, plan_edit_candidates, redact_track_comment, reveal, reveal_package,
-    reveal_with_channel, set_participant_ready, set_track_title, set_track_title_for_user,
-    set_track_title_for_user_on_track, signup, skip, start_async_event, start_event,
-    start_event_with_channel, submit, tick_deadlines, verify_commitment,
+    reveal_with_channel, reveal_zip, set_participant_ready, set_track_title,
+    set_track_title_for_user, set_track_title_for_user_on_track, signup, skip, start_async_event,
+    start_event, start_event_with_channel, submit, tick_deadlines, verify_commitment,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -3613,4 +3613,107 @@ fn a_paused_participant_gets_no_offer_until_ready() {
             matches!(effect, Effect::Offer { user_id, .. } if user_id == &user(0))
         })
     );
+}
+
+#[test]
+fn a_fill_in_covers_a_stranded_track_and_keeps_the_invariants() {
+    let fixture = Fixture::new(4, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (first_user, _, track_code) = offers[0].clone();
+    skip(&fixture.db, EVENT, &first_user, T4).unwrap();
+    ParticipantRepo::upsert(
+        fixture.db.conn(),
+        &swap_db::ParticipantRecord {
+            event_id: EVENT.to_string(),
+            user_id: "user-fill".to_string(),
+            display_name: "Fill In".to_string(),
+            role: swap_core::Role::FillIn,
+            membership: Membership::Active,
+            readiness: Readiness::Ready,
+            timezone: "Europe/Stockholm".to_string(),
+            max_handoffs: 20,
+            created_at: T4,
+            updated_at: T4,
+        },
+    )
+    .unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &track_code, 2).unwrap();
+    assert!(candidates.iter().any(|c| c.participant_id == "user-fill"));
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.participant_id == "user-fill")
+        .unwrap();
+    let outcome = assign_fill_in(
+        &fixture.db,
+        EVENT,
+        &track_code,
+        2,
+        &candidate.participant_id,
+        T4 + 10,
+    )
+    .unwrap();
+    let assignment = AssignmentRepo::get(fixture.db.conn(), &outcome.assignment_id)
+        .unwrap()
+        .unwrap_or_else(|| panic!("missing assignment {:?}", outcome));
+    assert_eq!(assignment.status, AssignmentStatus::Offered);
+    assert_eq!(assignment.track_code, track_code);
+    assert_ne!(assignment.participant_id, first_user);
+    assert!(
+        !SeenRepo::has(
+            fixture.db.conn(),
+            EVENT,
+            &track_code,
+            &assignment.participant_id
+        )
+        .unwrap()
+    );
+    assert!(matches!(
+        assign_fill_in(
+            &fixture.db,
+            EVENT,
+            &track_code,
+            2,
+            &candidate.participant_id,
+            T4 + 11
+        ),
+        Err(EngineError::FillInNotEligible(_))
+    ));
+}
+
+#[test]
+fn the_reveal_zip_carries_the_tracks_and_credits() {
+    let fixture = Fixture::new(2, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let round = fixture.open(0);
+    for (index, (user_id, assignment_id, _)) in round.iter().enumerate() {
+        claim(
+            &fixture.db,
+            &fixture.store,
+            EVENT,
+            assignment_id,
+            user_id,
+            T5,
+        )
+        .unwrap();
+        submit(
+            &fixture.db,
+            &fixture.store,
+            &PassthroughPreparer,
+            &SubmitRequest {
+                event_id: EVENT,
+                user_id,
+                filename: "edit.it",
+                bytes: &seed_bytes(120 + index as u8),
+            },
+            T6,
+        )
+        .unwrap();
+    }
+    reveal(&fixture.db, EVENT, T7).unwrap();
+    let bytes = reveal_zip(&fixture.db, &fixture.store, EVENT).unwrap();
+    assert!(!bytes.is_empty());
+    assert!(bytes.windows(12).any(|window| window == b"credits.json"));
 }

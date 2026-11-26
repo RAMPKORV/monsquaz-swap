@@ -57,6 +57,7 @@ export function RevealView({
   onRedact,
   onPublish,
   onAction,
+  onExport,
 }: {
   data: RevealPackage;
   streamSafe: boolean;
@@ -71,6 +72,7 @@ export function RevealView({
   onRedact: (commentId: string) => Promise<void>;
   onPublish: () => Promise<{ published: boolean; blocked: string[] }>;
   onAction: (message: string) => void;
+  onExport: () => Promise<void>;
 }) {
   const [selectedCode, setSelectedCode] = useState(
     () =>
@@ -320,6 +322,13 @@ export function RevealView({
             }}
           >
             {streamSafe ? "Stream-safe is on" : "Stream-safe off"}
+          </Button>
+          <Button
+            variant="secondary"
+            icon="download"
+            onClick={onExport}
+          >
+            Export ZIP
           </Button>
           {!data.published ? (
             <Button

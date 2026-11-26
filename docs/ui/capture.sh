@@ -111,6 +111,8 @@ shot mission-populated-light-1280 "view=mission&theme=light" 1280 800
 shot mission-populated-dark-1024 "view=mission" 1024 700
 shot mission-populated-light-1024 "view=mission&theme=light" 1024 700
 shot mission-populated-dark-zoom200 "view=mission" 640 400
+shot mission-fill-in-dark-1280 "view=mission&dialog=fillin" 1280 800
+shot mission-fill-in-dark-1024 "view=mission&dialog=fillin" 1024 700
 shot shell-command-palette-dark-1280 "view=mission&palette=1" 1280 800
 
 shot setup-first-run-dark-1280 "view=setup&state=empty" 1280 800

@@ -131,6 +131,11 @@ and one acknowledgement.
 
 - `host_lock_roster` closes seed intake and classifies unseeded signups as
   fill-ins. The planner refuses to generate a schedule before the lock.
+- `host_start_event` locks the schedule and publishes the short commitment
+  code in the announcement channel in the same transaction as the state
+  change. The message contains no file hash. A manual edit or replan creates
+  a new plan version and commitment before the lock, and the lock publishes
+  the latest commitment.
 - `host_open_round` opens one round. The host must call it. No timer opens a
   round.
 - `host_reveal` checks the reveal gate and writes the reveal messages to the

@@ -210,6 +210,13 @@ pub struct PlanEditCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartOutcome {
+    pub plan_version: u32,
+    pub commitment: String,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenRoundOutcome {
     pub round: u32,
     pub offers: usize,
@@ -1048,7 +1055,18 @@ pub fn edit_plan_assignment(
     })
 }
 
-pub fn start_event(db: &Db, event_id: &str, now: i64) -> Result<(), EngineError> {
+pub fn start_event(db: &Db, event_id: &str, now: i64) -> Result<StartOutcome, EngineError> {
+    start_event_with_channel(db, event_id, None, now)
+}
+
+/// Start the event and publish the plan commitment in the announcement
+/// channel. The state change and the outbound message commit together.
+pub fn start_event_with_channel(
+    db: &Db,
+    event_id: &str,
+    channel_id: Option<&str>,
+    now: i64,
+) -> Result<StartOutcome, EngineError> {
     let event = load_event(db, event_id)?;
     require_state(
         &event,
@@ -1072,8 +1090,25 @@ pub fn start_event(db: &Db, event_id: &str, now: i64) -> Result<(), EngineError>
     validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
     let next = current.state.transition_to(EventState::Active)?;
     EventRepo::set_state(&transaction, event_id, next, now)?;
+    let effect = channel_id
+        .filter(|channel_id| !channel_id.trim().is_empty())
+        .map(|channel_id| Effect::Channel {
+            channel_id: channel_id.to_string(),
+            content: format!(
+                "Schedule locked for {}. Commitment: {}. Compare this code with your plan.",
+                event.name,
+                &plan.commitment[..16.min(plan.commitment.len())]
+            ),
+        });
+    if let Some(effect) = &effect {
+        enqueue_effect(&transaction, event_id, effect, now)?;
+    }
     commit(transaction)?;
-    Ok(())
+    Ok(StartOutcome {
+        plan_version: plan.version,
+        commitment: plan.commitment,
+        effects: effect.into_iter().collect(),
+    })
 }
 
 pub fn open_round(

@@ -17,7 +17,8 @@ use swap_db::{
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
     edit_plan_assignment, generate_schedule, lock_roster, open_round, plan_edit_candidates,
-    redact_track_comment, reveal_package, reveal_with_channel, set_track_title, start_event,
+    redact_track_comment, reveal_package, reveal_with_channel, set_track_title,
+    start_event_with_channel,
 };
 
 #[derive(Debug, Serialize)]
@@ -1427,21 +1428,40 @@ fn friendly_plan_error(db: &Db, event_id: &str, error: EngineError) -> String {
 #[tauri::command]
 pub fn host_start_event(app: AppHandle) -> Result<PlanDataDto, String> {
     let db = open_db(&app)?;
-    start_host_event(&db)
+    let settings = host_settings(app.clone()).unwrap_or_default();
+    let channel = settings.announcement_channel_id.trim().to_string();
+    let result = start_host_event_with_channel(
+        &db,
+        if channel.is_empty() {
+            None
+        } else {
+            Some(channel.as_str())
+        },
+    );
+    if result.is_ok() {
+        #[cfg(feature = "live")]
+        app.state::<crate::live_runtime::LiveRuntime>().wake();
+    }
+    result
 }
 
-fn start_host_event(db: &Db) -> Result<PlanDataDto, String> {
+fn start_host_event_with_channel(db: &Db, channel_id: Option<&str>) -> Result<PlanDataDto, String> {
     let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
-    start_event(db, &event.id, now).map_err(|error| error.to_string())?;
+    let outcome = start_event_with_channel(db, &event.id, channel_id, now)
+        .map_err(|error| error.to_string())?;
     AuditRepo::insert(
         db.conn(),
         &event.id,
         now,
         "Host",
         "Event started",
-        None,
-        "{}",
+        Some(&format!("Plan v{}", outcome.plan_version)),
+        &serde_json::json!({
+            "commitment": outcome.commitment,
+            "announced": !outcome.effects.is_empty()
+        })
+        .to_string(),
     )
     .map_err(|error| error.to_string())?;
     plan_data(db)
@@ -2439,7 +2459,7 @@ mod tests {
         let entries = audit_log(&db, &SettingsDto::default()).unwrap();
         assert_eq!(entries[0].subject, "Plan v2");
 
-        let started = start_host_event(&db).unwrap();
+        let started = start_host_event_with_channel(&db, None).unwrap();
         assert!(started.committed);
         assert_eq!(started.status, "Committed");
         let entries = audit_log(&db, &SettingsDto::default()).unwrap();
@@ -2458,6 +2478,70 @@ mod tests {
         let mission = mission_control(&db, &SettingsDto::default()).unwrap();
         assert!(mission.next_action.is_none());
         assert_eq!(mission.event.as_ref().unwrap().round, 1);
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn starting_an_event_publishes_the_commitment() {
+        use swap_db::DeliveryRepo;
+
+        let (db, directory) = test_db("start-commitment");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Locked Swap".to_string(),
+                rounds: Some(2),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for (id, name, code) in [
+            ("u-alice", "Alice", "A1"),
+            ("u-bob", "Bob", "B1"),
+            ("u-carol", "Carol", "C1"),
+        ] {
+            seed_person(&db, &created.id, id, name);
+            seed_track(&db, &created.id, code, id);
+        }
+        lock_host_roster(&db).unwrap();
+        let plan = generate_host_plan(&db).unwrap();
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+
+        let started = start_host_event_with_channel(&db, Some("announce")).unwrap();
+        assert!(started.committed);
+        assert_eq!(started.commitment, plan.commitment);
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 1);
+
+        let pending = DeliveryRepo::pending(db.conn(), 10).unwrap();
+        let channel = pending
+            .iter()
+            .find(|delivery| delivery.kind == "channel")
+            .unwrap();
+        assert!(
+            channel
+                .payload
+                .windows("announce".len())
+                .any(|window| window == b"announce")
+        );
+        let short = &plan.commitment[..16];
+        assert!(
+            channel
+                .payload
+                .windows(short.len())
+                .any(|window| window == short.as_bytes())
+        );
+
+        let entries = AuditRepo::list_for_event(db.conn(), &created.id).unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.action == "Event started")
+            .unwrap();
+        assert_eq!(entry.subject.as_deref(), Some("Plan v1"));
+        let detail: serde_json::Value = serde_json::from_str(&entry.detail_json).unwrap();
+        assert_eq!(detail["commitment"], plan.commitment);
+        assert_eq!(detail["announced"], true);
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

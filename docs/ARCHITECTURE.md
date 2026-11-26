@@ -131,6 +131,22 @@ with an underfilled or unequal group. The repair merges or re-splits the
 groups, writes a new plan version with the reason `group repair`, and records
 an audit entry. A routine plan generation does not merge groups.
 
+## Async queue
+
+Async mode uses one global queue and no participant groups. The host starts
+the event without a classic plan. Each dispatch wave chooses one track for each
+Ready participant who holds no active offer. The choice excludes the person's
+own track, every track they have seen, tracks with an active offer, and tracks
+they let expire. The score prefers tracks whose owner or past holders the
+person has not worked with. The tie-break is deterministic.
+
+An offer contains the track code and the 24-hour claim deadline and no file.
+The claim sends the file and marks the pair as seen. A claim reminder fires with
+12 hours left. An expired offer returns the track to the pool, does not mark the
+pair as seen, pauses the participant for the Ready gate, and blocks a new offer
+of that track to that person. The two daily waves, event length caps, and the
+exposure gap report are the next slices.
+
 ## Simulation
 
 `swap-sim` drives the real classic engine with deterministic participants:

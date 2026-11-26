@@ -6,12 +6,13 @@ use swap_db::{
     HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, PrivacyRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
-    DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
+    DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
     PreparedBytes, SubmitRequest, add_track_comment, claim, create_event, dispatch,
-    dispatch_pending, edit_plan_assignment, event_status, expire_offer, generate_schedule,
-    join_with_seed, lock_roster, open_round, plan_edit_candidates, redact_track_comment, reveal,
-    reveal_package, reveal_with_channel, set_track_title, set_track_title_for_user,
-    set_track_title_for_user_on_track, signup, skip, start_event, start_event_with_channel, submit,
+    dispatch_async_wave, dispatch_pending, edit_plan_assignment, event_status, expire_offer,
+    generate_schedule, join_with_seed, lock_roster, open_round, plan_edit_candidates,
+    redact_track_comment, reveal, reveal_package, reveal_with_channel, set_track_title,
+    set_track_title_for_user, set_track_title_for_user_on_track, signup, skip, start_async_event,
+    start_event, start_event_with_channel, submit, tick_deadlines,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -2082,6 +2083,84 @@ fn group_repair_merges_an_underfilled_group_only_when_needed() {
         repair_group_schedule(&fixture.db, EVENT, T5),
         Err(EngineError::GroupRepairNotNeeded)
     ));
+}
+
+#[test]
+fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
+    let settings = EventSettings {
+        mode: Mode::Async,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(4, 0, settings);
+    lock_roster(&fixture.db, EVENT, T1).unwrap();
+    start_async_event(&fixture.db, EVENT, T2).unwrap();
+
+    let wave = dispatch_async_wave(&fixture.db, EVENT, T3).unwrap();
+    assert_eq!(wave.offers, 4);
+    assert_eq!(
+        SeenRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .len(),
+        0
+    );
+    let offers: Vec<(String, String, String)> = wave
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Offer {
+                user_id,
+                assignment_id,
+                track_code,
+                ..
+            } => Some((user_id.clone(), assignment_id.clone(), track_code.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(offers.len(), 4);
+    let (claimed_user, claimed_assignment, _) = &offers[0];
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        claimed_assignment,
+        claimed_user,
+        T4,
+    )
+    .unwrap();
+    assert_eq!(
+        SeenRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let reminder = tick_deadlines(&fixture.db, T3 + 12 * 60 * 60 + 1).unwrap();
+    assert_eq!(reminder.reminders, 3);
+    let second = tick_deadlines(&fixture.db, T3 + 12 * 60 * 60 + 1).unwrap();
+    assert_eq!(second.reminders, 0);
+
+    let expiry = tick_deadlines(&fixture.db, T3 + 24 * 60 * 60 + 1).unwrap();
+    assert_eq!(expiry.expired_offers, 3);
+    let expired = offers
+        .iter()
+        .find(|(user, _, _)| user != claimed_user)
+        .unwrap();
+    let mut participant = ParticipantRepo::get(fixture.db.conn(), EVENT, &expired.0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(participant.readiness, Readiness::Paused);
+    participant.readiness = Readiness::Ready;
+    participant.updated_at = T3 + 24 * 60 * 60 + 2;
+    ParticipantRepo::upsert(fixture.db.conn(), &participant).unwrap();
+
+    let next = dispatch_async_wave(&fixture.db, EVENT, T3 + 24 * 60 * 60 + 2).unwrap();
+    assert!(next.offers >= 1);
+    let assignments = AssignmentRepo::list_for_event(fixture.db.conn(), EVENT).unwrap();
+    assert!(!assignments.iter().any(|assignment| {
+        assignment.participant_id == expired.0
+            && assignment.track_code == expired.2
+            && assignment.status != AssignmentStatus::Expired
+    }));
 }
 
 #[test]

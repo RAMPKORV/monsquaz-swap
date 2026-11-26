@@ -16,8 +16,8 @@ use swap_db::{
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
-    generate_schedule, lock_roster, open_round, redact_track_comment, reveal_package,
-    reveal_with_channel, set_track_title, start_event,
+    edit_plan_assignment, generate_schedule, lock_roster, open_round, redact_track_comment,
+    reveal_package, reveal_with_channel, set_track_title, start_event,
 };
 
 #[derive(Debug, Serialize)]
@@ -1315,6 +1315,27 @@ pub fn host_decide_deadline(
     #[cfg(feature = "live")]
     app.state::<crate::live_runtime::LiveRuntime>().wake();
     Ok(())
+}
+
+#[tauri::command]
+pub fn host_edit_plan_assignment(
+    app: AppHandle,
+    round: u32,
+    track_code: String,
+    participant_id: String,
+) -> Result<PlanDataDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    edit_plan_assignment(
+        &db,
+        &event.id,
+        round,
+        &track_code,
+        &participant_id,
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    plan_data(&db)
 }
 
 #[tauri::command]

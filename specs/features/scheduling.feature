@@ -41,6 +41,19 @@ Feature: Classic anonymous scheduling
     And the planner blocks a change that creates a repeat or an own-track assignment
     And the change is recorded in the audit log
 
+  Scenario: A manual edit swaps the two people in the round
+    Given a generated classic schedule with fewer rounds than the full exposure
+    When the host changes one assignment
+    Then the two people swap tracks in that round
+    And each person keeps one assignment in the round
+    And the plan version and commitment change
+
+  Scenario: A complete schedule has no valid single-cell swap
+    Given a generated classic schedule with full exposure
+    When the host opens one assignment
+    Then the planner reports that no valid swap exists
+    And the host can replace the draft or shorten the plan
+
   Scenario: Locking the schedule publishes a commitment
     Given a validated classic schedule
     When the host locks the schedule

@@ -34,6 +34,7 @@ import {
   createEvent,
   decideDeadline,
   decideExtension,
+  editPlanAssignment,
   generatePlan,
   lockRoster,
   openRound,
@@ -431,6 +432,26 @@ export default function App() {
     }
   }
 
+  async function handleEditAssignment(
+    round: number,
+    trackCode: string,
+    participantId: string,
+  ) {
+    try {
+      setPlan(await editPlanAssignment(round, trackCode, participantId));
+      setToast("Schedule saved as a new version.");
+    } catch (error) {
+      const detail =
+        typeof error === "string"
+          ? error
+          : error instanceof Error
+            ? error.message
+            : "The change would break a schedule rule.";
+      setToast(`Could not change the assignment. ${detail}`);
+      throw error;
+    }
+  }
+
   async function handleSetPaused(userId: string, paused: boolean) {
     if (demo) {
       setToast(
@@ -639,6 +660,7 @@ export default function App() {
         data={plan}
         onAction={notify}
         onGeneratePlan={handleGeneratePlan}
+        onEditAssignment={handleEditAssignment}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
       />

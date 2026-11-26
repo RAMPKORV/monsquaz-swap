@@ -138,6 +138,20 @@ pub enum EngineError {
     CommentAlreadyRedacted,
     #[error("the participant did not work on this track")]
     NotTrackContributor,
+    #[error("plan cell not found: round {round} track {track}")]
+    PlanCellNotFound { round: u32, track: String },
+    #[error("the participant is not assigned in this round")]
+    PlanParticipantNotInRound,
+    #[error("the assignment did not change")]
+    PlanNoChange,
+    #[error("the change would give {participant} their own track {track}")]
+    PlanOwnTrack { participant: String, track: String },
+    #[error("the change would give {participant} track {track} twice")]
+    PlanRepeat { participant: String, track: String },
+    #[error("the plan changed; reload and try again")]
+    PlanChanged,
+    #[error("the plan is not valid: {0}")]
+    PlanInvalid(String),
 }
 
 #[derive(Debug, Clone)]
@@ -713,6 +727,175 @@ pub fn generate_schedule(
         commitment,
         fallback: schedule.fallback,
         assignments: planned,
+    })
+}
+
+/// Change one assignment before the event starts.
+///
+/// The incoming participant and the current holder swap their tracks in this
+/// round. The whole plan is validated and a new plan version with a new
+/// commitment is written. The old version stays in the database.
+pub fn edit_plan_assignment(
+    db: &Db,
+    event_id: &str,
+    round: u32,
+    track_code: &str,
+    participant_id: &str,
+    now: i64,
+) -> Result<ScheduleOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "schedule edit",
+        "schedule review",
+    )?;
+    let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+    if round >= plan.rounds {
+        return Err(EngineError::RoundOutOfRange {
+            round,
+            rounds: plan.rounds,
+        });
+    }
+    let mut assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
+    let target = assignments
+        .iter()
+        .find(|assignment| assignment.round == round && assignment.track_code == track_code)
+        .cloned()
+        .ok_or_else(|| EngineError::PlanCellNotFound {
+            round,
+            track: track_code.to_string(),
+        })?;
+    if target.participant_id == participant_id {
+        return Err(EngineError::PlanNoChange);
+    }
+    if !assignments
+        .iter()
+        .any(|assignment| assignment.round == round && assignment.participant_id == participant_id)
+    {
+        return Err(EngineError::PlanParticipantNotInRound);
+    }
+    let displaced = target.participant_id.clone();
+    for assignment in &mut assignments {
+        if assignment.round == round
+            && assignment.track_code == track_code
+            && assignment.participant_id == displaced
+        {
+            assignment.participant_id = participant_id.to_string();
+        } else if assignment.round == round && assignment.participant_id == participant_id {
+            assignment.participant_id = displaced.clone();
+        }
+    }
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let active = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active && participant.role == Role::Participant
+        })
+        .map(|participant| participant.user_id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let owners = TrackRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .map(|track| (track.code, track.owner_id))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut pairs = std::collections::BTreeSet::new();
+    let mut round_people = std::collections::BTreeSet::new();
+    let mut round_tracks = std::collections::BTreeSet::new();
+    for assignment in &assignments {
+        let owner = owners
+            .get(&assignment.track_code)
+            .ok_or_else(|| EngineError::TrackNotFound(assignment.track_code.clone()))?;
+        if !active.contains(assignment.participant_id.as_str()) {
+            return Err(EngineError::PlanParticipantNotInRound);
+        }
+        if owner == &assignment.participant_id {
+            return Err(EngineError::PlanOwnTrack {
+                participant: assignment.participant_id.clone(),
+                track: assignment.track_code.clone(),
+            });
+        }
+        if !pairs.insert((
+            assignment.participant_id.clone(),
+            assignment.track_code.clone(),
+        )) {
+            return Err(EngineError::PlanRepeat {
+                participant: assignment.participant_id.clone(),
+                track: assignment.track_code.clone(),
+            });
+        }
+        if !round_people.insert((assignment.round, assignment.participant_id.clone())) {
+            return Err(EngineError::PlanInvalid(format!(
+                "two tracks for {} in round {}",
+                assignment.participant_id, assignment.round
+            )));
+        }
+        if !round_tracks.insert((assignment.round, assignment.track_code.clone())) {
+            return Err(EngineError::PlanInvalid(format!(
+                "two holders for track {} in round {}",
+                assignment.track_code, assignment.round
+            )));
+        }
+    }
+
+    let version = plan.version + 1;
+    for assignment in &mut assignments {
+        assignment.plan_version = version;
+    }
+    let mut next = PlanRecord {
+        event_id: event_id.to_string(),
+        version,
+        seed: plan.seed,
+        rounds: plan.rounds,
+        settings_json: plan.settings_json,
+        commitment: String::new(),
+        committed_at: now,
+        reason: Some("manual edit".to_string()),
+    };
+    let commitment = plan_commitment(&next, &assignments);
+    next.commitment = commitment.clone();
+
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::ScheduleReview {
+        return Err(EngineError::WrongEventState {
+            action: "schedule edit",
+            state: current.state,
+            expected: "schedule review",
+        });
+    }
+    if PlanRepo::latest(&transaction, event_id)?.map(|latest| latest.version) != Some(plan.version)
+    {
+        return Err(EngineError::PlanChanged);
+    }
+    PlanRepo::insert(&transaction, &next)?;
+    for assignment in &assignments {
+        PlanRepo::insert_assignment(&transaction, assignment)?;
+    }
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Schedule edited",
+        Some(&format!("Plan v{version}")),
+        &serde_json::json!({
+            "round": round,
+            "trackCode": track_code,
+            "from": displaced,
+            "to": participant_id,
+            "commitment": commitment
+        })
+        .to_string(),
+    )?;
+    commit(transaction)?;
+
+    Ok(ScheduleOutcome {
+        version,
+        rounds: plan.rounds,
+        commitment,
+        fallback: false,
+        assignments,
     })
 }
 

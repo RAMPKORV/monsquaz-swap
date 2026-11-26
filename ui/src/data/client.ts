@@ -369,6 +369,12 @@ export async function setParticipantPaused(
   return invoke<PeopleData>("host_set_participant_paused", { userId, paused });
 }
 
+let demoPlanState: PlanData | null = null;
+
+export function resetDemoPlan(): void {
+  demoPlanState = null;
+}
+
 export async function loadPlan(scenario: Scenario): Promise<PlanData> {
   if (scenario === "loading") {
     return forceLoading<PlanData>();
@@ -378,7 +384,9 @@ export async function loadPlan(scenario: Scenario): Promise<PlanData> {
   }
   if (isDemoMode()) {
     await pause(180);
-    return demoPlan(scenario);
+    const data = demoPlan(scenario);
+    demoPlanState = data;
+    return structuredClone(data);
   }
   return invoke<PlanData>("host_plan");
 }
@@ -386,9 +394,50 @@ export async function loadPlan(scenario: Scenario): Promise<PlanData> {
 export async function generatePlan(): Promise<PlanData> {
   if (isDemoMode()) {
     await pause(420);
-    return demoPlan("default");
+    demoPlanState = demoPlan("default");
+    return structuredClone(demoPlanState);
   }
   return invoke<PlanData>("host_generate_plan");
+}
+
+export async function editPlanAssignment(
+  round: number,
+  trackCode: string,
+  participantId: string,
+): Promise<PlanData> {
+  if (isDemoMode()) {
+    await pause(260);
+    if (!demoPlanState) {
+      demoPlanState = demoPlan("default");
+    }
+    const track = demoPlanState.matrix.find(
+      (item) => item.trackCode === trackCode,
+    );
+    const target = track?.cells.find((cell) => cell.round === round);
+    const current = demoPlanState.matrix
+      .flatMap((item) => item.cells)
+      .find(
+        (cell) =>
+          cell.round === round && cell.participantId === participantId,
+      );
+    if (!target || !current || target.participantId === participantId) {
+      throw new Error("That assignment cannot be changed.");
+    }
+    const previous = {
+      participantId: target.participantId,
+      participantName: target.participantName,
+    };
+    target.participantId = current.participantId;
+    target.participantName = current.participantName;
+    current.participantId = previous.participantId;
+    current.participantName = previous.participantName;
+    return structuredClone(demoPlanState);
+  }
+  return invoke<PlanData>("host_edit_plan_assignment", {
+    round,
+    trackCode,
+    participantId,
+  });
 }
 
 const demoRevealTracks: RevealTrack[] = [

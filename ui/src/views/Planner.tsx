@@ -8,12 +8,18 @@ export function PlannerView({
   data,
   onAction,
   onGeneratePlan,
+  onEditAssignment,
   onStartEvent,
   onRedactionChange,
 }: {
   data: PlanData;
   onAction: (label: string) => void;
   onGeneratePlan: () => void;
+  onEditAssignment: (
+    round: number,
+    trackCode: string,
+    participantId: string,
+  ) => Promise<void>;
   onStartEvent: () => void;
   onRedactionChange: (active: boolean) => void;
 }) {
@@ -23,6 +29,19 @@ export function PlannerView({
   const [confirmLock, setConfirmLock] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [confirmRebuild, setConfirmRebuild] = useState(false);
+  const [editCell, setEditCell] = useState<{
+    round: number;
+    trackCode: string;
+  } | null>(() => {
+    if (new URLSearchParams(window.location.search).get("dialog") !== "edit") {
+      return null;
+    }
+    const cell = data.matrix[0]?.cells[0];
+    return cell ? { round: cell.round, trackCode: cell.trackCode } : null;
+  });
+  const [editCandidate, setEditCandidate] = useState("");
+  const [editError, setEditError] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
   useEffect(() => {
     onRedactionChange(viewAsParticipant);
     return () => onRedactionChange(false);
@@ -44,6 +63,61 @@ export function PlannerView({
         : data.graph.edges,
     [data.graph.edges, viewAsParticipant, viewer],
   );
+  const canEdit = data.status === "Draft" && !viewAsParticipant;
+  const editTrack = editCell
+    ? data.matrix.find((track) => track.trackCode === editCell.trackCode)
+    : undefined;
+  const editTarget = editCell
+    ? editTrack?.cells.find((cell) => cell.round === editCell.round)
+    : undefined;
+  const editCandidates = useMemo(() => {
+    if (!editCell || !editTarget) {
+      return [];
+    }
+    const people = new Map<string, string>();
+    for (const track of data.matrix) {
+      for (const cell of track.cells) {
+        if (cell.round === editCell.round && cell.participantId) {
+          people.set(cell.participantId, cell.participantName);
+        }
+      }
+    }
+    return [...people]
+      .filter(([participantId]) => participantId !== editTarget.participantId)
+      .filter(([participantId]) => {
+        return !data.matrix.some(
+          (track) =>
+            track.trackCode === editCell.trackCode &&
+            track.cells.some(
+              (cell) =>
+                cell.round !== editCell.round &&
+                cell.participantId === participantId,
+            ),
+        );
+      })
+      .map(([participantId, participantName]) => ({
+        participantId,
+        participantName,
+      }))
+      .sort((left, right) =>
+        left.participantName.localeCompare(right.participantName),
+      );
+  }, [data.matrix, editCell, editTarget]);
+
+  useEffect(() => {
+    if (!editCell) {
+      return;
+    }
+    setEditError("");
+    if (
+      editCandidates.length > 0 &&
+      !editCandidates.some(
+        (candidate) => candidate.participantId === editCandidate,
+      )
+    ) {
+      setEditCandidate(editCandidates[0].participantId);
+    }
+  }, [editCandidate, editCandidates, editCell]);
 
   if (data.status === "No event") {
     return (
@@ -255,6 +329,12 @@ export function PlannerView({
                       ? "Only the sample participant's assignments are visible."
                       : "Each cell shows who works on the track in that round. The letter marks the owner group. No one gets their own track or the same track twice."}
                   </p>
+                  {canEdit ? (
+                    <p className="field-help">
+                      Click a cell to change the holder. The two assignments in
+                      that round swap, and the planner validates the result.
+                    </p>
+                  ) : null}
                   <p id="matrix-scroll-help" className="visually-hidden">
                     Scroll both axes. Use the arrow keys when the matrix has focus.
                   </p>
@@ -304,6 +384,26 @@ export function PlannerView({
                                     <span className="visually-hidden">No assignment</span>
                                   </span>
                                 )
+                              ) : canEdit ? (
+                                <button
+                                  type="button"
+                                  className="matrix-edit"
+                                  aria-label={`Edit Round ${cell.round + 1} track ${cell.trackCode}, current holder ${cell.participantName}`}
+                                  onClick={() =>
+                                    setEditCell({
+                                      round: cell.round,
+                                      trackCode: cell.trackCode,
+                                    })
+                                  }
+                                >
+                                  {shortName(cell.participantName)}
+                                  {shortName(cell.participantName) === cell.participantName ? null : (
+                                    <span className="visually-hidden">
+                                      {" "}
+                                      ({cell.participantName})
+                                    </span>
+                                  )}
+                                </button>
                               ) : (
                                 <span title={cell.participantName}>
                                   {shortName(cell.participantName)}
@@ -453,6 +553,116 @@ export function PlannerView({
 
           </aside>
         </div>
+      ) : null}
+
+      {editCell ? (
+        <Dialog
+          title={`Change Round ${editCell.round + 1} assignment`}
+          initialFocusId="edit-cancel"
+          onClose={() => {
+            setEditCell(null);
+            setEditError("");
+          }}
+          footer={
+            <>
+              <Button
+                id="edit-cancel"
+                variant="secondary"
+                onClick={() => {
+                  setEditCell(null);
+                  setEditError("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={
+                  editBusy ||
+                  !editTarget ||
+                  editCandidates.length === 0 ||
+                  editCandidate.length === 0
+                }
+                onClick={async () => {
+                  if (!editCell || !editCandidate) {
+                    return;
+                  }
+                  setEditBusy(true);
+                  setEditError("");
+                  try {
+                    await onEditAssignment(
+                      editCell.round,
+                      editCell.trackCode,
+                      editCandidate,
+                    );
+                    setEditCell(null);
+                  } catch (error) {
+                    setEditError(
+                      error instanceof Error
+                        ? error.message
+                        : String(error),
+                    );
+                  } finally {
+                    setEditBusy(false);
+                  }
+                }}
+              >
+                Save change
+              </Button>
+            </>
+          }
+        >
+          {editTarget ? (
+            <>
+              <p>
+                Track <code>{editCell.trackCode}</code> in Round{" "}
+                {editCell.round + 1} is held by{" "}
+                <strong>{editTarget.participantName}</strong>. Choose the new
+                holder. The two people swap tracks in this round.
+              </p>
+              {editCandidates.length === 0 ? (
+                <p className="dialog__meta">
+                  No valid swap exists. This plan already uses every eligible
+                  person-and-track pairing. Replace the draft to change the
+                  structure, or shorten the plan.
+                </p>
+              ) : (
+                <label className="field">
+                  <span className="dialog__label">New holder</span>
+                  <select
+                    className="input"
+                    value={editCandidate}
+                    onChange={(event) =>
+                      setEditCandidate(event.target.value)
+                    }
+                  >
+                    {editCandidates.map((candidate) => (
+                      <option
+                        key={candidate.participantId}
+                        value={candidate.participantId}
+                      >
+                        {candidate.participantName}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <p className="dialog__meta">
+                The planner blocks an own track, a repeat, or a duplicate in the
+                round. The change creates a new plan version and commitment.
+              </p>
+              {editError ? (
+                <p className="dialog__error" role="alert">
+                  {editError}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="dialog__error" role="alert">
+              That assignment is no longer in the plan. Reload the planner.
+            </p>
+          )}
+        </Dialog>
       ) : null}
 
       {confirmReplace ? (

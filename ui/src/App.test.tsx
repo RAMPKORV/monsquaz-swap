@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
-import { loadRevealPackage, resetDemoReveal } from "./data/client";
+import {
+  loadRevealPackage,
+  resetDemoPlan,
+  resetDemoReveal,
+} from "./data/client";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -20,6 +24,7 @@ function setUrl(search: string) {
 beforeEach(() => {
   window.sessionStorage.clear();
   resetDemoReveal();
+  resetDemoPlan();
   setUrl("?demo=1");
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -249,6 +254,31 @@ describe("App", () => {
     expect(within(dialog).getByText("Track S7F3A · round 3")).toBeInTheDocument();
     expect(
       screen.queryByText("Reveal published to the reveal channel."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("changes one assignment before the schedule is locked", async () => {
+    setUrl("?demo=1&view=plan&state=dense");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Schedule planner" });
+    fireEvent.click(
+      screen.getAllByRole("button", { name: /Edit Round 1 track/ })[0],
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Change Round 1 assignment",
+    });
+    const select = within(dialog).getByLabelText("New holder");
+    const options = within(select).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    fireEvent.change(select, { target: { value: options[1].getAttribute("value") } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save change" }),
+    );
+    expect(
+      await screen.findByText("Schedule saved as a new version."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Change Round 1 assignment" }),
     ).not.toBeInTheDocument();
   });
 

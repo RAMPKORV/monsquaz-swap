@@ -102,6 +102,15 @@ deadline reaches
   → no silent auto-advance
 ```
 
+## Manual schedule edits
+
+A host can change one assignment before the event starts. The engine swaps the
+two people in that round, validates the whole plan, and writes a new plan
+version with a new commitment. The previous version stays. A complete classic
+plan has no valid single-cell swap, because every legal pairing is already
+used. The UI then reports that no valid swap exists and offers a new draft or a
+shorter plan. See `docs/adr/0005-manual-schedule-edits.md`.
+
 ## Simulation
 
 `swap-sim` drives the real classic engine with deterministic participants:

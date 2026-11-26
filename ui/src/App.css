@@ -2449,6 +2449,28 @@ select.input {
   color: var(--muted);
 }
 
+.matrix-edit {
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matrix-edit:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.matrix-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .matrix-you {
   color: var(--accent);
   font-weight: 600;
@@ -2986,6 +3008,19 @@ select.input {
   margin: 10px 0 0;
   color: var(--faint-raised);
   font-size: 11.5px;
+}
+
+.dialog__label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dialog__error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 12px;
 }
 
 .dialog__danger-action {

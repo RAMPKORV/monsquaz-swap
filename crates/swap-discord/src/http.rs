@@ -329,8 +329,7 @@ fn map_api_code(code: u64) -> DiscordError {
     match code {
         10013 => DiscordError::UnknownUser,
         50007 => DiscordError::DmClosed,
-        50001 | 50002 => DiscordError::NoMutualGuild,
-        50013 => DiscordError::Other("Discord says the bot lacks permission".to_string()),
+        50001 | 50002 | 50013 => DiscordError::MissingAccess,
         code => DiscordError::Other(format!("Discord API error {code}")),
     }
 }
@@ -351,6 +350,8 @@ pub struct HttpAttachmentFetcher {
 impl HttpAttachmentFetcher {
     pub fn new() -> Result<Self, AttachmentError> {
         let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| AttachmentError::Transport(error.to_string()))?;
         Ok(Self { client })
@@ -388,20 +389,34 @@ impl AttachmentFetcher for HttpAttachmentFetcher {
         {
             return Err(AttachmentError::TooLarge);
         }
-        let bytes = response
-            .bytes()
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
-        if bytes.len() as u64 > max_bytes {
-            return Err(AttachmentError::TooLarge);
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?
+        {
+            if bytes.len() as u64 + chunk.len() as u64 > max_bytes {
+                return Err(AttachmentError::TooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
         }
-        Ok(bytes.to_vec())
+        Ok(bytes)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_attachment_fetcher_refuses_a_foreign_url() {
+        let fetcher = HttpAttachmentFetcher::new().unwrap();
+        assert_eq!(
+            fetcher.fetch("http://localhost/file", 10).await,
+            Err(AttachmentError::InvalidUrl)
+        );
+    }
 
     #[test]
     fn a_filename_cannot_escape_the_store() {
@@ -415,9 +430,9 @@ mod tests {
     fn discord_error_codes_are_classified() {
         assert_eq!(map_api_code(10013), DiscordError::UnknownUser);
         assert_eq!(map_api_code(50007), DiscordError::DmClosed);
-        assert_eq!(map_api_code(50001), DiscordError::NoMutualGuild);
-        assert_eq!(map_api_code(50002), DiscordError::NoMutualGuild);
-        assert!(matches!(map_api_code(50013), DiscordError::Other(_)));
+        assert_eq!(map_api_code(50001), DiscordError::MissingAccess);
+        assert_eq!(map_api_code(50002), DiscordError::MissingAccess);
+        assert_eq!(map_api_code(50013), DiscordError::MissingAccess);
     }
 
     #[test]

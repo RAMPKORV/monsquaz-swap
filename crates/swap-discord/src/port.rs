@@ -101,6 +101,8 @@ pub enum DiscordError {
     NoMutualGuild,
     #[error("the Discord user does not exist")]
     UnknownUser,
+    #[error("Discord says the bot lacks access")]
+    MissingAccess,
     #[error("Discord rate-limited the request")]
     RateLimited,
     #[error("transport error: {0}")]
@@ -219,6 +221,7 @@ struct FakeState {
     edits: Vec<EditedMessage>,
     inbound: Vec<(DiscordUserId, InboundDm)>,
     fail_next_dm: Option<DiscordError>,
+    fail_next_thread: Option<DiscordError>,
 }
 
 #[derive(Debug, Default)]
@@ -238,6 +241,10 @@ impl FakeDiscord {
 
     pub fn fail_next_dm(&self, error: DiscordError) {
         self.lock().fail_next_dm = Some(error);
+    }
+
+    pub fn fail_next_thread(&self, error: DiscordError) {
+        self.lock().fail_next_thread = Some(error);
     }
 
     pub fn sent_dms(&self) -> Vec<SentDm> {
@@ -347,6 +354,9 @@ impl DiscordPort for FakeDiscord {
         name: &str,
     ) -> Result<DiscordChannelId, DiscordError> {
         let mut state = self.lock();
+        if let Some(error) = state.fail_next_thread.take() {
+            return Err(error);
+        }
         let thread_id = DiscordChannelId::new(format!("thread-{}", state.next_id + 1));
         state.next_id += 1;
         state.threads.push(CreatedThread {

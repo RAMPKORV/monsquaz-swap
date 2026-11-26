@@ -20,7 +20,7 @@ default = ["live"]
 live = ["swap-discord/live"]
 
 [dependencies]
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "time"] }
 keyring = "4"
 async-trait = "0.1"
 tauri = { version = "2.12.7", features = ["tray-icon"] }

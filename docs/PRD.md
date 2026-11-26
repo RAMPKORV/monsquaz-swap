@@ -253,7 +253,7 @@ named command. IDs are stable.
 
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
-| REQ-OPS-001 | must | State SHALL persist in SQLite (WAL) with automatic backups and a restore wizard; the app SHALL recover from a crash without duplicate sends/transitions. | `ops.feature` |
+| REQ-OPS-001 | must | State SHALL persist in SQLite (WAL) with automatic backups and a restore wizard; the app SHALL recover from a crash without duplicate transitions. Delivery SHALL be at least once. A crash after Discord accepts a send can repeat that send until transport reconciliation lands. | `ops.feature` |
 | REQ-OPS-002 | must | The app SHALL be single-instance and SHALL keep the bot running in the tray until explicit Quit. | `ops.feature` |
 | REQ-OPS-003 | must | Every host override, mapping access, and security-relevant event SHALL be recorded in an append-only audit log. | `ops.feature` |
 | REQ-OPS-004 | must | The app SHALL expose a participant view preview and a host dry-run simulator. | `ops.feature` |

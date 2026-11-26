@@ -33,9 +33,13 @@ impl GatewayHost {
 
     pub async fn shutdown(self) -> Result<(), String> {
         let _ = self.stop.send(true);
-        self.task
-            .await
-            .map_err(|error| error.to_string())?
-            .map_err(|error| error.to_string())
+        match self.task.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                eprintln!("the Discord gateway stopped with an error: {error}");
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
+        }
     }
 }

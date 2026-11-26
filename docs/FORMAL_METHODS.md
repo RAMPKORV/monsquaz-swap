@@ -54,7 +54,7 @@ describes.
 | Anonymity projections | `swap-sim` outbound audit | partial |
 | Classic schedule | `SwapSchedule.tla` | after planner repair |
 | Async queue | `SwapAsync.tla` | after async queue |
-| Delivery idempotency | `specs/tla/SwapDelivery.tla` | implemented |
+| Delivery terminal safety | `specs/tla/SwapDelivery.tla` | implemented |
 | Reveal gate | `SwapReveal.tla` | after reveal presenter |
 
 ## Invariants
@@ -78,14 +78,17 @@ The delivery model checks:
 - `SentWereEnqueued`: a sent effect was enqueued first.
 - `AckedWereSent`: an acknowledgement refers to a sent effect.
 - `AckedWereEnqueued`: an acknowledgement refers to an enqueued effect.
-- `NoLostEffect`: every enqueued effect is pending or acknowledged.
+- `NoLostEffect`: every enqueued effect is pending, acknowledged, or failed.
+- `FailedWereEnqueued`: a failed effect was enqueued first.
+- `FailedWereAlerted`: every failed effect queued a host alert.
+- `TerminalExclusive`: an effect is not both acknowledged and failed.
 - `UniqueKeys`: dedupe keys are unique.
 - `AttemptsBounded`: the attempt counter stays within the bound.
 - `TypeOK`: every variable has the expected shape.
 
 A restart is a stuttering step because the outbox and event state live in
-SQLite. The model proves safety across duplicate sends and lost responses; it
-does not prove wall-clock liveness.
+SQLite. The model proves safety across duplicate sends, lost responses, and
+the retry cap. It does not prove wall-clock liveness.
 
 ## Model-checking bounds
 
@@ -97,7 +100,7 @@ does not prove wall-clock liveness.
 | Delivery nightly | 4 effects | 3 attempts | 20 minutes |
 
 The claim PR model has 750 distinct states and the nightly model has 2,338,158.
-The delivery PR model has 216 distinct states and the nightly model has 4,096.
+The delivery PR model has 343 distinct states and the nightly model has 6,561.
 The nightly timeout is a hard ceiling. If a model exceeds its budget, reduce the
 scope or use Apalache. A skipped model must be reported, never silently
 ignored.
@@ -110,8 +113,9 @@ TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
 `NoOwnTrack`, `NoOwnOffer`, `AtMostOneOfferPerTrack`,
 `AtMostOneOfferPerPerson`, `AtMostOneActivePerPerson`, and
 `NoExpiredReoffer`, plus `AckedWereSent`, `SentWereEnqueued`, `UniqueKeys`,
-`NoLostEffect`, `AttemptsBounded`, and the delivery `TypeOK`. A parse error or
-an unrelated failure is not counted as a detected mutation.
+`NoLostEffect`, `FailedWereAlerted`, `AttemptsBounded`, and the delivery
+`TypeOK`. A parse error or an unrelated failure is not counted as a detected
+mutation.
 
 ## Conformance
 

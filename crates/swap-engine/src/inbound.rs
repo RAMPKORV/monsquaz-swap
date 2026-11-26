@@ -1,10 +1,12 @@
 //! Inbound Discord handler for the classic delivery loop.
 //!
-//! The handler downloads attachments immediately, submits them through the
-//! engine, and drains the durable outbox. It never stores or forwards the
-//! Discord CDN URL.
+//! The handler downloads attachments immediately and submits them through the
+//! engine. It wakes the outbox dispatcher after each event. It never stores or
+//! forwards the Discord CDN URL.
 
 use std::sync::{Arc, Mutex};
+
+use tokio::sync::Notify;
 
 use async_trait::async_trait;
 use swap_db::{AssignmentRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
@@ -15,11 +17,12 @@ use swap_discord::{
 use swap_files::BlobStore;
 
 use crate::clock::Clock;
-use crate::delivery::DeliveryWorker;
-use crate::engine::{EngineError, SubmitRequest, claim, skip, submit};
+use crate::delivery::{DeliveryReport, DeliveryWorker};
+use crate::engine::{EngineError, SubmissionSource, SubmitRequest, claim, skip, submit_attachment};
 use crate::prepare::DeliveryPreparer;
 use crate::settings::EventSettings;
 
+#[derive(Clone)]
 pub struct InboundService {
     db: Arc<Mutex<Db>>,
     store: BlobStore,
@@ -28,6 +31,7 @@ pub struct InboundService {
     fetcher: Arc<dyn AttachmentFetcher>,
     clock: Arc<dyn Clock>,
     worker: DeliveryWorker,
+    wake: Arc<Notify>,
 }
 
 impl InboundService {
@@ -48,7 +52,12 @@ impl InboundService {
             fetcher,
             clock,
             worker,
+            wake: Arc::new(Notify::new()),
         }
+    }
+
+    pub fn wake_notifier(&self) -> Arc<Notify> {
+        self.wake.clone()
     }
 
     pub fn with_alert_channel(mut self, channel_id: Option<String>) -> Self {
@@ -75,6 +84,13 @@ impl InboundService {
         self.clock.now()
     }
 
+    pub async fn drain_pending(&self) -> Result<DeliveryReport, String> {
+        self.worker
+            .drain(self.discord.as_ref(), self.now(), 100)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn backfill(&self) -> Result<usize, String> {
         let cursors = {
             let db = self.lock();
@@ -84,32 +100,46 @@ impl InboundService {
         for cursor in cursors {
             let user = DiscordUserId::new(cursor.user_id.clone());
             let after = cursor.last_seen_message_id.as_ref().map(MessageId::new);
-            let messages = self
-                .discord
-                .fetch_dm_after(&user, after.as_ref())
-                .await
-                .map_err(|error| error.to_string())?;
+            let messages = match self.discord.fetch_dm_after(&user, after.as_ref()).await {
+                Ok(messages) => messages,
+                Err(error) => {
+                    eprintln!("DM backfill failed for one participant: {error}");
+                    continue;
+                }
+            };
             for message in messages {
+                let mut complete = true;
                 for attachment in &message.attachments {
-                    self.attachment(
-                        &cursor.user_id,
-                        &cursor.channel_id,
-                        &message.message_id.0,
-                        attachment,
-                    )
-                    .await?;
-                    handled += 1;
+                    match self
+                        .attachment(
+                            &cursor.user_id,
+                            &cursor.channel_id,
+                            &message.message_id.0,
+                            attachment,
+                        )
+                        .await
+                    {
+                        Ok(()) => handled += 1,
+                        Err(error) => {
+                            eprintln!("DM backfill attachment failed: {error}");
+                            complete = false;
+                        }
+                    }
+                }
+                if !complete {
+                    continue;
                 }
                 let now = self.now();
                 let db = self.lock();
-                DmCursorRepo::upsert(
+                if let Err(error) = DmCursorRepo::upsert(
                     db.conn(),
                     &cursor.user_id,
                     &cursor.channel_id,
                     Some(&message.message_id.0),
                     now,
-                )
-                .map_err(|error| error.to_string())?;
+                ) {
+                    eprintln!("DM backfill cursor update failed: {error}");
+                }
             }
         }
         Ok(handled)
@@ -207,10 +237,12 @@ impl InboundService {
         let event_id = event.id.clone();
         let user = user_id.to_string();
         let filename = attachment.filename.clone();
+        let source_message = message_id.to_string();
+        let source_attachment = attachment.id.clone();
         let now = self.now();
         let outcome = tokio::task::spawn_blocking(move || {
             let db = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            submit(
+            submit_attachment(
                 &db,
                 &store,
                 preparer.as_ref(),
@@ -220,6 +252,10 @@ impl InboundService {
                     filename: &filename,
                     bytes: &bytes,
                 },
+                SubmissionSource {
+                    message_id: &source_message,
+                    attachment_id: &source_attachment,
+                },
                 now,
             )
         })
@@ -227,13 +263,8 @@ impl InboundService {
         .map_err(|error| error.to_string())?;
 
         match outcome {
-            Ok(_) => {
-                self.mark_processed(user_id, message_id, &attachment.id)?;
+            Ok(_) | Err(EngineError::AttachmentAlreadyProcessed) => {
                 self.update_cursor(user_id, channel_id, message_id)?;
-                self.worker
-                    .drain(self.discord.as_ref(), self.now(), 100)
-                    .await
-                    .map_err(|error| error.to_string())?;
                 Ok(())
             }
             Err(error) if terminal_submit(&error) => {
@@ -288,13 +319,7 @@ impl InboundService {
         .await
         .map_err(|error| error.to_string())?;
         match outcome {
-            Ok(_) => {
-                self.worker
-                    .drain(self.discord.as_ref(), self.now(), 100)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(error) if terminal_claim(&error) => {
                 self.notify(user_id, &claim_message(&error)).await;
                 Ok(())
@@ -315,13 +340,7 @@ impl InboundService {
         .await
         .map_err(|error| error.to_string())?;
         match outcome {
-            Ok(_) => {
-                self.worker
-                    .drain(self.discord.as_ref(), self.now(), 100)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(error) => {
                 self.notify(user_id, &format!("The skip failed: {error}"))
                     .await;
@@ -373,9 +392,14 @@ impl InboundService {
     }
 }
 
-#[async_trait]
-impl InboundHandler for InboundService {
-    async fn handle(&self, event: InboundEvent) -> Result<(), String> {
+impl InboundService {
+    pub async fn process(&self, event: InboundEvent) -> Result<(), String> {
+        let result = self.process_inner(event).await;
+        self.wake.notify_one();
+        result
+    }
+
+    async fn process_inner(&self, event: InboundEvent) -> Result<(), String> {
         match event {
             InboundEvent::DmAttachment {
                 user_id,
@@ -432,6 +456,19 @@ impl InboundHandler for InboundService {
             },
             _ => Ok(()),
         }
+    }
+}
+
+#[async_trait]
+impl InboundHandler for InboundService {
+    async fn handle(&self, event: InboundEvent) -> Result<(), String> {
+        let service = self.clone();
+        tokio::spawn(async move {
+            if let Err(error) = service.process(event).await {
+                eprintln!("inbound event failed: {error}");
+            }
+        });
+        Ok(())
     }
 }
 

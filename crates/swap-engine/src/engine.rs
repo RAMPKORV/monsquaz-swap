@@ -5,7 +5,7 @@ use swap_core::{
 use swap_db::{
     AssignmentRecord, AssignmentRepo, Connection, Db, DbError, EventRecord, EventRepo, FileRecord,
     FileRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    SeenRepo, TrackRecord, TrackRepo, Transaction,
+    ProcessedAttachmentRepo, SeenRepo, TrackRecord, TrackRepo, Transaction, TransactionBehavior,
 };
 use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
 use thiserror::Error;
@@ -98,6 +98,8 @@ pub enum EngineError {
     FormatChange { current: String, submitted: String },
     #[error("the reveal is blocked by {count} active assignments")]
     PendingAssignments { count: usize, ids: Vec<String> },
+    #[error("the attachment was already processed")]
+    AttachmentAlreadyProcessed,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +119,12 @@ pub struct SubmitRequest<'a> {
     pub user_id: &'a str,
     pub filename: &'a str,
     pub bytes: &'a [u8],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SubmissionSource<'a> {
+    pub message_id: &'a str,
+    pub attachment_id: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -697,6 +705,7 @@ pub fn claim(
         "Track {}. Your turn. Due at {next_due} UTC.",
         assignment.track_code
     );
+    let bytes = store.read(&current.sha256)?;
     let pending = PendingDelivery::File {
         user_id: user_id.to_string(),
         track_code: assignment.track_code.clone(),
@@ -706,7 +715,9 @@ pub fn claim(
     };
 
     let transaction = begin(db)?;
-    AssignmentRepo::claim(&transaction, assignment.id.as_str(), now, next_due, now)?;
+    if !AssignmentRepo::claim(&transaction, assignment.id.as_str(), now, next_due, now)? {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
     SeenRepo::record(
         &transaction,
         event_id,
@@ -724,7 +735,6 @@ pub fn claim(
     enqueue_pending(&transaction, event_id, &pending, now)?;
     commit(transaction)?;
 
-    let bytes = store.read(&current.sha256)?;
     let effects = vec![Effect::TrackFile {
         user_id: user_id.to_string(),
         track_code: assignment.track_code.clone(),
@@ -746,6 +756,28 @@ pub fn submit(
     store: &BlobStore,
     preparer: &dyn DeliveryPreparer,
     request: &SubmitRequest<'_>,
+    now: i64,
+) -> Result<SubmitOutcome, EngineError> {
+    submit_inner(db, store, preparer, request, None, now)
+}
+
+pub fn submit_attachment(
+    db: &Db,
+    store: &BlobStore,
+    preparer: &dyn DeliveryPreparer,
+    request: &SubmitRequest<'_>,
+    source: SubmissionSource<'_>,
+    now: i64,
+) -> Result<SubmitOutcome, EngineError> {
+    submit_inner(db, store, preparer, request, Some(source), now)
+}
+
+fn submit_inner(
+    db: &Db,
+    store: &BlobStore,
+    preparer: &dyn DeliveryPreparer,
+    request: &SubmitRequest<'_>,
+    source: Option<SubmissionSource<'_>>,
     now: i64,
 ) -> Result<SubmitOutcome, EngineError> {
     let event = load_event(db, request.event_id)?;
@@ -801,7 +833,9 @@ pub fn submit(
     };
     let transaction = begin(db)?;
     FileRepo::insert(&transaction, &file)?;
-    AssignmentRepo::submit(&transaction, &assignment.id, now, now)?;
+    if !AssignmentRepo::submit(&transaction, &assignment.id, now, now)? {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
     SeenRepo::record(
         &transaction,
         request.event_id,
@@ -816,6 +850,17 @@ pub fn submit(
         &assignment.track_code,
         TrackState::Submitted,
     )?;
+    if let Some(source) = source
+        && !ProcessedAttachmentRepo::mark(
+            &transaction,
+            request.user_id,
+            source.message_id,
+            source.attachment_id,
+            now,
+        )?
+    {
+        return Err(EngineError::AttachmentAlreadyProcessed);
+    }
     enqueue_effect(&transaction, request.event_id, &receipt, now)?;
     commit(transaction)?;
 
@@ -1000,7 +1045,10 @@ pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError>
 }
 
 fn begin(db: &Db) -> Result<Transaction<'_>, EngineError> {
-    Ok(db.conn().unchecked_transaction().map_err(DbError::from)?)
+    Ok(
+        Transaction::new_unchecked(db.conn(), TransactionBehavior::Immediate)
+            .map_err(DbError::from)?,
+    )
 }
 
 fn commit(transaction: Transaction<'_>) -> Result<(), EngineError> {

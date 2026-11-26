@@ -778,7 +778,7 @@ async fn an_attachment_is_downloaded_stored_and_processed_once() {
     use swap_db::ProcessedAttachmentRepo;
     use swap_discord::{
         DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
-        InboundHandler, MessageId,
+        MessageId,
     };
     use swap_engine::{FixedClock, InboundService};
 
@@ -834,7 +834,8 @@ async fn an_attachment_is_downloaded_stored_and_processed_once() {
             url: url.to_string(),
         },
     };
-    service.handle(event.clone()).await.unwrap();
+    service.process(event.clone()).await.unwrap();
+    service.drain_pending().await.unwrap();
 
     let versions = {
         let db = db.lock().unwrap();
@@ -852,7 +853,7 @@ async fn an_attachment_is_downloaded_stored_and_processed_once() {
         assert!(ProcessedAttachmentRepo::is_processed(db.conn(), &user_id, "m-1", "a-1").unwrap());
     }
 
-    service.handle(event).await.unwrap();
+    service.process(event).await.unwrap();
     let versions = {
         let db = db.lock().unwrap();
         FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
@@ -865,8 +866,7 @@ async fn a_claim_command_delivers_the_claimed_file_from_the_outbox() {
     use std::sync::{Arc, Mutex};
 
     use swap_discord::{
-        DiscordUserId, FakeAttachmentFetcher, InboundEvent, InboundHandler, InteractionRef,
-        SlashCommand,
+        DiscordUserId, FakeAttachmentFetcher, InboundEvent, InteractionRef, SlashCommand,
     };
     use swap_engine::{FixedClock, InboundService};
 
@@ -896,7 +896,7 @@ async fn a_claim_command_delivers_the_claimed_file_from_the_outbox() {
         Arc::new(FixedClock(T5)),
     );
     service
-        .handle(InboundEvent::SlashCommand {
+        .process(InboundEvent::SlashCommand {
             interaction: InteractionRef::new("i-1", "token"),
             user_id: DiscordUserId::new(user_id),
             guild_id: None,
@@ -905,6 +905,7 @@ async fn a_claim_command_delivers_the_claimed_file_from_the_outbox() {
         })
         .await
         .unwrap();
+    service.drain_pending().await.unwrap();
 
     assert_eq!(discord.sent_files().len(), 1);
 }
@@ -986,7 +987,7 @@ async fn an_offer_holder_cannot_submit_before_a_claim() {
 
     use swap_discord::{
         DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
-        InboundHandler, MessageId,
+        MessageId,
     };
     use swap_engine::{FixedClock, InboundService};
 
@@ -1015,7 +1016,7 @@ async fn an_offer_holder_cannot_submit_before_a_claim() {
         Arc::new(FixedClock(T5)),
     );
     service
-        .handle(InboundEvent::DmAttachment {
+        .process(InboundEvent::DmAttachment {
             user_id: DiscordUserId::new(user_id),
             channel_id: DiscordChannelId::new("dm-1"),
             message_id: MessageId::new("m-1"),
@@ -1035,4 +1036,55 @@ async fn an_offer_holder_cannot_submit_before_a_claim() {
             .iter()
             .any(|sent| sent.message.content.contains("no active track"))
     );
+}
+
+#[test]
+fn an_attachment_source_is_marked_in_the_submit_transaction() {
+    let fixture = Fixture::new(3, 0);
+    let assignments = fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let bytes = seed_bytes(55);
+    let request = SubmitRequest {
+        event_id: EVENT,
+        user_id: &user_id,
+        filename: "edit.it",
+        bytes: &bytes,
+    };
+    let source = swap_engine::SubmissionSource {
+        message_id: "m-1",
+        attachment_id: "a-1",
+    };
+    swap_engine::submit_attachment(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &request,
+        source,
+        T5,
+    )
+    .unwrap();
+    let error = swap_engine::submit_attachment(
+        &fixture.db,
+        &fixture.store,
+        &PassthroughPreparer,
+        &request,
+        source,
+        T5,
+    )
+    .unwrap_err();
+    assert!(matches!(error, EngineError::AttachmentAlreadyProcessed));
+    let versions = FileRepo::list_for_track(fixture.db.conn(), EVENT, &track_code).unwrap();
+    assert_eq!(versions.len(), 2);
+    assert!(!assignments.is_empty());
 }

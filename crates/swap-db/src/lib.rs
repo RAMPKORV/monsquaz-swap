@@ -15,4 +15,4 @@ pub use repos::{
     MetaRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     PrivacyRepo, ProcessedAttachmentRepo, SeenPairRecord, SeenRepo, TrackRecord, TrackRepo,
 };
-pub use rusqlite::{Connection, Transaction};
+pub use rusqlite::{Connection, Transaction, TransactionBehavior};

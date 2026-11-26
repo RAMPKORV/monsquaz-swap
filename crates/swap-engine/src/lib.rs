@@ -21,10 +21,10 @@ pub use delivery::{
 pub use effects::{Effect, dispatch};
 pub use engine::{
     ClaimOutcome, CreditEntry, EngineError, EventStatus, ExpireOutcome, JoinOutcome, JoinRequest,
-    LockOutcome, OpenRoundOutcome, RevealOutcome, ScheduleOutcome, SkipOutcome, SubmitOutcome,
-    SubmitRequest, TrackCredits, claim, create_event, event_status, expire_offer,
+    LockOutcome, OpenRoundOutcome, RevealOutcome, ScheduleOutcome, SkipOutcome, SubmissionSource,
+    SubmitOutcome, SubmitRequest, TrackCredits, claim, create_event, event_status, expire_offer,
     generate_schedule, join_with_seed, lock_roster, open_round, reveal, signup, skip, start_event,
-    submit,
+    submit, submit_attachment,
 };
 pub use ids::{assignment_id, plan_commitment, track_code};
 pub use inbound::InboundService;

@@ -185,6 +185,13 @@ CREATE TABLE processed_attachments (
     PRIMARY KEY (user_id, message_id, attachment_id)
 ) STRICT;
 "#,
+    r#"
+-- Migration 005: separate recipient index for privacy deletion, and an
+-- outbound DM cursor that cannot consume inbound attachments.
+ALTER TABLE deliveries ADD COLUMN recipient_id TEXT;
+CREATE INDEX deliveries_by_recipient ON deliveries(recipient_id);
+ALTER TABLE dm_cursors ADD COLUMN last_sent_message_id TEXT;
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

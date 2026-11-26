@@ -1227,8 +1227,7 @@ pub fn host_settings(app: AppHandle) -> Result<SettingsDto, String> {
     read_settings(&app)
 }
 
-#[tauri::command]
-pub fn save_host_settings(
+pub(crate) fn save_settings_values(
     app: AppHandle,
     mut settings: SettingsDto,
 ) -> Result<SettingsDto, String> {

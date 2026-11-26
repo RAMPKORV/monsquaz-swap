@@ -1197,6 +1197,7 @@ impl PrivacyRepo {
 pub struct DeliveryRecord {
     pub id: String,
     pub event_id: String,
+    pub recipient_id: Option<String>,
     pub kind: String,
     pub payload: Vec<u8>,
     pub status: String,
@@ -1211,14 +1212,15 @@ fn row_to_delivery(row: &Row<'_>) -> rusqlite::Result<DeliveryRecord> {
     Ok(DeliveryRecord {
         id: row.get(0)?,
         event_id: row.get(1)?,
-        kind: row.get(2)?,
-        payload: row.get(3)?,
-        status: row.get(4)?,
-        attempts: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
-        sent_at: row.get(8)?,
-        last_error: row.get(9)?,
+        recipient_id: row.get(2)?,
+        kind: row.get(3)?,
+        payload: row.get(4)?,
+        status: row.get(5)?,
+        attempts: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        sent_at: row.get(9)?,
+        last_error: row.get(10)?,
     })
 }
 
@@ -1231,15 +1233,17 @@ impl DeliveryRepo {
         conn: &Connection,
         id: &str,
         event_id: &str,
+        recipient_id: Option<&str>,
         kind: &str,
         payload: &[u8],
         now: i64,
     ) -> Result<bool, DbError> {
         let changed = conn.execute(
-            "INSERT OR IGNORE INTO deliveries
-                (id, event_id, kind, payload, status, attempts, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?5)",
-            params![id, event_id, kind, payload, now],
+            "INSERT INTO deliveries
+                (id, event_id, recipient_id, kind, payload, status, attempts, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', 0, ?6, ?6)
+             ON CONFLICT(id) DO NOTHING",
+            params![id, event_id, recipient_id, kind, payload, now],
         )?;
         Ok(changed > 0)
     }
@@ -1247,8 +1251,8 @@ impl DeliveryRepo {
     pub fn get(conn: &Connection, id: &str) -> Result<Option<DeliveryRecord>, DbError> {
         let row = conn
             .query_row(
-                "SELECT id, event_id, kind, payload, status, attempts, created_at, updated_at,
-                        sent_at, last_error
+                "SELECT id, event_id, recipient_id, kind, payload, status, attempts, created_at,
+                        updated_at, sent_at, last_error
                  FROM deliveries WHERE id = ?1",
                 params![id],
                 row_to_delivery,
@@ -1259,15 +1263,22 @@ impl DeliveryRepo {
 
     pub fn pending(conn: &Connection, limit: usize) -> Result<Vec<DeliveryRecord>, DbError> {
         let mut statement = conn.prepare(
-            "SELECT id, event_id, kind, payload, status, attempts, created_at, updated_at,
-                    sent_at, last_error
+            "SELECT id, event_id, recipient_id, kind, payload, status, attempts, created_at,
+                    updated_at, sent_at, last_error
              FROM deliveries WHERE status = 'pending'
-             ORDER BY created_at, id LIMIT ?1",
+             ORDER BY updated_at, id LIMIT ?1",
         )?;
         let rows = statement
             .query_map(params![limit as i64], row_to_delivery)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    pub fn delete_for_recipient(conn: &Connection, recipient_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM deliveries WHERE recipient_id = ?1",
+            params![recipient_id],
+        )?)
     }
 
     pub fn count_pending(conn: &Connection) -> Result<i64, DbError> {
@@ -1337,8 +1348,13 @@ mod delivery_tests {
         let db = Db::open_in_memory().unwrap();
         EventRepo::insert(db.conn(), &event()).unwrap();
 
-        assert!(DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", "dm", b"payload", 10).unwrap());
-        assert!(!DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", "dm", b"payload", 11).unwrap());
+        assert!(
+            DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", None, "dm", b"payload", 10).unwrap()
+        );
+        assert!(
+            !DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", None, "dm", b"payload", 11)
+                .unwrap()
+        );
         assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 1);
 
         let pending = DeliveryRepo::pending(db.conn(), 10).unwrap();
@@ -1359,14 +1375,14 @@ mod delivery_tests {
         EventRepo::insert(db.conn(), &event()).unwrap();
         {
             let tx = db.conn_mut().transaction().unwrap();
-            DeliveryRepo::enqueue(&tx, "rollback", "evt-1", "dm", b"payload", 10).unwrap();
+            DeliveryRepo::enqueue(&tx, "rollback", "evt-1", None, "dm", b"payload", 10).unwrap();
             tx.rollback().unwrap();
         }
         assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
 
         {
             let tx = db.conn_mut().transaction().unwrap();
-            DeliveryRepo::enqueue(&tx, "commit", "evt-1", "dm", b"payload", 11).unwrap();
+            DeliveryRepo::enqueue(&tx, "commit", "evt-1", None, "dm", b"payload", 11).unwrap();
             tx.commit().unwrap();
         }
         assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 1);
@@ -1376,7 +1392,7 @@ mod delivery_tests {
     fn a_failed_attempt_stays_pending_until_the_terminal_failure() {
         let db = Db::open_in_memory().unwrap();
         EventRepo::insert(db.conn(), &event()).unwrap();
-        DeliveryRepo::enqueue(db.conn(), "key-2", "evt-1", "file", b"file", 10).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "key-2", "evt-1", None, "file", b"file", 10).unwrap();
 
         assert!(DeliveryRepo::mark_retry(db.conn(), "key-2", 20, "temporary").unwrap());
         let row = DeliveryRepo::get(db.conn(), "key-2").unwrap().unwrap();
@@ -1396,6 +1412,7 @@ pub struct DmCursorRecord {
     pub user_id: String,
     pub channel_id: String,
     pub last_seen_message_id: Option<String>,
+    pub last_sent_message_id: Option<String>,
     pub updated_at: i64,
 }
 
@@ -1410,11 +1427,19 @@ impl DmCursorRepo {
         now: i64,
     ) -> Result<(), DbError> {
         conn.execute(
-            "INSERT INTO dm_cursors (user_id, channel_id, last_seen_message_id, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO dm_cursors
+                (user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4)
              ON CONFLICT(user_id) DO UPDATE SET
                  channel_id = excluded.channel_id,
-                 last_seen_message_id = COALESCE(excluded.last_seen_message_id, dm_cursors.last_seen_message_id),
+                 last_seen_message_id = CASE
+                     WHEN dm_cursors.last_seen_message_id IS NULL THEN excluded.last_seen_message_id
+                     WHEN excluded.last_seen_message_id IS NULL THEN dm_cursors.last_seen_message_id
+                     WHEN CAST(excluded.last_seen_message_id AS INTEGER)
+                          > CAST(dm_cursors.last_seen_message_id AS INTEGER)
+                         THEN excluded.last_seen_message_id
+                     ELSE dm_cursors.last_seen_message_id
+                 END,
                  updated_at = excluded.updated_at",
             params![user_id, channel_id, last_seen_message_id, now],
         )?;
@@ -1424,7 +1449,7 @@ impl DmCursorRepo {
     pub fn get(conn: &Connection, user_id: &str) -> Result<Option<DmCursorRecord>, DbError> {
         Ok(conn
             .query_row(
-                "SELECT user_id, channel_id, last_seen_message_id, updated_at
+                "SELECT user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at
                  FROM dm_cursors WHERE user_id = ?1",
                 params![user_id],
                 |row| {
@@ -1432,16 +1457,44 @@ impl DmCursorRepo {
                         user_id: row.get(0)?,
                         channel_id: row.get(1)?,
                         last_seen_message_id: row.get(2)?,
-                        updated_at: row.get(3)?,
+                        last_sent_message_id: row.get(3)?,
+                        updated_at: row.get(4)?,
                     })
                 },
             )
             .optional()?)
     }
 
+    pub fn set_sent(
+        conn: &Connection,
+        user_id: &str,
+        channel_id: &str,
+        message_id: &str,
+        now: i64,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO dm_cursors
+                (user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at)
+             VALUES (?1, ?2, NULL, ?3, ?4)
+             ON CONFLICT(user_id) DO UPDATE SET
+                 channel_id = COALESCE(NULLIF(dm_cursors.channel_id, ''), excluded.channel_id),
+                 last_sent_message_id = excluded.last_sent_message_id,
+                 updated_at = excluded.updated_at",
+            params![user_id, channel_id, message_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete(conn: &Connection, user_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM dm_cursors WHERE user_id = ?1",
+            params![user_id],
+        )?)
+    }
+
     pub fn list(conn: &Connection) -> Result<Vec<DmCursorRecord>, DbError> {
         let mut statement = conn.prepare(
-            "SELECT user_id, channel_id, last_seen_message_id, updated_at
+            "SELECT user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at
              FROM dm_cursors ORDER BY user_id",
         )?;
         let rows = statement
@@ -1450,7 +1503,8 @@ impl DmCursorRepo {
                     user_id: row.get(0)?,
                     channel_id: row.get(1)?,
                     last_seen_message_id: row.get(2)?,
-                    updated_at: row.get(3)?,
+                    last_sent_message_id: row.get(3)?,
+                    updated_at: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1476,6 +1530,13 @@ impl ProcessedAttachmentRepo {
             params![user_id, message_id, attachment_id, now],
         )?;
         Ok(changed > 0)
+    }
+
+    pub fn delete_for_user(conn: &Connection, user_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM processed_attachments WHERE user_id = ?1",
+            params![user_id],
+        )?)
     }
 
     pub fn is_processed(

@@ -115,6 +115,9 @@ run_delivery_mutation "attempt leaves the counter unbounded" "AttemptsBounded" \
 run_delivery_mutation "attempt count leaves the naturals" "TypeOK" \
   "attempts' = [attempts EXCEPT ![e] = attempts[e] + 1]" \
   "attempts' = [attempts EXCEPT ![e] = -1]"
+run_delivery_mutation "failure drops the host alert" "FailedWereAlerted" \
+  "alerted' = alerted \\cup {e}" \
+  "UNCHANGED alerted"
 
 if [ "$MODE" = "nightly" ]; then
   echo "TLA+ claim nightly model"

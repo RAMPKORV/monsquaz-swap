@@ -539,6 +539,10 @@ textarea {
   color: var(--muted);
 }
 
+.statusbar__bot {
+  display: none;
+}
+
 .statusbar__spacer {
   flex: 1;
 }
@@ -3381,6 +3385,10 @@ select.input {
     display: none;
   }
 
+  .statusbar__bot {
+    display: inline-flex;
+  }
+
   .nav-item {
     width: auto;
     flex: none;
@@ -3651,11 +3659,6 @@ select.input {
   .statusbar {
     gap: 8px;
     overflow-x: auto;
-  }
-
-  .statusbar__item:nth-child(2),
-  .statusbar__item:nth-child(4) {
-    display: none;
   }
 }
 

@@ -576,6 +576,13 @@ export default function App() {
           </main>
           <footer className="statusbar">
             <span className="statusbar__item">SQLite, local</span>
+            <span className="statusbar__item statusbar__bot">
+              {mission?.bot?.status === "Online"
+                ? "Bot online"
+                : mission?.bot?.status === "Offline"
+                  ? "Bot offline"
+                  : "No bot"}
+            </span>
             <span className="statusbar__spacer" />
             <span className="statusbar__item">
               {view === "plan" && plan

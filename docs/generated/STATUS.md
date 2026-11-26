@@ -5,13 +5,13 @@
 **PRD:** draft v1  
 **Blocked issues:** 11 · **Ready leaves:** 4  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 22
+**Stale scores:** 21
 
 ## Issues by status
 
 | Status | Count |
 |---|---|
-| Triage | 12 |
+| Triage | 11 |
 | Research | 0 |
 | Specification | 0 |
 | Ready for implementation | 10 |
@@ -19,7 +19,7 @@
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 39 |
+| Done | 40 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 

@@ -1230,7 +1230,7 @@ async fn an_active_assignment_wins_over_a_new_signup_event() {
 
     use swap_discord::{
         DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
-        MessageId,
+        InteractionRef, MessageId, SlashCommand,
     };
     use swap_engine::{FixedClock, InboundService};
 
@@ -1268,13 +1268,13 @@ async fn an_active_assignment_wins_over_a_new_signup_event() {
         db.clone(),
         fixture.store.clone(),
         Arc::new(PassthroughPreparer),
-        discord,
+        discord.clone(),
         fetcher,
         Arc::new(FixedClock(T5)),
     );
     service
         .process(InboundEvent::DmAttachment {
-            user_id: DiscordUserId::new(user_id),
+            user_id: DiscordUserId::new(user_id.clone()),
             channel_id: DiscordChannelId::new("dm-1"),
             message_id: MessageId::new("m-edit"),
             author_name: None,
@@ -1297,6 +1297,27 @@ async fn an_active_assignment_wins_over_a_new_signup_event() {
         TrackRepo::list_for_event(db.conn(), "evt-2").unwrap()
     };
     assert!(next_tracks.is_empty());
+    service
+        .process(InboundEvent::SlashCommand {
+            interaction: InteractionRef::new("i-join", "token"),
+            user_id: DiscordUserId::new(user_id.clone()),
+            guild_id: None,
+            command: SlashCommand::Join,
+            options: Default::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        ParticipantRepo::get(db.lock().unwrap().conn(), "evt-2", &user_id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|dm| dm.message.content.contains("already in an active event"))
+    );
 }
 
 #[test]

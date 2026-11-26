@@ -725,6 +725,18 @@ impl InboundService {
                 .await;
             return Ok(());
         };
+        let active = {
+            let db = self.lock();
+            EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        };
+        if active.is_some() {
+            self.notify(
+                user_id,
+                "You are already in an active event. Finish or leave it before you join another.",
+            )
+            .await;
+            return Ok(());
+        }
         let participant = {
             let db = self.lock();
             swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)

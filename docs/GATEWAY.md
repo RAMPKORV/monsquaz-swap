@@ -136,9 +136,9 @@ and one acknowledgement.
 - `host_reveal` checks the reveal gate and writes one credits message to the
   mapped reveal channel in the same transaction as the state change.
 - `/swap join` records the optional timezone and handoff budget, then sends the
-  seed instructions. It seeds the inbound cursor to the instruction message, so
-  a seed sent during a short outage is backfilled. A seed attachment calls
-  `join_with_seed`.
+  seed instructions. It refuses a user who is active in another event. It seeds
+  the inbound cursor to the instruction message, so a seed sent during a short
+  outage is backfilled. A seed attachment calls `join_with_seed`.
 - The gateway health appears in the mission control and settings views. The
   states are starting, online, reconnecting, stopped, and failed.
 

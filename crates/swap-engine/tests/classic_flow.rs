@@ -968,7 +968,7 @@ async fn backfill_recovers_a_dm_attachment_after_an_outage() {
         fetcher,
         Arc::new(FixedClock(T5)),
     );
-    assert_eq!(service.backfill().await.unwrap(), 1);
+    assert_eq!(service.backfill().await.unwrap().handled, 1);
     let versions = {
         let db = db.lock().unwrap();
         FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
@@ -1056,6 +1056,162 @@ async fn backfill_ignores_an_attachment_from_before_the_claim() {
         )
         .unwrap()
     );
+}
+
+#[tokio::test]
+async fn a_failed_backfill_is_retried_for_the_same_participant() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordError, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundDm, MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    DmCursorRepo::upsert(fixture.db.conn(), &user_id, "dm-1", None, T4).unwrap();
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let url = "https://cdn.discordapp.com/attachments/1/2/retry.it";
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    fetcher.add(url, &seed_bytes(93));
+    discord.push_inbound(
+        DiscordUserId::new(user_id.clone()),
+        InboundDm {
+            message_id: MessageId::new("m-retry"),
+            content: String::new(),
+            attachments: vec![DmAttachment {
+                id: "a-retry".to_string(),
+                filename: "retry.it".to_string(),
+                size: seed_bytes(93).len() as u64,
+                url: url.to_string(),
+            }],
+        },
+    );
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    service.mark_backfill_pending();
+    discord.fail_next_fetch(DiscordError::Transport("offline".to_string()));
+    let report = service.backfill().await.unwrap();
+    assert_eq!(report.failed, 1);
+    assert_eq!(report.handled, 0);
+    assert_eq!(
+        FileRepo::list_for_track(db.lock().unwrap().conn(), EVENT, &track_code)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let report = service.retry_backfill().await.unwrap();
+    assert_eq!(report.failed, 0);
+    assert_eq!(report.handled, 1);
+    assert_eq!(
+        FileRepo::list_for_track(db.lock().unwrap().conn(), EVENT, &track_code)
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn queued_attachments_keep_their_message_order() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
+        InboundHandler, MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    let first = seed_bytes(91);
+    let second = seed_bytes(92);
+    let first_url = "https://cdn.discordapp.com/attachments/1/2/first.it";
+    let second_url = "https://cdn.discordapp.com/attachments/1/2/second.it";
+    fetcher.add(first_url, &first);
+    fetcher.add(second_url, &second);
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord,
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    for (message_id, url, bytes) in [("m-1", first_url, &first), ("m-2", second_url, &second)] {
+        service
+            .handle(InboundEvent::DmAttachment {
+                user_id: DiscordUserId::new(user_id.clone()),
+                channel_id: DiscordChannelId::new("dm-1"),
+                message_id: MessageId::new(message_id),
+                attachment: DmAttachment {
+                    id: format!("a-{message_id}"),
+                    filename: "edit.it".to_string(),
+                    size: bytes.len() as u64,
+                    url: url.to_string(),
+                },
+            })
+            .await
+            .unwrap();
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let count = {
+                let db = db.lock().unwrap();
+                FileRepo::list_for_track(db.conn(), EVENT, &track_code)
+                    .unwrap()
+                    .len()
+            };
+            if count >= 3 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let versions = {
+        let db = db.lock().unwrap();
+        FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
+    };
+    assert_eq!(versions.len(), 3);
+    assert_eq!(versions[2].sha256, sha256_hex(&second));
 }
 
 #[tokio::test]

@@ -4,15 +4,17 @@
 //! engine. It wakes the outbox dispatcher after each event. It never stores or
 //! forwards the Discord CDN URL.
 
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 
 use async_trait::async_trait;
 use swap_db::{AssignmentRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
 use swap_discord::{
-    Action, AttachmentFetcher, DiscordChannelId, DiscordPort, DiscordUserId, DmAttachment,
-    InboundEvent, InboundHandler, MessageId,
+    Action, AttachmentFetcher, DiscordChannelId, DiscordError, DiscordPort, DiscordUserId,
+    DmAttachment, InboundEvent, InboundHandler, MessageId,
 };
 use swap_files::BlobStore;
 
@@ -32,6 +34,22 @@ pub struct InboundService {
     clock: Arc<dyn Clock>,
     worker: DeliveryWorker,
     wake: Arc<Notify>,
+    queues: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<InboundEvent>>>>,
+    backfill_pending: Arc<Mutex<HashSet<String>>>,
+    backfill_notify: Arc<Notify>,
+    backfill_warned: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BackfillReport {
+    pub handled: usize,
+    pub failed: usize,
+}
+
+impl BackfillReport {
+    pub fn complete(&self) -> bool {
+        self.failed == 0
+    }
 }
 
 impl InboundService {
@@ -53,7 +71,87 @@ impl InboundService {
             clock,
             worker,
             wake: Arc::new(Notify::new()),
+            queues: Arc::new(Mutex::new(HashMap::new())),
+            backfill_pending: Arc::new(Mutex::new(HashSet::new())),
+            backfill_notify: Arc::new(Notify::new()),
+            backfill_warned: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Gate live events for every participant with a saved DM cursor until the
+    /// startup backfill for that participant succeeds.
+    pub fn mark_backfill_pending(&self) {
+        let cursors = {
+            let db = self.lock();
+            DmCursorRepo::list(db.conn())
+        };
+        match cursors {
+            Ok(cursors) => {
+                let mut pending = self
+                    .backfill_pending
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                for cursor in cursors {
+                    pending.insert(cursor.user_id);
+                }
+            }
+            Err(error) => eprintln!("DM backfill cursor list failed: {error}"),
+        }
+    }
+
+    fn finish_backfill_user(&self, user_id: &str) {
+        let removed = self
+            .backfill_pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(user_id);
+        if removed {
+            self.backfill_notify.notify_waiters();
+        }
+    }
+
+    async fn wait_for_backfill(&self, user_id: &str) {
+        loop {
+            let pending = self
+                .backfill_pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(user_id);
+            if !pending {
+                return;
+            }
+            let notified = self.backfill_notify.notified();
+            let still_pending = self
+                .backfill_pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(user_id);
+            if !still_pending {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    fn queue_sender(&self, user_id: &str) -> mpsc::UnboundedSender<InboundEvent> {
+        let mut queues = self
+            .queues
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(sender) = queues.get(user_id) {
+            return sender.clone();
+        }
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let service = self.clone();
+        tokio::spawn(async move {
+            while let Some(event) = receiver.recv().await {
+                if let Err(error) = service.process(event).await {
+                    eprintln!("inbound event failed: {error}");
+                }
+            }
+        });
+        queues.insert(user_id.to_string(), sender.clone());
+        sender
     }
 
     pub fn wake_notifier(&self) -> Arc<Notify> {
@@ -91,22 +189,50 @@ impl InboundService {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn backfill(&self) -> Result<usize, String> {
+    pub async fn backfill(&self) -> Result<BackfillReport, String> {
+        self.backfill_users(None).await
+    }
+
+    /// Retry only the participants whose startup backfill has not succeeded.
+    pub async fn retry_backfill(&self) -> Result<BackfillReport, String> {
+        let pending = self
+            .backfill_pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if pending.is_empty() {
+            return Ok(BackfillReport::default());
+        }
+        self.backfill_users(Some(&pending)).await
+    }
+
+    async fn backfill_users(
+        &self,
+        only: Option<&HashSet<String>>,
+    ) -> Result<BackfillReport, String> {
         let cursors = {
             let db = self.lock();
             DmCursorRepo::list(db.conn()).map_err(|error| error.to_string())?
         };
-        let mut handled = 0;
+        let mut report = BackfillReport::default();
         for cursor in cursors {
+            if only.is_some_and(|only| !only.contains(&cursor.user_id)) {
+                continue;
+            }
             let user = DiscordUserId::new(cursor.user_id.clone());
             let after = cursor.last_seen_message_id.as_ref().map(MessageId::new);
             let messages = match self.discord.fetch_dm_after(&user, after.as_ref()).await {
                 Ok(messages) => messages,
                 Err(error) => {
                     eprintln!("DM backfill failed for one participant: {error}");
+                    report.failed += 1;
+                    if permanent_backfill_error(&error) {
+                        self.finish_backfill_user(&cursor.user_id);
+                    }
                     continue;
                 }
             };
+            let mut user_failed = false;
             for message in messages {
                 let mut complete = true;
                 for attachment in &message.attachments {
@@ -119,7 +245,7 @@ impl InboundService {
                         )
                         .await
                     {
-                        Ok(()) => handled += 1,
+                        Ok(()) => report.handled += 1,
                         Err(error) => {
                             eprintln!("DM backfill attachment failed: {error}");
                             complete = false;
@@ -127,7 +253,8 @@ impl InboundService {
                     }
                 }
                 if !complete {
-                    continue;
+                    user_failed = true;
+                    break;
                 }
                 let now = self.now();
                 let db = self.lock();
@@ -139,11 +266,33 @@ impl InboundService {
                     now,
                 ) {
                     eprintln!("DM backfill cursor update failed: {error}");
+                    user_failed = true;
+                    break;
                 }
             }
+            if user_failed {
+                report.failed += 1;
+            } else {
+                self.finish_backfill_user(&cursor.user_id);
+            }
+        }
+        if report.failed > 0 {
+            if !self.backfill_warned.swap(true, Ordering::SeqCst) {
+                self.worker
+                    .notify_host(
+                        self.discord.as_ref(),
+                        &format!(
+                            "DM backfill failed for {} participant(s). The app will retry.",
+                            report.failed
+                        ),
+                    )
+                    .await;
+            }
+        } else {
+            self.backfill_warned.store(false, Ordering::SeqCst);
         }
         self.wake.notify_one();
-        Ok(handled)
+        Ok(report)
     }
 
     async fn handle_attachment(
@@ -399,6 +548,7 @@ impl InboundService {
 
 impl InboundService {
     pub async fn process(&self, event: InboundEvent) -> Result<(), String> {
+        self.wait_for_backfill(&event.user_id().0).await;
         let result = self.process_inner(event).await;
         self.wake.notify_one();
         result
@@ -467,13 +617,10 @@ impl InboundService {
 #[async_trait]
 impl InboundHandler for InboundService {
     async fn handle(&self, event: InboundEvent) -> Result<(), String> {
-        let service = self.clone();
-        tokio::spawn(async move {
-            if let Err(error) = service.process(event).await {
-                eprintln!("inbound event failed: {error}");
-            }
-        });
-        Ok(())
+        let user_id = event.user_id().0.clone();
+        self.queue_sender(&user_id)
+            .send(event)
+            .map_err(|_| "the inbound queue is closed".to_string())
     }
 }
 
@@ -491,6 +638,16 @@ fn message_is_current(message_id: &str, cutoff_secs: i64) -> bool {
     };
     let millis = (id >> 22) as i64 + DISCORD_EPOCH_MS;
     millis / 1000 + CLOCK_SKEW_SECS >= cutoff_secs
+}
+
+fn permanent_backfill_error(error: &DiscordError) -> bool {
+    matches!(
+        error,
+        DiscordError::DmClosed
+            | DiscordError::NoMutualGuild
+            | DiscordError::UnknownUser
+            | DiscordError::MissingAccess
+    )
 }
 
 fn terminal_submit(error: &EngineError) -> bool {

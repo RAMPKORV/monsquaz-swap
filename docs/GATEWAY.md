@@ -111,6 +111,12 @@ Backfill can only visit a participant who has an inbound cursor. Discord does
 not replay a direct message that arrives while the gateway is offline. A
 first-time submitter must send the file again after the gateway reconnects.
 
+Inbound events for one participant run in arrival order. A live event for a
+participant with a saved cursor waits until that participant's startup backfill
+succeeds. The dispatcher retries a failed backfill every 30 seconds and posts
+one host alert for each failure streak. A later message never advances the
+cursor past a failed attachment.
+
 A crash after Discord accepts a send and before the sent mark can duplicate a
 message. The delivery id is stable. A future transport nonce or reconciliation
 step must close that window. The formal delivery model allows duplicate sends

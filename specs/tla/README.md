@@ -63,7 +63,7 @@ unrelated failures. Run `scripts/formal/check.sh`.
 | `sent` | a send attempt was made |
 | `acked` | `deliveries.status = 'sent'` |
 | `failed` | `deliveries.status = 'failed'` |
-| `alerted` | an alert row enqueued by `mark_failed` |
+| `alerted` | a committed `audit_log` row `delivery.failed` |
 | `Key[e]` | `deliveries.id` (the dedupe key) |
 
 The `banned` set is a design requirement. The async queue must add the backing

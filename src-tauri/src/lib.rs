@@ -25,31 +25,51 @@ async fn save_host_settings(
 ) -> Result<host::SettingsDto, String> {
     let before = host::read_settings(&app).unwrap_or_default();
     let _restart = before.dm_fallback != settings.dm_fallback;
-    let saved = host::save_settings_values(app.clone(), settings)?;
     #[cfg(feature = "live")]
-    if _restart {
+    let restart_token = if _restart {
         let live = app.state::<live_runtime::LiveRuntime>();
         if live.is_running() {
-            if let Err(error) = live.stop().await {
-                eprintln!("Discord gateway did not stop: {error}");
-            }
             let token = app
                 .state::<setup_host::BotRuntime>()
                 .current_token()
-                .ok()
-                .flatten();
-            if let Some(token) = token
-                && !saved.guild_id.is_empty()
-                && let Err(error) = live.start(
-                    &app,
-                    token,
-                    saved.guild_id.clone(),
-                    Some(saved.announcement_channel_id.clone()),
-                    saved.dm_fallback,
-                )
-            {
-                eprintln!("Discord gateway did not restart: {error}");
-            }
+                .map_err(|error| format!("the bot token is not available: {error}"))?
+                .ok_or_else(|| "the bot token is not available".to_string())?;
+            Some(token)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let saved = host::save_settings_values(app.clone(), settings)?;
+    #[cfg(feature = "live")]
+    if let Some(token) = restart_token {
+        let live = app.state::<live_runtime::LiveRuntime>();
+        live.stop()
+            .await
+            .map_err(|error| format!("settings saved, but the gateway did not stop: {error}"))?;
+        if let Err(error) = live.start(
+            &app,
+            token.clone(),
+            saved.guild_id.clone(),
+            Some(saved.announcement_channel_id.clone()),
+            saved.dm_fallback,
+        ) {
+            let rollback = live.start(
+                &app,
+                token,
+                before.guild_id.clone(),
+                Some(before.announcement_channel_id.clone()),
+                before.dm_fallback,
+            );
+            return Err(match rollback {
+                Ok(()) => format!(
+                    "settings saved, but the gateway did not start with the new fallback: {error}. The old fallback is active."
+                ),
+                Err(rollback_error) => format!(
+                    "settings saved, but the gateway is offline: {error}. The rollback failed: {rollback_error}"
+                ),
+            });
         }
     }
     Ok(saved)

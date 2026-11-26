@@ -80,7 +80,7 @@ The delivery model checks:
 - `AckedWereEnqueued`: an acknowledgement refers to an enqueued effect.
 - `NoLostEffect`: every enqueued effect is pending, acknowledged, or failed.
 - `FailedWereEnqueued`: a failed effect was enqueued first.
-- `FailedWereAlerted`: every failed effect queued a host alert.
+- `FailedWereAlerted`: every failed effect committed a host-visible audit row.
 - `TerminalExclusive`: an effect is not both acknowledged and failed.
 - `UniqueKeys`: dedupe keys are unique.
 - `AttemptsBounded`: the attempt counter stays within the bound.

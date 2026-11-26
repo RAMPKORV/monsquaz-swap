@@ -8,7 +8,10 @@
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use swap_db::{AuditRepo, Connection, Db, DbError, DeliveryRecord, DeliveryRepo, DmCursorRepo};
+use swap_db::{
+    AuditRepo, Connection, Db, DbError, DeliveryRecord, DeliveryRepo, DmCursorRepo, Transaction,
+    TransactionBehavior,
+};
 use swap_discord::{
     DiscordChannelId, DiscordError, DiscordPort, DiscordUserId, MessageId, OutboundFile,
     OutboundMessage,
@@ -356,9 +359,14 @@ impl DeliveryWorker {
                         let db = db_guard(self);
                         match fallback {
                             Ok(true) => {
-                                DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
-                                AuditRepo::insert(
+                                let transaction = Transaction::new_unchecked(
                                     db.conn(),
+                                    TransactionBehavior::Immediate,
+                                )
+                                .map_err(DbError::from)?;
+                                DeliveryRepo::mark_sent(&transaction, &row.id, now)?;
+                                AuditRepo::insert(
+                                    &transaction,
                                     &row.event_id,
                                     now,
                                     "worker",
@@ -366,6 +374,7 @@ impl DeliveryWorker {
                                     None,
                                     &format!("{{\"kind\":\"{}\"}}", row.kind),
                                 )?;
+                                transaction.commit().map_err(DbError::from)?;
                                 report.sent += 1;
                             }
                             Ok(false) => {
@@ -423,11 +432,13 @@ impl DeliveryWorker {
         now: i64,
         error: &str,
     ) -> Result<bool, DeliveryError> {
-        if !DeliveryRepo::mark_failed(conn, &row.id, now, error)? {
+        let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+            .map_err(DbError::from)?;
+        if !DeliveryRepo::mark_failed(&transaction, &row.id, now, error)? {
             return Ok(false);
         }
-        if let Err(error) = AuditRepo::insert(
-            conn,
+        AuditRepo::insert(
+            &transaction,
             &row.event_id,
             now,
             "worker",
@@ -438,13 +449,20 @@ impl DeliveryWorker {
                 row.kind,
                 serde_json::to_string(error).unwrap_or_else(|_| "\"unknown\"".to_string())
             ),
-        ) {
-            eprintln!("delivery audit entry failed: {error}");
-        }
+        )?;
+        transaction.commit().map_err(DbError::from)?;
         Ok(true)
     }
 
     async fn alert(&self, discord: &dyn DiscordPort, row: &DeliveryRecord, error: &str) {
+        self.notify_host(
+            discord,
+            &format!("A delivery needs host attention: {}. {}", row.kind, error),
+        )
+        .await;
+    }
+
+    pub async fn notify_host(&self, discord: &dyn DiscordPort, content: &str) {
         let Some(channel) = &self.alert_channel else {
             return;
         };
@@ -457,9 +475,13 @@ impl DeliveryWorker {
         else {
             return;
         };
-        let content = format!("A delivery needs host attention: {}. {}", row.kind, error);
         let _ = discord
-            .send_channel_message(&thread, OutboundMessage { content })
+            .send_channel_message(
+                &thread,
+                OutboundMessage {
+                    content: content.to_string(),
+                },
+            )
             .await;
     }
 }

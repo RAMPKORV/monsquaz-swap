@@ -222,6 +222,7 @@ struct FakeState {
     inbound: Vec<(DiscordUserId, InboundDm)>,
     fail_next_dm: Option<DiscordError>,
     fail_next_thread: Option<DiscordError>,
+    fail_next_fetch: Option<DiscordError>,
 }
 
 #[derive(Debug, Default)]
@@ -245,6 +246,10 @@ impl FakeDiscord {
 
     pub fn fail_next_thread(&self, error: DiscordError) {
         self.lock().fail_next_thread = Some(error);
+    }
+
+    pub fn fail_next_fetch(&self, error: DiscordError) {
+        self.lock().fail_next_fetch = Some(error);
     }
 
     pub fn sent_dms(&self) -> Vec<SentDm> {
@@ -398,7 +403,10 @@ impl DiscordPort for FakeDiscord {
         user_id: &DiscordUserId,
         after: Option<&MessageId>,
     ) -> Result<Vec<InboundDm>, DiscordError> {
-        let state = self.lock();
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next_fetch.take() {
+            return Err(error);
+        }
         let mut messages: Vec<InboundDm> = state
             .inbound
             .iter()

@@ -78,6 +78,7 @@ impl LiveRuntime {
                 .with_alert_channel(alert_channel_id)
                 .with_fallback_channel(fallback_channel),
         );
+        service.mark_backfill_pending();
         let gateway = GatewayHost::start(token, guild_id, service.clone())?;
         let (stop, stop_rx) = watch::channel(false);
         let task_service = service.clone();
@@ -89,6 +90,7 @@ impl LiveRuntime {
             run_dispatch_loop(Duration::from_secs(30), wake, stop_rx, move || {
                 let service = drain_service.clone();
                 async move {
+                    let _ = service.retry_backfill().await;
                     let _ = service.drain_pending().await;
                 }
             })

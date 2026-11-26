@@ -85,8 +85,9 @@ The baseline is reviewed debt, not a mute button.
 Refract is pinned by commit because it is pre-release. The install script
 builds it into `.cache/refract/<commit>` and installs Chromium through
 Playwright. CI caches that directory. To update Refract, change the commit in
-`design/refract.lock.json`, run the gate, and review any new findings. Do not
-commit the cache or `design/artifacts/`.
+`design/refract.lock.json`, update the cache key in `.github/workflows/ci.yml`,
+run the gate, and review any new findings. Do not commit the cache or
+`design/artifacts/`.
 
 ## False positives
 

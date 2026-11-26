@@ -21,6 +21,7 @@ export type Scenario =
   | "extension-ready"
   | "round-ready"
   | "reveal-ready"
+  | "join-phase"
   | "infeasible";
 
 export type MissionControl = {
@@ -32,6 +33,12 @@ export type MissionControl = {
   activity: ActivityEntry[];
   timeline: TimelineStep[];
   facts: EventFact[];
+  join: JoinInfo;
+};
+
+export type JoinInfo = {
+  formats: string[];
+  maxFileMib: number;
 };
 
 export type EventSummary = {

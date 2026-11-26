@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { EventDraft, SetupData } from "../types";
 import { Button, Field, PageHeader, Skeleton, StatusPill, Toggle } from "../components";
 import { Icon } from "../icons";
+import { JoinInstructions } from "./JoinInstructions";
 
 const steps = [
   { id: "basics", label: "Basics", detail: "Name, mode, windows" },
@@ -21,12 +22,23 @@ const extensions = ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac
 
 export function SetupView({
   data,
+  timezone,
   onCreate,
 }: {
   data: SetupData;
+  timezone?: string;
   onCreate: (draft: EventDraft) => void;
 }) {
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    const initial = new URLSearchParams(window.location.search).get("step");
+    if (initial === "review") {
+      return 3;
+    }
+    const numeric = Number(initial);
+    return Number.isInteger(numeric) && numeric >= 0 && numeric <= 3
+      ? numeric
+      : 0;
+  });
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const firstStep = useRef(true);
 
@@ -99,7 +111,9 @@ export function SetupView({
         {step === 0 ? <BasicsStep draft={draft} update={update} /> : null}
         {step === 1 ? <FilesStep draft={draft} update={update} /> : null}
         {step === 2 ? <GroupsStep draft={draft} update={update} /> : null}
-        {step === 3 ? <ReviewStep data={data} draft={draft} /> : null}
+        {step === 3 ? (
+          <ReviewStep data={data} draft={draft} timezone={timezone} />
+        ) : null}
 
         <div className="wizard-actions">
           <Button
@@ -522,7 +536,15 @@ function GroupsStep({
   );
 }
 
-function ReviewStep({ data, draft }: { data: SetupData; draft: EventDraft }) {
+function ReviewStep({
+  data,
+  draft,
+  timezone,
+}: {
+  data: SetupData;
+  draft: EventDraft;
+  timezone?: string;
+}) {
   return (
     <div className="wizard-grid">
       <dl className="review-grid">
@@ -575,6 +597,14 @@ function ReviewStep({ data, draft }: { data: SetupData; draft: EventDraft }) {
           </div>
         ))}
       </div>
+
+      <JoinInstructions
+        formats={draft.allowlist}
+        maxMib={20}
+        exampleTimezone={timezone}
+        preview
+        headingLevel={3}
+      />
     </div>
   );
 }

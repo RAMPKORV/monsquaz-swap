@@ -846,7 +846,7 @@ impl InboundService {
             .join(", ");
         let max_mib = settings.max_file_bytes / (1024 * 1024);
         let content = format!(
-            "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. The bot stores the file locally."
+            "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. A seed is a track you made. The host starts the event after the roster locks."
         );
         if let Ok(message_id) = self
             .discord

@@ -9,6 +9,7 @@ import {
 } from "../components";
 import { Icon } from "../icons";
 import { isDemoMode, previewUrl } from "../data/client";
+import { plural } from "../i18n";
 import type {
   RevealAlbumTrack,
   RevealComment,
@@ -535,7 +536,11 @@ export function RevealView({
                 <h2 id="reveal-comments-title">Comments and answers</h2>
                 <span className="card__meta">
                   {selected.comments.length}{" "}
-                  {selected.comments.length === 1 ? "comment" : "comments"}
+                  {plural(
+                    selected.comments.length,
+                    "comment",
+                    "comments",
+                  )}
                 </span>
               </div>
               {selected.comments.length === 0 ? (

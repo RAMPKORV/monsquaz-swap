@@ -25,6 +25,7 @@ export type IconName =
   | "play"
   | "lock"
   | "file"
+  | "copy"
   | "eye-off"
   | "sparkles"
   | "mail"
@@ -156,6 +157,12 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="M6 3h8l4 4v14H6z" />
       <path d="M14 3v5h4M9 13h6M9 17h4" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
     </>
   ),
   "eye-off": (

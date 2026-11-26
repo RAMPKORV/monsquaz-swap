@@ -7,6 +7,7 @@ import {
 import type { PlanData, PlanEditCandidate } from "../types";
 import { Button, Dialog, EmptyState, PageHeader, Skeleton, StatusPill } from "../components";
 import { Icon } from "../icons";
+import { plural } from "../i18n";
 
 
 export function PlannerView({
@@ -287,9 +288,7 @@ export function PlannerView({
                   {visibleWarnings.length}{" "}
                   {warningNeedsAction
                     ? "to review"
-                    : visibleWarnings.length === 1
-                      ? "note"
-                      : "notes"}
+                    : plural(visibleWarnings.length, "note", "notes")}
                 </StatusPill>
               ) : null}
             </div>
@@ -539,9 +538,7 @@ export function PlannerView({
                     {visibleWarnings.length}{" "}
                     {warningNeedsAction
                       ? "to review"
-                      : visibleWarnings.length === 1
-                        ? "note"
-                        : "notes"}
+                      : plural(visibleWarnings.length, "note", "notes")}
                   </StatusPill>
                 </div>
                 <div className="warnings">

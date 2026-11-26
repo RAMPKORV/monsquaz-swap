@@ -11,6 +11,7 @@ import {
   StatusPill,
 } from "../components";
 import { Icon } from "../icons";
+import { JoinInstructions } from "./JoinInstructions";
 
 function stageTone(stage: string) {
   if (stage === "Active") return "ok" as const;
@@ -21,11 +22,13 @@ function stageTone(stage: string) {
 
 export function MissionControlView({
   data,
+  timezone,
   onAction,
   onDecision,
   onNavigate,
 }: {
   data: MissionControl;
+  timezone?: string;
   onAction: (label: string) => void;
   onDecision: (decision: Decision, action: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
@@ -101,6 +104,14 @@ export function MissionControlView({
         Participants are anonymous to each other until the reveal. You can see
         the mapping.
       </p>
+
+      {event.stage === "Join phase" ? (
+        <JoinInstructions
+          formats={data.join.formats}
+          maxMib={data.join.maxFileMib}
+          exampleTimezone={timezone}
+        />
+      ) : null}
 
       {data.nextAction ? (
         <section

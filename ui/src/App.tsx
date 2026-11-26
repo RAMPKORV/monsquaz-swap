@@ -640,12 +640,17 @@ export default function App() {
     ) : view === "mission" && mission ? (
       <MissionControlView
         data={mission}
+        timezone={settings?.timezone}
         onAction={notify}
         onDecision={handleDecision}
         onNavigate={(next) => setView(next)}
       />
     ) : view === "setup" && setup ? (
-      <SetupView data={setup} onCreate={handleCreateEvent} />
+      <SetupView
+        data={setup}
+        timezone={settings?.timezone}
+        onCreate={handleCreateEvent}
+      />
     ) : view === "people" && people ? (
       <PeopleView
         data={people}

@@ -18,6 +18,11 @@
       "query": "demo=1&static=1&view=mission&dialog=decision"
     },
     {
+      "id": "mission-join",
+      "query": "demo=1&static=1&view=mission&state=join-phase",
+      "contrast": true
+    },
+    {
       "id": "mission-light",
       "query": "demo=1&static=1&view=mission&theme=light",
       "contrast": true
@@ -27,6 +32,11 @@
       "query": "demo=1&static=1&view=setup",
       "contrast": true,
       "focus": true
+    },
+    {
+      "id": "setup-review",
+      "query": "demo=1&static=1&view=setup&step=review",
+      "contrast": true
     },
     {
       "id": "people",

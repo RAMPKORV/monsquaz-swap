@@ -31,6 +31,14 @@ pub struct MissionControlDto {
     activity: Vec<ActivityDto>,
     timeline: Vec<TimelineStepDto>,
     facts: Vec<EventFactDto>,
+    join: JoinInfoDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JoinInfoDto {
+    formats: Vec<String>,
+    max_file_mib: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1485,6 +1493,13 @@ fn mission_control_with_health(
             activity: Vec::new(),
             timeline: Vec::new(),
             facts: Vec::new(),
+            join: JoinInfoDto {
+                formats: swap_files::DEFAULT_EXTENSIONS
+                    .iter()
+                    .map(|extension| (*extension).to_string())
+                    .collect(),
+                max_file_mib: swap_files::DEFAULT_MAX_SIZE / (1024 * 1024),
+            },
         });
     };
     let event_summary = summary(db, &event)?;
@@ -1790,6 +1805,10 @@ fn mission_control_with_health(
         activity,
         timeline,
         facts,
+        join: JoinInfoDto {
+            formats: settings_json.allowed_extensions.clone(),
+            max_file_mib: settings_json.max_file_bytes / (1024 * 1024),
+        },
     })
 }
 

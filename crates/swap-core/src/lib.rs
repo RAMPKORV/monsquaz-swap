@@ -17,8 +17,9 @@ pub mod schedule;
 pub mod state;
 
 pub use groups::{
-    GroupShape, GroupWarning, MAX_GROUP_COUNT, MAX_GROUP_SIZE, MAX_PHASES, MIN_GROUP_SIZE,
-    MIN_PHASES, default_cadence, group_sizes, group_warnings, phase_count, suggest_groups,
+    GroupPhase, GroupSchedule, GroupScheduleError, GroupShape, GroupWarning, MAX_GROUP_COUNT,
+    MAX_GROUP_SIZE, MAX_PHASES, MIN_GROUP_SIZE, MIN_PHASES, default_cadence, group_schedule,
+    group_sizes, group_warnings, phase_count, suggest_groups,
 };
 pub use ids::{ParticipantId, TrackCode};
 pub use ledger::{LedgerError, SeenLedger, Touch};

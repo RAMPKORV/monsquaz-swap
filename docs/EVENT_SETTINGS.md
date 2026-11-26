@@ -70,7 +70,9 @@ yet.
 The group lookup runs when the planner generates the plan, because the active
 roster is known then. The plan stores the effective group count and size. The
 manual count and size controls are enabled only for the Manual group mode.
-Soft-bound and cadence warnings do not block the plan.
+Soft-bound and cadence warnings do not block the plan. Participants rotate one
+group forward at each phase. A group phase that cannot fill uses the global pool
+for that phase and reports a host warning. Groups return in the next phase.
 
 Rules:
 

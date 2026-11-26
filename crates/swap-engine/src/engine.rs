@@ -134,6 +134,8 @@ pub enum EngineError {
     InvalidCommentKind,
     #[error("the comment was not found: {0}")]
     CommentNotFound(String),
+    #[error(transparent)]
+    GroupSchedule(#[from] swap_core::GroupScheduleError),
     #[error("the comment is already redacted")]
     CommentAlreadyRedacted,
     #[error("the participant did not work on this track")]
@@ -715,11 +717,53 @@ pub fn generate_schedule(
     let previous = PlanRepo::latest(db.conn(), event_id)?;
     let version = previous.map(|plan| plan.version + 1).unwrap_or(1);
     let plan_seed = event.seed.wrapping_add(u64::from(version - 1));
-    let schedule = Schedule::generate_with(&people, &specs, rounds, plan_seed, strategy)?;
+    let (assignments, fallback) =
+        if settings.mode == Mode::Classic && settings.group_count.unwrap_or(1) > 1 {
+            let mut grouped: Vec<&ParticipantRecord> = active.clone();
+            grouped.sort_by(|left, right| {
+                left.display_name
+                    .cmp(&right.display_name)
+                    .then_with(|| left.user_id.cmp(&right.user_id))
+            });
+            let group_people: Vec<ParticipantId> = grouped
+                .iter()
+                .map(|participant| ParticipantId::new(participant.user_id.clone()))
+                .collect();
+            let group_specs: Vec<TrackSpec> = tracks
+                .iter()
+                .map(|track| TrackSpec {
+                    code: TrackCode::new(track.code.clone()),
+                    owner: ParticipantId::new(track.owner_id.clone()),
+                })
+                .collect();
+            let group_sizes = swap_core::group_sizes(
+                grouped.len(),
+                settings.group_count.unwrap_or(1),
+                settings.group_size.unwrap_or(0),
+            );
+            let cadence = if settings.swap_cadence.as_deref() == Some("Exhausted") {
+                let largest = group_sizes.iter().copied().max().unwrap_or(1);
+                largest.saturating_sub(1).max(1)
+            } else {
+                swap_core::default_cadence(rounds)
+            };
+            let group_plan = swap_core::group_schedule(
+                &group_people,
+                &group_specs,
+                &group_sizes,
+                rounds,
+                cadence,
+                plan_seed,
+            )?;
+            let fallback = group_plan.phases.iter().any(|phase| phase.global_pool);
+            (group_plan.assignments, fallback)
+        } else {
+            let schedule = Schedule::generate_with(&people, &specs, rounds, plan_seed, strategy)?;
+            (schedule.assignments, schedule.fallback)
+        };
 
     let settings_json = serde_json::to_string(&settings)?;
-    let planned: Vec<PlanAssignmentRecord> = schedule
-        .assignments
+    let planned: Vec<PlanAssignmentRecord> = assignments
         .iter()
         .map(|assignment| PlanAssignmentRecord {
             event_id: event_id.to_string(),
@@ -765,7 +809,7 @@ pub fn generate_schedule(
         version,
         rounds,
         commitment,
-        fallback: schedule.fallback,
+        fallback,
         assignments: planned,
     })
 }

@@ -409,6 +409,7 @@ pub struct PlanDataDto {
     matrix: Vec<MatrixTrackDto>,
     graph: GraphDto,
     groups: Vec<PlannerGroupDto>,
+    phases: Vec<PlannerPhaseDto>,
     warnings: Vec<PlannerWarningDto>,
     fun_score: Option<u32>,
     fun_guardrails: Vec<GuardrailDto>,
@@ -460,7 +461,17 @@ struct PlannerGroupDto {
     name: String,
     size: usize,
     tracks: usize,
+    track_codes: Vec<String>,
     participants: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannerPhaseDto {
+    index: u32,
+    start_round: u32,
+    rounds: u32,
+    global_pool: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -787,6 +798,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
                 edges: Vec::new(),
             },
             groups: Vec::new(),
+            phases: Vec::new(),
             warnings: Vec::new(),
             fun_score: None,
             fun_guardrails: Vec::new(),
@@ -814,6 +826,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
                 edges: Vec::new(),
             },
             groups: Vec::new(),
+            phases: Vec::new(),
             warnings: Vec::new(),
             fun_score: None,
             fun_guardrails: Vec::new(),
@@ -838,7 +851,19 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         serde_json::from_str(&plan.settings_json).unwrap_or_default()
     };
     let (groups, group_of) = planner_groups(&settings, &participants, &tracks);
-    let warnings = planner_group_warnings(&settings, &participants, plan.rounds);
+    let mut warnings = planner_group_warnings(&settings, &participants, plan.rounds);
+    let phases = planner_phases(&settings, &assignments, &tracks, &group_of, plan.rounds);
+    for phase in phases.iter().filter(|phase| phase.global_pool) {
+        warnings.push(PlannerWarningDto {
+            id: format!("group-fallback-{}", phase.index),
+            severity: "warn".to_string(),
+            title: "The planner used the global pool in a phase".to_string(),
+            detail: format!(
+                "Phase {} could not fill inside its groups. It uses all tracks and preserves the seen ledger. Later phases try groups again.",
+                phase.index + 1
+            ),
+        });
+    }
     let group_for = |owner_id: &str| {
         group_of
             .get(owner_id)
@@ -894,6 +919,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         matrix,
         graph: GraphDto { round: 0, edges },
         groups,
+        phases,
         warnings,
         fun_score: None,
         fun_guardrails: Vec::new(),
@@ -915,13 +941,16 @@ fn planner_groups(
     let mut active: Vec<&swap_db::ParticipantRecord> = participants
         .iter()
         .filter(|participant| {
-            matches!(
-                participant.membership,
-                Membership::Seeded | Membership::Active
-            )
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == swap_core::Readiness::Ready
         })
         .collect();
-    active.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    active.sort_by(|left, right| {
+        left.display_name
+            .cmp(&right.display_name)
+            .then_with(|| left.user_id.cmp(&right.user_id))
+    });
     if active.is_empty() {
         return (Vec::new(), std::collections::BTreeMap::new());
     }
@@ -939,14 +968,17 @@ fn planner_groups(
         let members = &active[start..end];
         start = end;
         let name = group_name(index);
-        let owned = tracks
+        let mut track_codes: Vec<String> = tracks
             .iter()
             .filter(|track| {
                 members
                     .iter()
                     .any(|participant| participant.user_id == track.owner_id)
             })
-            .count();
+            .map(|track| track.code.clone())
+            .collect();
+        track_codes.sort();
+        let owned = track_codes.len();
         for participant in members {
             group_of.insert(participant.user_id.clone(), name.clone());
         }
@@ -954,6 +986,7 @@ fn planner_groups(
             name,
             size: members.len(),
             tracks: owned,
+            track_codes,
             participants: members
                 .iter()
                 .map(|participant| participant.display_name.clone())
@@ -1038,6 +1071,79 @@ fn planner_group_warnings(
                     "A group of {size} cannot exhaust in {rounds} rounds. Use a K-round swap."
                 ),
             },
+        })
+        .collect()
+}
+
+fn planner_phases(
+    settings: &EventSettings,
+    assignments: &[swap_db::PlanAssignmentRecord],
+    tracks: &[swap_db::TrackRecord],
+    group_of: &std::collections::BTreeMap<String, String>,
+    rounds: u32,
+) -> Vec<PlannerPhaseDto> {
+    if settings.mode != Mode::Classic || rounds == 0 {
+        return Vec::new();
+    }
+    let mut sizes: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+    for group in group_of.values() {
+        *sizes.entry(group.as_str()).or_default() += 1;
+    }
+    let group_count = sizes.len();
+    if group_count <= 1 {
+        return Vec::new();
+    }
+    let largest = sizes.values().copied().max().unwrap_or(1);
+    let cadence = if settings.swap_cadence.as_deref() == Some("Exhausted") {
+        largest.saturating_sub(1).max(1)
+    } else {
+        swap_core::default_cadence(rounds)
+    };
+    if cadence == 0 {
+        return Vec::new();
+    }
+    let group_index = |name: &str| -> Option<usize> {
+        name.as_bytes().first().map(|byte| (byte - b'A') as usize)
+    };
+    let owners: std::collections::BTreeMap<&str, &str> = tracks
+        .iter()
+        .map(|track| (track.code.as_str(), track.owner_id.as_str()))
+        .collect();
+    let phase_count = rounds.div_ceil(cadence);
+    (0..phase_count)
+        .map(|phase| {
+            let start_round = phase * cadence;
+            let phase_rounds = cadence.min(rounds - start_round);
+            let mut global_pool = false;
+            for assignment in assignments.iter().filter(|assignment| {
+                assignment.round >= start_round && assignment.round < start_round + phase_rounds
+            }) {
+                let Some(person_group) = group_of
+                    .get(&assignment.participant_id)
+                    .and_then(|name| group_index(name))
+                else {
+                    continue;
+                };
+                let Some(owner) = owners.get(assignment.track_code.as_str()) else {
+                    continue;
+                };
+                let Some(track_group) = group_of.get(*owner).and_then(|name| group_index(name))
+                else {
+                    continue;
+                };
+                let expected =
+                    (track_group + group_count - (phase as usize % group_count)) % group_count;
+                if person_group != expected {
+                    global_pool = true;
+                    break;
+                }
+            }
+            PlannerPhaseDto {
+                index: phase,
+                start_round,
+                rounds: phase_rounds,
+                global_pool,
+            }
         })
         .collect()
 }
@@ -2393,7 +2499,13 @@ mod tests {
         assert_eq!(plan.groups.len(), 2);
         assert!(plan.groups.iter().all(|group| group.size == 5));
         assert!(plan.groups.iter().all(|group| group.tracks == 5));
-        assert!(plan.warnings.is_empty());
+        assert_eq!(plan.phases.len(), 5);
+        assert!(plan.phases.last().unwrap().global_pool);
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|warning| warning.id == "group-fallback-4" && warning.severity == "warn")
+        );
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

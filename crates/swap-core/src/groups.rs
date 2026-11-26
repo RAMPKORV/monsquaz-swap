@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::{HashMap, HashSet};
+
+use thiserror::Error;
+
+use crate::ids::ParticipantId;
+use crate::schedule::{ScheduledAssignment, TrackSpec, match_round};
+
 pub const MIN_GROUP_SIZE: u32 = 5;
 pub const MAX_GROUP_SIZE: u32 = 12;
 pub const MAX_GROUP_COUNT: u32 = 4;
@@ -149,6 +156,224 @@ pub fn group_warnings(sizes: &[u32], rounds: u32, cadence: &str) -> Vec<GroupWar
     warnings
 }
 
+/// One phase of a group schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupPhase {
+    pub index: u32,
+    pub start_round: u32,
+    pub rounds: u32,
+    /// True when the phase used the global pool because a group could not fill.
+    pub global_pool: bool,
+}
+
+/// A complete classic group schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupSchedule {
+    pub assignments: Vec<ScheduledAssignment>,
+    pub phases: Vec<GroupPhase>,
+    pub cadence: u32,
+    pub group_sizes: Vec<u32>,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum GroupScheduleError {
+    #[error("the group schedule needs at least two groups")]
+    TooFewGroups,
+    #[error("the group sizes do not cover the roster")]
+    GroupSizes,
+    #[error("a group has a different number of people and tracks")]
+    GroupShape,
+    #[error("no matching exists in phase {phase}, round {round}")]
+    Infeasible { phase: u32, round: u32 },
+}
+
+/// Generate a group-rotating classic schedule.
+///
+/// Participants are split into base groups in the given order. Tracks stay in
+/// the group of their owner. At each phase, participants rotate forward by one
+/// group and the group matches its K rounds. A matching never uses an own
+/// track or a track that the person has seen. When a group cannot fill a phase,
+/// the phase uses the global pool. The result is deterministic for the same
+/// input and seed.
+pub fn group_schedule(
+    participants: &[ParticipantId],
+    tracks: &[TrackSpec],
+    group_sizes: &[u32],
+    rounds: u32,
+    cadence: u32,
+    seed: u64,
+) -> Result<GroupSchedule, GroupScheduleError> {
+    if group_sizes.len() < 2 {
+        return Err(GroupScheduleError::TooFewGroups);
+    }
+    if participants.is_empty()
+        || participants.len() != tracks.len()
+        || group_sizes.iter().map(|size| *size as usize).sum::<usize>() != participants.len()
+    {
+        return Err(GroupScheduleError::GroupSizes);
+    }
+    let cadence = cadence.max(1).min(rounds.max(1));
+
+    let mut base_groups: Vec<Vec<ParticipantId>> = Vec::with_capacity(group_sizes.len());
+    let mut group_of_person: HashMap<ParticipantId, usize> = HashMap::new();
+    let mut start = 0;
+    for (group, size) in group_sizes.iter().enumerate() {
+        let end = start + *size as usize;
+        let members = participants[start..end].to_vec();
+        for person in &members {
+            group_of_person.insert(person.clone(), group);
+        }
+        base_groups.push(members);
+        start = end;
+    }
+
+    let mut group_tracks: Vec<Vec<TrackSpec>> = vec![Vec::new(); group_sizes.len()];
+    for track in tracks {
+        let group = group_of_person
+            .get(&track.owner)
+            .copied()
+            .ok_or(GroupScheduleError::GroupSizes)?;
+        group_tracks[group].push(track.clone());
+    }
+    for (group, members) in base_groups.iter().enumerate() {
+        if group_tracks[group].len() != members.len() {
+            return Err(GroupScheduleError::GroupShape);
+        }
+        group_tracks[group].sort_by(|left, right| left.code.0.cmp(&right.code.0));
+    }
+
+    let person_index: HashMap<ParticipantId, usize> = participants
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, person)| (person, index))
+        .collect();
+    let track_index: HashMap<String, usize> = tracks
+        .iter()
+        .enumerate()
+        .map(|(index, track)| (track.code.0.clone(), index))
+        .collect();
+    let mut seen = vec![vec![false; tracks.len()]; participants.len()];
+    let mut assignments = Vec::with_capacity(rounds as usize * participants.len());
+    let mut phases = Vec::new();
+    let phase_count = rounds.div_ceil(cadence);
+    let group_count = group_sizes.len();
+
+    for phase in 0..phase_count {
+        let start_round = phase * cadence;
+        let phase_rounds = cadence.min(rounds - start_round);
+        let mut phase_assignments = Vec::new();
+        let mut phase_seen = seen.clone();
+        let mut local_ok = true;
+
+        for group in 0..group_count {
+            let source = (group + group_count - (phase as usize % group_count)) % group_count;
+            let people = &base_groups[source];
+            let group_tracks = &group_tracks[group];
+            for round in 0..phase_rounds {
+                let mut forbidden = HashSet::new();
+                for (local_person, person) in people.iter().enumerate() {
+                    let global_person = person_index[person];
+                    for (local_track, track) in group_tracks.iter().enumerate() {
+                        let global_track = track_index[&track.code.0];
+                        if track.owner == *person || phase_seen[global_person][global_track] {
+                            forbidden.insert((local_person, local_track));
+                        }
+                    }
+                }
+                let match_seed = seed
+                    ^ (phase as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    ^ ((group as u64) << 32)
+                    ^ round as u64;
+                let Some(matched) =
+                    match_round(people.len(), group_tracks.len(), &forbidden, match_seed)
+                else {
+                    local_ok = false;
+                    break;
+                };
+                for (local_track, local_person) in matched.iter().enumerate() {
+                    let person = &people[*local_person];
+                    let track = &group_tracks[local_track];
+                    phase_assignments.push(ScheduledAssignment {
+                        round: start_round + round,
+                        track: track.code.clone(),
+                        participant: person.clone(),
+                    });
+                    phase_seen[person_index[person]][track_index[&track.code.0]] = true;
+                }
+            }
+            if !local_ok {
+                break;
+            }
+        }
+
+        if local_ok {
+            assignments.extend(phase_assignments);
+            seen = phase_seen;
+            phases.push(GroupPhase {
+                index: phase,
+                start_round,
+                rounds: phase_rounds,
+                global_pool: false,
+            });
+            continue;
+        }
+
+        // A group could not fill its phase. Use the global pool for the whole
+        // phase, preserve the seen ledger, and restore groups next phase.
+        phase_assignments.clear();
+        phase_seen = seen.clone();
+        for round in 0..phase_rounds {
+            let mut forbidden = HashSet::new();
+            for (person_index, person) in participants.iter().enumerate() {
+                for (track_index, track) in tracks.iter().enumerate() {
+                    if track.owner == *person || phase_seen[person_index][track_index] {
+                        forbidden.insert((person_index, track_index));
+                    }
+                }
+            }
+            let match_seed = seed
+                ^ 0xC0FF_EE00_1234_5678
+                ^ (phase as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ round as u64;
+            let Some(matched) =
+                match_round(participants.len(), tracks.len(), &forbidden, match_seed)
+            else {
+                return Err(GroupScheduleError::Infeasible { phase, round });
+            };
+            for (track_index, person_index) in matched.iter().enumerate() {
+                phase_assignments.push(ScheduledAssignment {
+                    round: start_round + round,
+                    track: tracks[track_index].code.clone(),
+                    participant: participants[*person_index].clone(),
+                });
+                phase_seen[*person_index][track_index] = true;
+            }
+        }
+        assignments.extend(phase_assignments);
+        seen = phase_seen;
+        phases.push(GroupPhase {
+            index: phase,
+            start_round,
+            rounds: phase_rounds,
+            global_pool: true,
+        });
+    }
+
+    assignments.sort_by(|left, right| {
+        left.round
+            .cmp(&right.round)
+            .then_with(|| left.track.0.cmp(&right.track.0))
+            .then_with(|| left.participant.0.cmp(&right.participant.0))
+    });
+    Ok(GroupSchedule {
+        assignments,
+        phases,
+        cadence,
+        group_sizes: group_sizes.to_vec(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +432,97 @@ mod tests {
         assert!(
             !group_warnings(&[8], 8, "Exhausted")
                 .contains(&GroupWarning::Exhausted { size: 8, rounds: 8 })
+        );
+    }
+
+    fn roster(count: usize) -> (Vec<ParticipantId>, Vec<TrackSpec>) {
+        let people = (0..count)
+            .map(|index| ParticipantId::new(format!("P{index:02}")))
+            .collect::<Vec<_>>();
+        let tracks = (0..count)
+            .map(|index| TrackSpec {
+                code: crate::ids::TrackCode::new(format!("T{index:02}")),
+                owner: ParticipantId::new(format!("P{index:02}")),
+            })
+            .collect::<Vec<_>>();
+        (people, tracks)
+    }
+
+    #[test]
+    fn group_rotation_keeps_tracks_and_avoids_repeats() {
+        let (people, tracks) = roster(10);
+        let schedule = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
+        assert_eq!(schedule.phases.len(), 4);
+        assert!(schedule.phases.iter().all(|phase| !phase.global_pool));
+        assert_eq!(schedule.assignments.len(), 80);
+
+        let mut seen = std::collections::HashSet::new();
+        for assignment in &schedule.assignments {
+            assert_ne!(
+                assignment.track.0,
+                assignment.participant.0.replace('P', "T")
+            );
+            assert!(
+                seen.insert((assignment.participant.0.clone(), assignment.track.0.clone())),
+                "repeat for {} on {}",
+                assignment.participant.0,
+                assignment.track.0
+            );
+            let phase = (assignment.round / 2) as usize;
+            let track_group = assignment.track.0[1..].parse::<usize>().unwrap() / 5;
+            let person_group = assignment.participant.0[1..].parse::<usize>().unwrap() / 5;
+            let expected = (track_group + 2 - (phase % 2)) % 2;
+            assert_eq!(person_group, expected, "round {}", assignment.round);
+        }
+        for round in 0..8 {
+            let people_in_round = schedule
+                .assignments
+                .iter()
+                .filter(|assignment| assignment.round == round)
+                .map(|assignment| assignment.participant.0.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            let tracks_in_round = schedule
+                .assignments
+                .iter()
+                .filter(|assignment| assignment.round == round)
+                .map(|assignment| assignment.track.0.as_str())
+                .collect::<std::collections::HashSet<_>>();
+            assert_eq!(people_in_round.len(), 10);
+            assert_eq!(tracks_in_round.len(), 10);
+        }
+    }
+
+    #[test]
+    fn an_extra_round_falls_back_to_the_global_pool() {
+        let (people, tracks) = roster(10);
+        let schedule = group_schedule(&people, &tracks, &[5, 5], 9, 2, 42).unwrap();
+        assert_eq!(schedule.phases.len(), 5);
+        assert!(schedule.phases.last().unwrap().global_pool);
+        assert_eq!(schedule.assignments.len(), 90);
+        let mut seen = std::collections::HashSet::new();
+        for assignment in &schedule.assignments {
+            assert!(seen.insert((assignment.participant.0.clone(), assignment.track.0.clone())));
+        }
+    }
+
+    #[test]
+    fn the_group_schedule_is_deterministic() {
+        let (people, tracks) = roster(10);
+        let first = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
+        let second = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn group_sizes_must_cover_the_roster() {
+        let (people, tracks) = roster(10);
+        assert_eq!(
+            group_schedule(&people, &tracks, &[5, 4], 8, 2, 42),
+            Err(GroupScheduleError::GroupSizes)
+        );
+        assert_eq!(
+            group_schedule(&people, &tracks, &[5], 8, 2, 42),
+            Err(GroupScheduleError::TooFewGroups)
         );
     }
 }

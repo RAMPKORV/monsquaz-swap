@@ -559,6 +559,10 @@ describe("App", () => {
       await screen.findByRole("heading", { level: 1, name: "Schedule planner" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Fun score")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Group A" }));
+    expect(
+      document.querySelectorAll(".matrix__row--match").length,
+    ).toBeGreaterThan(0);
     fireEvent.click(
       screen.getByRole("button", { name: "Preview participant redaction" }),
     );
@@ -567,6 +571,31 @@ describe("App", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("Fun score")).not.toBeInTheDocument();
     expect(screen.queryByText("Groups")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".matrix__row--match").length).toBe(0);
+    expect(
+      screen.queryByRole("button", { name: "Group A" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("filters the planner by group and shows the rotation phases", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    await screen.findByRole("heading", { level: 1, name: "Schedule planner" });
+    expect(screen.getByText(/Phase 1 · rounds/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Group A" }));
+    expect(screen.getByRole("button", { name: "Group A" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByText(/Highlighting Group A · \d+ tracks/),
+    ).toBeInTheDocument();
+    expect(document.querySelectorAll(".matrix__row--match").length).toBeGreaterThan(
+      0,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
+    expect(document.querySelectorAll(".matrix__row--match").length).toBe(0);
   });
 
   it("confirms before locking the schedule", async () => {

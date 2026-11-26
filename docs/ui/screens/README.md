@@ -50,6 +50,7 @@ Additional states:
 
 ## Review record
 
-The three review waves and the fixed findings are recorded in
-`docs/ui/reviews/MSW-020.md`. Do not close a UI issue until the latest wave has
-no must-fix item.
+The MSW-020 shell/planner review is recorded in `docs/ui/reviews/MSW-020.md`.
+The MSW-042 seeded-planner review is recorded in
+`docs/ui/reviews/MSW-042.md`. Do not close a UI issue until the latest wave
+has no must-fix item.

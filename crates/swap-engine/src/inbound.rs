@@ -383,6 +383,11 @@ impl InboundService {
         };
         let cutoff = assignment.claimed_at.unwrap_or(assignment.offered_at);
         if !message_is_current(message_id, cutoff) {
+            self.notify(
+                user_id,
+                "That file is older than your current track. Send the file again if it is your current edit.",
+            )
+            .await;
             self.mark_processed(user_id, message_id, &attachment.id)?;
             return Ok(());
         }

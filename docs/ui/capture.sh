@@ -138,6 +138,14 @@ shot plan-error-dark-1280 "view=plan&state=error" 1280 800
 shot plan-infeasible-dark-1280 "view=plan&state=infeasible" 1280 800
 shot plan-long-dark-1280 "view=plan&state=long" 1280 800
 shot plan-dense-dark-1280 "view=plan&state=dense" 1280 800
+shot plan-edit-dark-1280 "view=plan&state=dense&dialog=edit" 1280 800
+shot plan-edit-selected-dark-1280 "view=plan&state=dense&dialog=edit&candidate=first" 1280 800
+shot plan-cell-focus-dark-1280 "view=plan&state=dense&focus=cell" 1280 800
+shot plan-edit-dark-1024 "view=plan&state=dense&dialog=edit" 1024 700
+shot plan-edit-light-1280 "view=plan&state=dense&dialog=edit&theme=light" 1280 800
+shot plan-edit-no-swap-dark-1280 "view=plan&state=dense&dialog=edit&nocandidates=1" 1280 800
+shot plan-edit-no-swap-dark-1024 "view=plan&state=dense&dialog=edit&nocandidates=1" 1024 700
+shot plan-edit-dark-zoom200 "view=plan&state=dense&dialog=edit" 640 400
 shot plan-populated-light-1280 "view=plan&theme=light" 1280 800
 shot plan-populated-dark-1024 "view=plan" 1024 700
 shot plan-participant-view-dark-1280 "view=plan&participant=1" 1280 800

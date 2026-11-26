@@ -1,7 +1,9 @@
-use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState, album_order};
+use swap_core::{
+    AssignmentStatus, EventState, Membership, Readiness, Role, TrackState, album_order,
+};
 use swap_db::{
     AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
-    HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
+    HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, PrivacyRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
@@ -1557,6 +1559,424 @@ fn reminders_do_not_burst_after_quiet_hours() {
     assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 0);
     assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 1);
     assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 0);
+}
+
+#[test]
+fn a_manual_edit_swaps_two_assignments_and_validates_the_plan() {
+    use swap_engine::{edit_plan_assignment, plan_edit_candidates};
+
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = fixture.lock_and_schedule();
+    let before = PlanRepo::latest(fixture.db.conn(), EVENT).unwrap().unwrap();
+    let target = schedule
+        .iter()
+        .find(|assignment| assignment.round == 0)
+        .unwrap()
+        .clone();
+    let owner = TrackRepo::get(fixture.db.conn(), EVENT, &target.track_code)
+        .unwrap()
+        .unwrap()
+        .owner_id;
+    let candidate = schedule
+        .iter()
+        .find(|assignment| {
+            assignment.round == 0
+                && assignment.participant_id != target.participant_id
+                && assignment.participant_id != owner
+                && !schedule.iter().any(|other| {
+                    other.participant_id == assignment.participant_id
+                        && other.track_code == target.track_code
+                })
+        })
+        .unwrap()
+        .clone();
+    let candidate_old_track = candidate.track_code.clone();
+    let displaced = target.participant_id.clone();
+    let candidates = plan_edit_candidates(&fixture.db, EVENT, 0, &target.track_code).unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|item| item.participant_id == candidate.participant_id)
+    );
+    assert!(
+        candidates
+            .iter()
+            .all(|item| item.participant_id != target.participant_id)
+    );
+
+    assert!(matches!(
+        edit_plan_assignment(&fixture.db, EVENT, 0, &target.track_code, &owner, 1, T4),
+        Err(EngineError::PlanOwnTrack { .. })
+    ));
+    assert!(matches!(
+        edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &target.participant_id,
+            1,
+            T4
+        ),
+        Err(EngineError::PlanNoChange)
+    ));
+    let target_track = &target.track_code;
+    let holders = schedule
+        .iter()
+        .filter(|assignment| &assignment.track_code == target_track)
+        .collect::<Vec<_>>();
+    let repeat_candidate = holders[0];
+    let repeat_target = holders[1];
+    assert!(matches!(
+        edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            repeat_target.round,
+            target_track,
+            &repeat_candidate.participant_id,
+            1,
+            T4
+        ),
+        Err(EngineError::PlanRepeat { .. })
+    ));
+
+    let outcome = edit_plan_assignment(
+        &fixture.db,
+        EVENT,
+        0,
+        &target.track_code,
+        &candidate.participant_id,
+        1,
+        T4,
+    )
+    .unwrap();
+    assert_eq!(outcome.version, 2);
+    assert_ne!(outcome.commitment, before.commitment);
+    let after = PlanRepo::list_assignments(fixture.db.conn(), EVENT, 2).unwrap();
+    assert_eq!(after.len(), schedule.len());
+    let stored = PlanRepo::latest(fixture.db.conn(), EVENT).unwrap().unwrap();
+    assert_eq!(stored.version, 2);
+    assert_eq!(stored.commitment, outcome.commitment);
+    assert_eq!(
+        PlanRepo::list_assignments(fixture.db.conn(), EVENT, 1)
+            .unwrap()
+            .len(),
+        schedule.len()
+    );
+    assert!(
+        AuditRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.action == "Schedule edited"
+                && entry.detail_json.contains(&displaced)
+                && entry.detail_json.contains(&candidate.participant_id))
+    );
+    assert_eq!(
+        after
+            .iter()
+            .find(|assignment| {
+                assignment.round == 0 && assignment.track_code == target.track_code
+            })
+            .unwrap()
+            .participant_id,
+        candidate.participant_id
+    );
+    assert_eq!(
+        after
+            .iter()
+            .find(|assignment| {
+                assignment.round == 0 && assignment.track_code == candidate_old_track
+            })
+            .unwrap()
+            .participant_id,
+        displaced
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    for assignment in &after {
+        assert!(seen.insert((
+            assignment.participant_id.clone(),
+            assignment.track_code.clone()
+        )));
+        assert_ne!(
+            TrackRepo::get(fixture.db.conn(), EVENT, &assignment.track_code)
+                .unwrap()
+                .unwrap()
+                .owner_id,
+            assignment.participant_id
+        );
+    }
+}
+
+#[test]
+fn a_complete_schedule_has_no_valid_single_cell_swap() {
+    use swap_engine::{edit_plan_assignment, plan_edit_candidates};
+
+    let fixture = Fixture::new(4, 0);
+    let schedule = fixture.lock_and_schedule();
+    let target = schedule
+        .iter()
+        .find(|assignment| assignment.round == 0)
+        .unwrap()
+        .clone();
+    assert!(
+        plan_edit_candidates(&fixture.db, EVENT, 0, &target.track_code)
+            .unwrap()
+            .is_empty()
+    );
+    let candidates = schedule
+        .iter()
+        .filter(|assignment| {
+            assignment.round == 0 && assignment.participant_id != target.participant_id
+        })
+        .collect::<Vec<_>>();
+    assert!(!candidates.is_empty());
+    for candidate in candidates {
+        let result = edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &candidate.participant_id,
+            1,
+            T4,
+        );
+        assert!(
+            result.is_err(),
+            "a complete schedule must reject every single-cell swap"
+        );
+    }
+    assert_eq!(
+        PlanRepo::latest(fixture.db.conn(), EVENT)
+            .unwrap()
+            .unwrap()
+            .version,
+        1
+    );
+}
+
+#[test]
+fn every_single_cell_edit_is_valid_or_rejected_without_writing() {
+    use swap_engine::edit_plan_assignment;
+
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = fixture.lock_and_schedule();
+    let cells = schedule
+        .iter()
+        .map(|assignment| (assignment.round, assignment.track_code.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let people = schedule
+        .iter()
+        .map(|assignment| assignment.participant_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut version = PlanRepo::latest(fixture.db.conn(), EVENT)
+        .unwrap()
+        .unwrap()
+        .version;
+    for (round, track) in cells {
+        for participant in &people {
+            let result =
+                edit_plan_assignment(&fixture.db, EVENT, round, &track, participant, version, T4);
+            match result {
+                Ok(outcome) => {
+                    assert_eq!(outcome.version, version + 1);
+                    version = outcome.version;
+                    let assignments =
+                        PlanRepo::list_assignments(fixture.db.conn(), EVENT, version).unwrap();
+                    let mut pairs = std::collections::BTreeSet::new();
+                    let mut round_people = std::collections::BTreeSet::new();
+                    let mut round_tracks = std::collections::BTreeSet::new();
+                    for assignment in assignments {
+                        assert!(pairs.insert((
+                            assignment.participant_id.clone(),
+                            assignment.track_code.clone()
+                        )));
+                        assert!(
+                            round_people
+                                .insert((assignment.round, assignment.participant_id.clone()))
+                        );
+                        assert!(
+                            round_tracks.insert((assignment.round, assignment.track_code.clone()))
+                        );
+                        assert_ne!(
+                            TrackRepo::get(fixture.db.conn(), EVENT, &assignment.track_code)
+                                .unwrap()
+                                .unwrap()
+                                .owner_id,
+                            assignment.participant_id
+                        );
+                    }
+                }
+                Err(error) => {
+                    assert!(
+                        matches!(
+                            error,
+                            EngineError::PlanOwnTrack { .. }
+                                | EngineError::PlanRepeat { .. }
+                                | EngineError::PlanNoChange
+                                | EngineError::PlanParticipantNotInRound
+                                | EngineError::PlanCellNotFound { .. }
+                                | EngineError::PlanChanged
+                                | EngineError::PlanInvalid(_)
+                        ),
+                        "unexpected error: {error:?}"
+                    );
+                    assert_eq!(
+                        PlanRepo::latest(fixture.db.conn(), EVENT)
+                            .unwrap()
+                            .unwrap()
+                            .version,
+                        version
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn manual_edit_rejects_a_stale_plan_version_after_start_or_with_paused_people() {
+    use swap_engine::edit_plan_assignment;
+
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = fixture.lock_and_schedule();
+    let target = schedule
+        .iter()
+        .find(|assignment| assignment.round == 0)
+        .unwrap()
+        .clone();
+    let candidate = schedule
+        .iter()
+        .find(|assignment| {
+            assignment.round == 0 && assignment.participant_id != target.participant_id
+        })
+        .unwrap()
+        .clone();
+    assert!(matches!(
+        edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &candidate.participant_id,
+            0,
+            T4
+        ),
+        Err(EngineError::PlanChanged)
+    ));
+    let mut paused = ParticipantRepo::get(fixture.db.conn(), EVENT, &target.participant_id)
+        .unwrap()
+        .unwrap();
+    paused.readiness = Readiness::Paused;
+    ParticipantRepo::upsert(fixture.db.conn(), &paused).unwrap();
+    assert!(matches!(
+        edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &candidate.participant_id,
+            1,
+            T4
+        ),
+        Err(EngineError::PlanInvalid(_))
+    ));
+}
+
+#[test]
+fn manual_edit_rejects_an_incomplete_plan_and_a_started_event() {
+    use swap_engine::edit_plan_assignment;
+
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = fixture.lock_and_schedule();
+    let target = schedule
+        .iter()
+        .find(|assignment| assignment.round == 0)
+        .unwrap()
+        .clone();
+    let candidate = schedule
+        .iter()
+        .find(|assignment| {
+            assignment.round == 0 && assignment.participant_id != target.participant_id
+        })
+        .unwrap()
+        .clone();
+    PrivacyRepo::delete_plan_after(fixture.db.conn(), EVENT, &candidate.participant_id, -1)
+        .unwrap();
+    assert!(matches!(
+        edit_plan_assignment(
+            &fixture.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &candidate.participant_id,
+            1,
+            T4
+        ),
+        Err(EngineError::PlanInvalid(_))
+    ));
+
+    let started = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = started.lock_and_schedule();
+    started.start();
+    let target = schedule
+        .iter()
+        .find(|assignment| assignment.round == 0)
+        .unwrap()
+        .clone();
+    let candidate = schedule
+        .iter()
+        .find(|assignment| {
+            assignment.round == 0 && assignment.participant_id != target.participant_id
+        })
+        .unwrap()
+        .clone();
+    assert!(matches!(
+        edit_plan_assignment(
+            &started.db,
+            EVENT,
+            0,
+            &target.track_code,
+            &candidate.participant_id,
+            1,
+            T4
+        ),
+        Err(EngineError::WrongEventState { .. })
+    ));
 }
 
 #[test]

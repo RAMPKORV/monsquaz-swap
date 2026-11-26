@@ -238,8 +238,15 @@ export type PlanCell = {
 
 export type MatrixTrack = {
   trackCode: string;
+  ownerId: string;
   ownerGroup: string;
   cells: PlanCell[];
+};
+
+export type PlanEditCandidate = {
+  participantId: string;
+  participantName: string;
+  currentTrack: string;
 };
 
 export type PlannerGroup = {
@@ -295,6 +302,8 @@ export type RevealData = {
 export type PlanData = {
   status: "No event" | "No plan" | "Draft" | "Committed" | "Infeasible";
   event: EventSummary | null;
+  version: number;
+  commitment: string;
   rounds: number;
   tracks: number;
   participants: number;

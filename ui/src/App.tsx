@@ -34,7 +34,9 @@ import {
   createEvent,
   decideDeadline,
   decideExtension,
+  editPlanAssignment,
   generatePlan,
+  loadPlanEditCandidates,
   lockRoster,
   openRound,
   revealEvent,
@@ -431,6 +433,22 @@ export default function App() {
     }
   }
 
+  async function handleEditAssignment(
+    round: number,
+    trackCode: string,
+    participantId: string,
+    expectedVersion: number,
+  ) {
+    const next = await editPlanAssignment(
+      round,
+      trackCode,
+      participantId,
+      expectedVersion,
+    );
+    setPlan(next);
+    setToast("Schedule saved as a new version.");
+  }
+
   async function handleSetPaused(userId: string, paused: boolean) {
     if (demo) {
       setToast(
@@ -639,6 +657,8 @@ export default function App() {
         data={plan}
         onAction={notify}
         onGeneratePlan={handleGeneratePlan}
+        onEditAssignment={handleEditAssignment}
+        onLoadCandidates={loadPlanEditCandidates}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
       />

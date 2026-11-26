@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
-import { loadRevealPackage, resetDemoReveal } from "./data/client";
+import {
+  loadRevealPackage,
+  resetDemoPlan,
+  resetDemoReveal,
+} from "./data/client";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -20,6 +24,7 @@ function setUrl(search: string) {
 beforeEach(() => {
   window.sessionStorage.clear();
   resetDemoReveal();
+  resetDemoPlan();
   setUrl("?demo=1");
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -250,6 +255,59 @@ describe("App", () => {
     expect(
       screen.queryByText("Reveal published to the reveal channel."),
     ).not.toBeInTheDocument();
+  });
+
+  it("changes one assignment before the schedule is locked", async () => {
+    setUrl("?demo=1&view=plan&state=dense");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Schedule planner" });
+    const firstCell = screen.getAllByRole("button", {
+      name: /Edit Round 1 track/,
+    })[0];
+    firstCell.focus();
+    fireEvent.keyDown(firstCell, { key: "ArrowRight" });
+    expect(document.activeElement).toHaveAccessibleName(/Edit Round 2 track/);
+    fireEvent.click(firstCell);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Change Round 1 assignment",
+    });
+    const select = await within(dialog).findByLabelText("New holder");
+    expect((select as HTMLSelectElement).value).toBe("");
+    expect(
+      within(dialog).getByRole("button", { name: "Save change" }),
+    ).toBeDisabled();
+    const options = within(select).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    fireEvent.change(select, { target: { value: options[1].getAttribute("value") } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save change" }),
+    );
+    expect(
+      await screen.findByText("Schedule saved as a new version."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Plan v2")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "Change Round 1 assignment" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains when no valid swap exists", async () => {
+    setUrl("?demo=1&view=plan&state=dense&dialog=edit&nocandidates=1");
+    render(<App />);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Change Round 1 assignment",
+    });
+    expect(
+      await within(dialog).findByText(
+        /No person in this round can take this track/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await within(dialog).findByRole("button", { name: "Replace draft" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Save change" }),
+    ).toBeDisabled();
   });
 
   it("shows the first-run state", async () => {

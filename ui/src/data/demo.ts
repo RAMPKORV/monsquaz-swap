@@ -1008,6 +1008,7 @@ function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
   const offsets = planRoundOffsets(count);
   return trackOrder.map((trackIndex, position) => ({
     trackCode: trackCodes[trackIndex % trackCodes.length]!,
+    ownerId: `user-${trackIndex.toString().padStart(2, "0")}`,
     ownerGroup: String.fromCharCode(65 + Math.floor(trackIndex / groupSize)),
     cells: Array.from({ length: rounds }, (_, round) => {
       const offset = offsets[round % offsets.length]!;
@@ -1053,6 +1054,8 @@ export function demoPlan(scenario: Scenario): PlanData {
     return {
       status: "No event",
       event: null,
+      version: 0,
+      commitment: "",
       rounds: 0,
       tracks: 0,
       participants: 0,
@@ -1076,6 +1079,8 @@ export function demoPlan(scenario: Scenario): PlanData {
     return {
       status: "Infeasible",
       event,
+      version: 1,
+      commitment: "demo-commit-1",
       rounds,
       tracks: count,
       participants: count,
@@ -1130,6 +1135,8 @@ export function demoPlan(scenario: Scenario): PlanData {
   return {
     status: "Draft",
     event,
+    version: 1,
+    commitment: "demo-commit-1",
     rounds,
     tracks: count,
     participants: count,

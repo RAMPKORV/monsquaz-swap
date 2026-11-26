@@ -633,7 +633,9 @@ pub fn generate_schedule(
     let active: Vec<&ParticipantRecord> = participants
         .iter()
         .filter(|participant| {
-            participant.membership == Membership::Active && participant.role == Role::Participant
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == Readiness::Ready
         })
         .collect();
     if active.is_empty() {

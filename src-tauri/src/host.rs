@@ -1354,7 +1354,7 @@ pub fn host_plan_edit_candidates(
                 })
                 .collect()
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| friendly_plan_error(&db, &event.id, error))
 }
 
 #[tauri::command]

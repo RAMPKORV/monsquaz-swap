@@ -13,6 +13,14 @@ use tokio::sync::watch;
 ///
 /// The setup service starts this host after it reads the token from the OS
 /// keychain. The token never enters the UI after setup.
+struct FinishGuard(Arc<AtomicBool>);
+
+impl Drop for FinishGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 pub struct GatewayHost {
     stop: watch::Sender<bool>,
     task: JoinHandle<Result<(), GatewayError>>,
@@ -34,9 +42,8 @@ impl GatewayHost {
         let finished = Arc::new(AtomicBool::new(false));
         let task_finished = finished.clone();
         let task = spawn(async move {
-            let result = supervisor.run(stop_rx).await;
-            task_finished.store(true, Ordering::SeqCst);
-            result
+            let _finished = FinishGuard(task_finished);
+            supervisor.run(stop_rx).await
         });
         Ok(Self {
             stop,

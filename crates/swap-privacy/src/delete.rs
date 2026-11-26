@@ -1,7 +1,8 @@
 use swap_core::{AssignmentStatus, Membership, Readiness};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DbError, MetaRepo, ParticipantRecord, ParticipantRepo,
-    PrivacyRepo, TrackRepo, Transaction,
+    AssignmentRepo, AuditRepo, Db, DbError, DeliveryRepo, DmCursorRepo, MetaRepo,
+    ParticipantRecord, ParticipantRepo, PrivacyRepo, ProcessedAttachmentRepo, TrackRepo,
+    Transaction,
 };
 use swap_files::sha256_hex;
 
@@ -79,6 +80,9 @@ pub fn delete_participant(
     let plan_assignments_removed =
         PrivacyRepo::delete_plan_after(&transaction, event_id, user_id, last_opened_round)?;
     let counts = PrivacyRepo::replace_identity(&transaction, event_id, user_id, &tombstone_id)?;
+    DmCursorRepo::delete(&transaction, user_id)?;
+    ProcessedAttachmentRepo::delete_for_user(&transaction, user_id)?;
+    DeliveryRepo::delete_for_recipient(&transaction, user_id)?;
     ParticipantRepo::delete(&transaction, event_id, user_id)?;
 
     let detail = serde_json::json!({

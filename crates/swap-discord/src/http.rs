@@ -16,7 +16,10 @@ use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, MessageMarker, UserMarker};
 
 use crate::inbound::DmAttachment;
-use crate::port::{DiscordError, DiscordPort, InboundDm, OutboundFile, OutboundMessage};
+use crate::port::{
+    AttachmentError, AttachmentFetcher, DiscordError, DiscordPort, InboundDm, OutboundFile,
+    OutboundMessage,
+};
 use crate::setup::validate_bot_token_shape;
 use crate::{DiscordChannelId, DiscordUserId, MessageId};
 
@@ -162,6 +165,68 @@ impl DiscordPort for HttpDiscordPort {
         self.send_message(channel, &message).await
     }
 
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError> {
+        let channel = parse_id::<ChannelMarker>(&channel_id.0)?;
+        let thread = self
+            .http
+            .create_thread(channel, name, ChannelType::PrivateThread)
+            .await
+            .map_err(map_http_error)?
+            .model()
+            .await
+            .map_err(map_body_error)?;
+        Ok(DiscordChannelId::new(thread.id.get().to_string()))
+    }
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError> {
+        let thread = parse_id::<ChannelMarker>(&thread_id.0)?;
+        let user = parse_id::<UserMarker>(&user_id.0)?;
+        self.http
+            .add_thread_member(thread, user)
+            .await
+            .map_err(map_http_error)?;
+        Ok(())
+    }
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError> {
+        let channel = parse_id::<ChannelMarker>(&channel_id.0)?;
+        let filename = safe_filename(&file.filename);
+        let attachment = DiscordAttachment {
+            file: file.bytes,
+            filename: filename.to_string(),
+            id: 0,
+            description: None,
+            duration_secs: None,
+            is_spoiler: None,
+            title: None,
+            waveform: None,
+        };
+        let mut message = self.http.create_message(channel);
+        if !file.caption.trim().is_empty() {
+            message = message.content(&file.caption);
+        }
+        let sent = message
+            .attachments(std::slice::from_ref(&attachment))
+            .await
+            .map_err(map_http_error)?
+            .model()
+            .await
+            .map_err(map_body_error)?;
+        Ok(MessageId::new(sent.id.get().to_string()))
+    }
+
     async fn fetch_dm_after(
         &self,
         user_id: &DiscordUserId,
@@ -264,8 +329,7 @@ fn map_api_code(code: u64) -> DiscordError {
     match code {
         10013 => DiscordError::UnknownUser,
         50007 => DiscordError::DmClosed,
-        50001 | 50002 => DiscordError::NoMutualGuild,
-        50013 => DiscordError::Other("Discord says the bot lacks permission".to_string()),
+        50001 | 50002 | 50013 => DiscordError::MissingAccess,
         code => DiscordError::Other(format!("Discord API error {code}")),
     }
 }
@@ -278,9 +342,81 @@ pub fn is_text_channel(kind: ChannelType) -> bool {
     )
 }
 
+/// Downloads Discord CDN attachments for immediate intake.
+pub struct HttpAttachmentFetcher {
+    client: reqwest::Client,
+}
+
+impl HttpAttachmentFetcher {
+    pub fn new() -> Result<Self, AttachmentError> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
+        Ok(Self { client })
+    }
+}
+
+impl Default for HttpAttachmentFetcher {
+    fn default() -> Self {
+        Self::new().expect("the attachment HTTP client must build")
+    }
+}
+
+#[async_trait]
+impl AttachmentFetcher for HttpAttachmentFetcher {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError> {
+        if !url.starts_with("https://cdn.discordapp.com/")
+            && !url.starts_with("https://media.discordapp.net/")
+        {
+            return Err(AttachmentError::InvalidUrl);
+        }
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AttachmentError::Transport(format!(
+                "Discord CDN returned {}",
+                response.status()
+            )));
+        }
+        if let Some(length) = response.content_length()
+            && length > max_bytes
+        {
+            return Err(AttachmentError::TooLarge);
+        }
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| AttachmentError::Transport(error.to_string()))?
+        {
+            if bytes.len() as u64 + chunk.len() as u64 > max_bytes {
+                return Err(AttachmentError::TooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_attachment_fetcher_refuses_a_foreign_url() {
+        let fetcher = HttpAttachmentFetcher::new().unwrap();
+        assert_eq!(
+            fetcher.fetch("http://localhost/file", 10).await,
+            Err(AttachmentError::InvalidUrl)
+        );
+    }
 
     #[test]
     fn a_filename_cannot_escape_the_store() {
@@ -294,9 +430,9 @@ mod tests {
     fn discord_error_codes_are_classified() {
         assert_eq!(map_api_code(10013), DiscordError::UnknownUser);
         assert_eq!(map_api_code(50007), DiscordError::DmClosed);
-        assert_eq!(map_api_code(50001), DiscordError::NoMutualGuild);
-        assert_eq!(map_api_code(50002), DiscordError::NoMutualGuild);
-        assert!(matches!(map_api_code(50013), DiscordError::Other(_)));
+        assert_eq!(map_api_code(50001), DiscordError::MissingAccess);
+        assert_eq!(map_api_code(50002), DiscordError::MissingAccess);
+        assert_eq!(map_api_code(50013), DiscordError::MissingAccess);
     }
 
     #[test]

@@ -8,6 +8,8 @@ authors.workspace = true
 description = "Event application service for Monsquaz Swap"
 
 [dependencies]
+async-trait = "0.1"
+bincode = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -15,6 +17,7 @@ swap-core = { path = "../swap-core" }
 swap-db = { path = "../swap-db" }
 swap-discord = { path = "../swap-discord", default-features = false }
 swap-files = { path = "../swap-files" }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 thiserror = "2"
 
 [dev-dependencies]

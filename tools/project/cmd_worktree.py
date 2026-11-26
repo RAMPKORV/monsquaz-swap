@@ -194,7 +194,7 @@ def cmd_worktree_new(a):
     result = core.write(fn)
     if warning:
         result["warning"] = warning
-    setup = core.repo_path("scripts/worktree-setup.sh")
+    setup = wt / "scripts/worktree-setup.sh"
     if setup.exists() and os.access(setup, os.X_OK) and not a.no_setup:
         env = dict(os.environ, PROJECT_WORKSPACE=str(core.workspace_root()),
                    PROJECT_ISSUE=issue["key"], PROJECT_BRANCH=branch)

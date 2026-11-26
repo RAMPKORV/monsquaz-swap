@@ -6,8 +6,8 @@
 //! or a live Discord connection.
 
 use swap_discord::{
-    DiscordPort, DiscordUserId, HttpDiscordPort, OutboundFile, OutboundMessage, SetupDirectory,
-    TwilightSetup,
+    DiscordChannelId, DiscordPort, DiscordUserId, HttpDiscordPort, OutboundFile, OutboundMessage,
+    SetupDirectory, TwilightSetup,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -47,6 +47,7 @@ const CHANNELS: &str = r#"[
 ]"#;
 
 const DM_CHANNEL: &str = r#"{"id": "100", "type": 1}"#;
+const PRIVATE_THREAD: &str = r#"{"id": "101", "type": 12, "name": "Monsquaz Swap delivery"}"#;
 
 const MESSAGE: &str = r#"{
   "attachments": [],
@@ -222,4 +223,56 @@ async fn the_setup_test_dm_uses_the_same_mock() {
         String::from_utf8_lossy(&requests[1].body)
             .contains("Monsquaz Swap test message. Your bot can reach you.")
     );
+}
+
+#[tokio::test]
+async fn the_http_port_creates_a_private_thread_and_sends_a_file() {
+    install_crypto();
+    let server = MockServer::start().await;
+    mount_json(
+        &server,
+        "POST",
+        "/api/v10/channels/10/threads",
+        PRIVATE_THREAD,
+    )
+    .await;
+    Mock::given(method("PUT"))
+        .and(path("/api/v10/channels/101/thread-members/42"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    mount_json(&server, "POST", "/api/v10/channels/101/messages", MESSAGE).await;
+
+    let token = "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc";
+    let port = HttpDiscordPort::with_proxy(token, proxy_host(&server)).unwrap();
+    let thread = port
+        .create_private_thread(&DiscordChannelId::new("10"), "Monsquaz Swap delivery")
+        .await
+        .unwrap();
+    assert_eq!(thread.0, "101");
+    port.add_thread_member(&thread, &DiscordUserId::new("42"))
+        .await
+        .unwrap();
+    let id = port
+        .send_file_to_channel(
+            &thread,
+            OutboundFile {
+                filename: "S7F3A.it".to_string(),
+                bytes: vec![1, 2, 3],
+                caption: "Track S7F3A. Your turn.".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(id.0, "555");
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_bot_auth(&requests, token);
+    assert_eq!(requests[0].url.path(), "/api/v10/channels/10/threads");
+    assert_eq!(
+        requests[1].url.path(),
+        "/api/v10/channels/101/thread-members/42"
+    );
+    assert_eq!(requests[2].url.path(), "/api/v10/channels/101/messages");
 }

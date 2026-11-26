@@ -76,6 +76,25 @@ impl EventRepo {
         Ok(())
     }
 
+    pub fn active_for_user(
+        conn: &Connection,
+        user_id: &str,
+    ) -> Result<Option<EventRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT e.id, e.name, e.state, e.seed, e.settings_json, e.created_at, e.updated_at
+                 FROM events e
+                 JOIN participants p ON p.event_id = e.id
+                 WHERE p.user_id = ?1 AND p.membership = 'active'
+                   AND e.state IN ('active', 'paused')
+                 ORDER BY e.updated_at DESC LIMIT 1",
+                params![user_id],
+                row_to_raw_event,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
     pub fn get(conn: &Connection, id: &str) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(
@@ -1171,5 +1190,400 @@ impl PrivacyRepo {
             params![event_id, participant_id, round],
         )?;
         Ok(changed)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeliveryRecord {
+    pub id: String,
+    pub event_id: String,
+    pub recipient_id: Option<String>,
+    pub kind: String,
+    pub payload: Vec<u8>,
+    pub status: String,
+    pub attempts: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub sent_at: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+fn row_to_delivery(row: &Row<'_>) -> rusqlite::Result<DeliveryRecord> {
+    Ok(DeliveryRecord {
+        id: row.get(0)?,
+        event_id: row.get(1)?,
+        recipient_id: row.get(2)?,
+        kind: row.get(3)?,
+        payload: row.get(4)?,
+        status: row.get(5)?,
+        attempts: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        sent_at: row.get(9)?,
+        last_error: row.get(10)?,
+    })
+}
+
+pub struct DeliveryRepo;
+
+impl DeliveryRepo {
+    /// Insert a delivery. The id is the dedupe key. Returns true when the row
+    /// is new.
+    pub fn enqueue(
+        conn: &Connection,
+        id: &str,
+        event_id: &str,
+        recipient_id: Option<&str>,
+        kind: &str,
+        payload: &[u8],
+        now: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "INSERT INTO deliveries
+                (id, event_id, recipient_id, kind, payload, status, attempts, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', 0, ?6, ?6)
+             ON CONFLICT(id) DO NOTHING",
+            params![id, event_id, recipient_id, kind, payload, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Result<Option<DeliveryRecord>, DbError> {
+        let row = conn
+            .query_row(
+                "SELECT id, event_id, recipient_id, kind, payload, status, attempts, created_at,
+                        updated_at, sent_at, last_error
+                 FROM deliveries WHERE id = ?1",
+                params![id],
+                row_to_delivery,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub fn pending(conn: &Connection, limit: usize) -> Result<Vec<DeliveryRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, recipient_id, kind, payload, status, attempts, created_at,
+                    updated_at, sent_at, last_error
+             FROM deliveries WHERE status = 'pending'
+             ORDER BY updated_at, id LIMIT ?1",
+        )?;
+        let rows = statement
+            .query_map(params![limit as i64], row_to_delivery)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn delete_for_recipient(conn: &Connection, recipient_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM deliveries WHERE recipient_id = ?1",
+            params![recipient_id],
+        )?)
+    }
+
+    pub fn count_pending(conn: &Connection) -> Result<i64, DbError> {
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM deliveries WHERE status = 'pending'",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn mark_sent(conn: &Connection, id: &str, now: i64) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE deliveries
+             SET status = 'sent', sent_at = ?2, updated_at = ?2, last_error = NULL
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn mark_retry(conn: &Connection, id: &str, now: i64, error: &str) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE deliveries
+             SET attempts = attempts + 1, updated_at = ?2, last_error = ?3
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now, error],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn mark_failed(
+        conn: &Connection,
+        id: &str,
+        now: i64,
+        error: &str,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE deliveries
+             SET status = 'failed', updated_at = ?2, last_error = ?3
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now, error],
+        )?;
+        Ok(changed > 0)
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use crate::db::Db;
+    use swap_core::EventState;
+
+    fn event() -> EventRecord {
+        EventRecord {
+            id: "evt-1".to_string(),
+            name: "Test Swap".to_string(),
+            state: EventState::Draft,
+            seed: 42,
+            settings_json: "{}".to_string(),
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn enqueue_is_idempotent_and_marks_sent() {
+        let db = Db::open_in_memory().unwrap();
+        EventRepo::insert(db.conn(), &event()).unwrap();
+
+        assert!(
+            DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", None, "dm", b"payload", 10).unwrap()
+        );
+        assert!(
+            !DeliveryRepo::enqueue(db.conn(), "key-1", "evt-1", None, "dm", b"payload", 11)
+                .unwrap()
+        );
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 1);
+
+        let pending = DeliveryRepo::pending(db.conn(), 10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "key-1");
+        assert_eq!(pending[0].payload, b"payload");
+
+        assert!(DeliveryRepo::mark_sent(db.conn(), "key-1", 20).unwrap());
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+        let sent = DeliveryRepo::get(db.conn(), "key-1").unwrap().unwrap();
+        assert_eq!(sent.status, "sent");
+        assert_eq!(sent.sent_at, Some(20));
+    }
+
+    #[test]
+    fn a_rolled_back_enqueue_is_not_visible() {
+        let mut db = Db::open_in_memory().unwrap();
+        EventRepo::insert(db.conn(), &event()).unwrap();
+        {
+            let tx = db.conn_mut().transaction().unwrap();
+            DeliveryRepo::enqueue(&tx, "rollback", "evt-1", None, "dm", b"payload", 10).unwrap();
+            tx.rollback().unwrap();
+        }
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+
+        {
+            let tx = db.conn_mut().transaction().unwrap();
+            DeliveryRepo::enqueue(&tx, "commit", "evt-1", None, "dm", b"payload", 11).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_failed_attempt_stays_pending_until_the_terminal_failure() {
+        let db = Db::open_in_memory().unwrap();
+        EventRepo::insert(db.conn(), &event()).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "key-2", "evt-1", None, "file", b"file", 10).unwrap();
+
+        assert!(DeliveryRepo::mark_retry(db.conn(), "key-2", 20, "temporary").unwrap());
+        let row = DeliveryRepo::get(db.conn(), "key-2").unwrap().unwrap();
+        assert_eq!(row.status, "pending");
+        assert_eq!(row.attempts, 1);
+        assert_eq!(row.last_error.as_deref(), Some("temporary"));
+
+        assert!(DeliveryRepo::mark_failed(db.conn(), "key-2", 30, "dm closed").unwrap());
+        let row = DeliveryRepo::get(db.conn(), "key-2").unwrap().unwrap();
+        assert_eq!(row.status, "failed");
+        assert_eq!(row.attempts, 1);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DmCursorRecord {
+    pub user_id: String,
+    pub channel_id: String,
+    pub last_seen_message_id: Option<String>,
+    pub last_sent_message_id: Option<String>,
+    pub updated_at: i64,
+}
+
+pub struct DmCursorRepo;
+
+impl DmCursorRepo {
+    pub fn upsert(
+        conn: &Connection,
+        user_id: &str,
+        channel_id: &str,
+        last_seen_message_id: Option<&str>,
+        now: i64,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO dm_cursors
+                (user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at)
+             VALUES (?1, ?2, ?3, NULL, ?4)
+             ON CONFLICT(user_id) DO UPDATE SET
+                 channel_id = excluded.channel_id,
+                 last_seen_message_id = CASE
+                     WHEN dm_cursors.last_seen_message_id IS NULL THEN excluded.last_seen_message_id
+                     WHEN excluded.last_seen_message_id IS NULL THEN dm_cursors.last_seen_message_id
+                     WHEN CAST(excluded.last_seen_message_id AS INTEGER)
+                          > CAST(dm_cursors.last_seen_message_id AS INTEGER)
+                         THEN excluded.last_seen_message_id
+                     ELSE dm_cursors.last_seen_message_id
+                 END,
+                 updated_at = excluded.updated_at",
+            params![user_id, channel_id, last_seen_message_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(conn: &Connection, user_id: &str) -> Result<Option<DmCursorRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at
+                 FROM dm_cursors WHERE user_id = ?1",
+                params![user_id],
+                |row| {
+                    Ok(DmCursorRecord {
+                        user_id: row.get(0)?,
+                        channel_id: row.get(1)?,
+                        last_seen_message_id: row.get(2)?,
+                        last_sent_message_id: row.get(3)?,
+                        updated_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    /// Record an outbound message. An offer also seeds the inbound cursor to
+    /// the offer message, so backfill cannot return older history.
+    pub fn set_sent(
+        conn: &Connection,
+        user_id: &str,
+        channel_id: &str,
+        message_id: &str,
+        seed_seen: bool,
+        now: i64,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO dm_cursors
+                (user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at)
+             VALUES (?1, ?2, CASE WHEN ?5 THEN ?3 ELSE NULL END, ?3, ?4)
+             ON CONFLICT(user_id) DO UPDATE SET
+                 channel_id = COALESCE(NULLIF(dm_cursors.channel_id, ''), excluded.channel_id),
+                 last_seen_message_id = COALESCE(
+                     dm_cursors.last_seen_message_id,
+                     excluded.last_seen_message_id
+                 ),
+                 last_sent_message_id = excluded.last_sent_message_id,
+                 updated_at = excluded.updated_at",
+            params![user_id, channel_id, message_id, now, seed_seen],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete(conn: &Connection, user_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM dm_cursors WHERE user_id = ?1",
+            params![user_id],
+        )?)
+    }
+
+    pub fn list(conn: &Connection) -> Result<Vec<DmCursorRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at
+             FROM dm_cursors ORDER BY user_id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(DmCursorRecord {
+                    user_id: row.get(0)?,
+                    channel_id: row.get(1)?,
+                    last_seen_message_id: row.get(2)?,
+                    last_sent_message_id: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+pub struct ProcessedAttachmentRepo;
+
+impl ProcessedAttachmentRepo {
+    /// Mark an attachment as processed. Returns true when the row is new.
+    pub fn mark(
+        conn: &Connection,
+        user_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+        now: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "INSERT INTO processed_attachments
+                (user_id, message_id, attachment_id, processed_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(user_id, message_id, attachment_id) DO NOTHING",
+            params![user_id, message_id, attachment_id, now],
+        )?;
+        Ok(changed > 0)
+    }
+
+    pub fn delete_for_user(conn: &Connection, user_id: &str) -> Result<usize, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM processed_attachments WHERE user_id = ?1",
+            params![user_id],
+        )?)
+    }
+
+    pub fn is_processed(
+        conn: &Connection,
+        user_id: &str,
+        message_id: &str,
+        attachment_id: &str,
+    ) -> Result<bool, DbError> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM processed_attachments
+             WHERE user_id = ?1 AND message_id = ?2 AND attachment_id = ?3",
+            params![user_id, message_id, attachment_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod dm_cursor_tests {
+    use super::*;
+    use crate::db::Db;
+
+    #[test]
+    fn an_offer_seeds_the_inbound_cursor_and_later_sends_do_not() {
+        let db = Db::open_in_memory().unwrap();
+        DmCursorRepo::set_sent(db.conn(), "u1", "dm", "100", true, 10).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u1").unwrap().unwrap();
+        assert_eq!(cursor.last_seen_message_id.as_deref(), Some("100"));
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("100"));
+
+        DmCursorRepo::set_sent(db.conn(), "u1", "dm", "200", false, 20).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u1").unwrap().unwrap();
+        assert_eq!(cursor.last_seen_message_id.as_deref(), Some("100"));
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("200"));
+
+        DmCursorRepo::set_sent(db.conn(), "u2", "dm", "300", false, 30).unwrap();
+        let cursor = DmCursorRepo::get(db.conn(), "u2").unwrap().unwrap();
+        assert!(cursor.last_seen_message_id.is_none());
+        assert_eq!(cursor.last_sent_message_id.as_deref(), Some("300"));
     }
 }

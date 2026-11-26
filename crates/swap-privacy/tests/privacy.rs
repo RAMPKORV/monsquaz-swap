@@ -1,7 +1,8 @@
 use std::io::{Cursor, Read};
 
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, FileRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, FileRepo, ParticipantRepo, PlanRepo,
+    ProcessedAttachmentRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     Effect, EventSettings, JoinRequest, PassthroughPreparer, SubmitRequest, claim, create_event,
@@ -369,5 +370,40 @@ fn deletion_removes_future_plan_rows_but_keeps_past_credits() {
             .filter(|assignment| assignment.participant_id == report.tombstone_id)
             .count(),
         1
+    );
+}
+
+#[test]
+fn deletion_removes_delivery_state_and_inbound_cursors() {
+    let fixture = Fixture::new(3);
+    fixture.submit_all(0, T4);
+    let target = user(0);
+    DeliveryRepo::enqueue(
+        fixture.db.conn(),
+        "delivery-1",
+        EVENT,
+        Some(&target),
+        "dm",
+        b"payload",
+        T5,
+    )
+    .unwrap();
+    DmCursorRepo::upsert(fixture.db.conn(), &target, "dm", Some("m-1"), T5).unwrap();
+    ProcessedAttachmentRepo::mark(fixture.db.conn(), &target, "m-1", "a-1", T5).unwrap();
+
+    delete_participant(&fixture.db, EVENT, &target, T6).unwrap();
+
+    assert!(
+        DeliveryRepo::get(fixture.db.conn(), "delivery-1")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        DmCursorRepo::get(fixture.db.conn(), &target)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        !ProcessedAttachmentRepo::is_processed(fixture.db.conn(), &target, "m-1", "a-1").unwrap()
     );
 }

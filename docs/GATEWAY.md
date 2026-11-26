@@ -18,10 +18,11 @@ normalized events and decides what to do.
 - The runtime does not download attachment bytes. It passes the URL and size to
   the application. The application downloads and stores the bytes.
 - The runtime does not send DMs or files. The live `HttpDiscordPort` adapter
-  sends the setup test message and backs `fetch_dm_after`. The delivery loop
-  remains in the offer and submission slice.
-- `src-tauri/src/gateway_host.rs` owns the supervisor task on Tauri's runtime.
-  The setup service starts it after it reads the keychain token.
+  sends setup, offer, file, receipt, alert, and thread messages and backs
+  `fetch_dm_after`.
+- `src-tauri/src/live_runtime.rs` owns the supervisor, the inbound service, and
+  the delivery worker. The app starts it when a keychain token and guild are
+  configured.
 
 ## Runtime loop
 
@@ -38,9 +39,11 @@ normalized events and decides what to do.
 9. On a stop signal, close the shard with code 1000 and publish `Stopped`.
 10. On an authentication or configuration error, publish `Failed` and stop.
 
-A handler error increments the `handler_errors` counter. A handler error does
-not close the session. The supervisor gives each handler 5 seconds. A handler
-must not block for longer than that.
+The supervisor gives each handler 5 seconds. The inbound service queues the
+event per participant and returns at once, so a file render or a delivery retry
+cannot cancel the state change. A processing error is logged by the queue
+worker. The supervisor `handler_errors` counter covers queue and transport
+errors, not processing errors. MSW-045 tracks a full health surface.
 
 ## Secrets
 
@@ -78,11 +81,13 @@ The operator observes four things:
 
 ## Rollback
 
-The runtime has no database migration. To roll back:
+The gateway runtime has no migration of its own. The delivery outbox migrations
+live in `swap-db`. To roll back to a build without them:
 
 1. Stop the supervisor. It closes the shard with code 1000.
-2. Remove the `live` feature. The contract and supervisor core still build.
-3. No event data, ledger row, or file changes occur in the gateway.
+2. Restore the database backup from before the first delivery migration.
+3. Remove the `live` feature. The contract and supervisor core still build.
+4. No event data, ledger row, or file changes occur in the gateway.
 
 Verification for the rollback path:
 
@@ -91,13 +96,48 @@ cargo test -p swap-discord --no-default-features
 cargo check -p monsquaz-swap --no-default-features
 ```
 
+## Restart and backfill
+
+The app opens the SQLite database when it starts. It dispatches pending outbox
+rows, then repeats the dispatch every 30 seconds, and runs one DM backfill for
+each recorded inbound cursor. A command that produces an effect commits the
+event state and its outbox rows in one transaction. A restart or reboot keeps
+the event, seen ledger, files, and pending deliveries.
+
+The outbound DM cursor and the inbound DM cursor are separate columns. A sent DM
+can never move the inbound cursor past an unprocessed attachment. Backfill
+ignores an attachment whose Discord message id is more than ten minutes older
+than the current claim.
+Backfill can only visit a participant who has an inbound cursor. Discord does
+not replay a direct message that arrives while the gateway is offline. A
+first-time submitter must send the file again after the gateway reconnects.
+
+An offer seeds the inbound cursor to the offer message, so backfill cannot
+return older history. Inbound events for one participant run in arrival order.
+A live event for a participant with a saved cursor waits until that
+participant's startup backfill succeeds. The dispatcher retries a failed backfill every 30 seconds and posts
+one host alert for each failure streak. A later message never advances the
+cursor past a failed attachment. A transient send retries for about ten
+minutes before the worker marks the delivery failed and alerts the host.
+
+A crash after Discord accepts a send and before the sent mark can duplicate a
+message. The delivery id is stable. A future transport nonce or reconciliation
+step must close that window. The formal delivery model allows duplicate sends
+and one acknowledgement.
+
 ## Deferred work
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and
   `host-status`. Discord command permissions do not apply per subcommand.
-- The bot setup flow is in `docs/SETUP.md`. It stores the token in the OS
-  keychain, maps channels, and sends a test direct message.
-- The start/stop UI commands remain in the delivery slice.
-- Outbound DM, file delivery, and DM backfill remain in the offer and
-  submission slice. `DiscordPort::fetch_dm_after` has no live adapter yet.
+- The settings screen has no dedicated host-alert channel. The worker creates a
+  private thread under the announcement channel and adds no participant. The
+  host must be a thread member to read the alert. Keep the announcement channel
+  free of participants, or add a host-alert channel before beta.
+- The UI does not show gateway health or a dead supervisor task. MSW-045 tracks
+  the status surface.
+- The inbound service handles claim, skip, status, and help. It does not yet
+  route `/swap seed`, `/swap join`, or member joins to the engine. MSW-021
+  tracks the classic end-to-end loop.
+- Transport nonce or reconciliation must close the duplicate-send window
+  (MSW-044).
 - The real test guild smoke test needs `DISCORD_TOKEN` and `DISCORD_GUILD`.

@@ -51,12 +51,35 @@ Feature: Host operations and recovery
     And the first instance stays in control
     And no second bot session starts
 
-  Scenario: A crash does not duplicate a send
+  Scenario: A crash after a send repeats that send
+    Given an assignment that was committed and sent to Discord
+    And the app stops before it records the send
+    When the app restarts
+    Then the app retries the send
+    And the recipient can receive the same message again
+    And the delivery row records the recovery attempt
+    And the app does not repeat the state transition
+
+  Scenario: A crash before a send does not lose the effect
     Given an assignment that was committed but not sent
     When the app crashes and restarts
     Then the app retries the send once
-    And the app does not send a duplicate message
-    And the app records the recovery
+    And the recipient receives the message
+    And the delivery row records the recovery
+
+  Scenario: The host restarts during an active event
+    Given an active event with committed assignments
+    When the host closes the app and starts it again
+    Then the event state and the seen ledger are unchanged
+    And the outbox contains every unacknowledged effect
+    And the app retries each unacknowledged effect
+    And the app never loses a committed effect
+
+  Scenario: A failed command does not change state
+    Given a command that changes an assignment and enqueues an effect
+    When the command fails before it commits
+    Then the assignment keeps its previous state
+    And the outbox contains no effect for the failed command
 
   Scenario: A backup can be restored
     Given an automatic backup from before a transition

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -26,6 +27,73 @@ pub struct InboundDm {
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum AttachmentError {
+    #[error("the attachment URL is not a Discord CDN URL")]
+    InvalidUrl,
+    #[error("the attachment is larger than the configured limit")]
+    TooLarge,
+    #[error("the attachment download failed: {0}")]
+    Transport(String),
+}
+
+/// Downloads an attachment from a Discord CDN URL. The app calls this on
+/// receipt; it must never forward the URL or store it as the file location.
+#[async_trait]
+pub trait AttachmentFetcher: Send + Sync {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError>;
+}
+
+#[derive(Debug, Default)]
+struct FakeAttachmentState {
+    files: HashMap<String, Vec<u8>>,
+    fail_next: Option<AttachmentError>,
+}
+
+#[derive(Debug, Default)]
+pub struct FakeAttachmentFetcher {
+    state: Mutex<FakeAttachmentState>,
+}
+
+impl FakeAttachmentFetcher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&self, url: &str, bytes: &[u8]) {
+        self.lock().files.insert(url.to_string(), bytes.to_vec());
+    }
+
+    pub fn fail_next(&self, error: AttachmentError) {
+        self.lock().fail_next = Some(error);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, FakeAttachmentState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[async_trait]
+impl AttachmentFetcher for FakeAttachmentFetcher {
+    async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError> {
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next.take() {
+            return Err(error);
+        }
+        let bytes = state
+            .files
+            .get(url)
+            .cloned()
+            .ok_or_else(|| AttachmentError::Transport("not found".to_string()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(AttachmentError::TooLarge);
+        }
+        Ok(bytes)
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum DiscordError {
     #[error("direct messages are closed or the bot is blocked")]
     DmClosed,
@@ -33,6 +101,8 @@ pub enum DiscordError {
     NoMutualGuild,
     #[error("the Discord user does not exist")]
     UnknownUser,
+    #[error("Discord says the bot lacks access")]
+    MissingAccess,
     #[error("Discord rate-limited the request")]
     RateLimited,
     #[error("transport error: {0}")]
@@ -70,6 +140,24 @@ pub trait DiscordPort: Send + Sync {
         message: OutboundMessage,
     ) -> Result<MessageId, DiscordError>;
 
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError>;
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError>;
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError>;
+
     async fn fetch_dm_after(
         &self,
         user_id: &DiscordUserId,
@@ -96,6 +184,25 @@ pub struct SentChannelMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedThread {
+    pub channel_id: DiscordChannelId,
+    pub parent_id: DiscordChannelId,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadMember {
+    pub thread_id: DiscordChannelId,
+    pub user_id: DiscordUserId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentChannelFile {
+    pub channel_id: DiscordChannelId,
+    pub file: OutboundFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditedMessage {
     pub user_id: DiscordUserId,
     pub message_id: MessageId,
@@ -108,9 +215,14 @@ struct FakeState {
     dms: Vec<SentDm>,
     files: Vec<SentFile>,
     channel_messages: Vec<SentChannelMessage>,
+    threads: Vec<CreatedThread>,
+    thread_members: Vec<ThreadMember>,
+    channel_files: Vec<SentChannelFile>,
     edits: Vec<EditedMessage>,
     inbound: Vec<(DiscordUserId, InboundDm)>,
     fail_next_dm: Option<DiscordError>,
+    fail_next_thread: Option<DiscordError>,
+    fail_next_fetch: Option<DiscordError>,
 }
 
 #[derive(Debug, Default)]
@@ -132,6 +244,14 @@ impl FakeDiscord {
         self.lock().fail_next_dm = Some(error);
     }
 
+    pub fn fail_next_thread(&self, error: DiscordError) {
+        self.lock().fail_next_thread = Some(error);
+    }
+
+    pub fn fail_next_fetch(&self, error: DiscordError) {
+        self.lock().fail_next_fetch = Some(error);
+    }
+
     pub fn sent_dms(&self) -> Vec<SentDm> {
         self.lock().dms.clone()
     }
@@ -142,6 +262,18 @@ impl FakeDiscord {
 
     pub fn channel_messages(&self) -> Vec<SentChannelMessage> {
         self.lock().channel_messages.clone()
+    }
+
+    pub fn created_threads(&self) -> Vec<CreatedThread> {
+        self.lock().threads.clone()
+    }
+
+    pub fn thread_members(&self) -> Vec<ThreadMember> {
+        self.lock().thread_members.clone()
+    }
+
+    pub fn channel_files(&self) -> Vec<SentChannelFile> {
+        self.lock().channel_files.clone()
     }
 
     pub fn edits(&self) -> Vec<EditedMessage> {
@@ -221,12 +353,60 @@ impl DiscordPort for FakeDiscord {
         Ok(message_id)
     }
 
+    async fn create_private_thread(
+        &self,
+        channel_id: &DiscordChannelId,
+        name: &str,
+    ) -> Result<DiscordChannelId, DiscordError> {
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next_thread.take() {
+            return Err(error);
+        }
+        let thread_id = DiscordChannelId::new(format!("thread-{}", state.next_id + 1));
+        state.next_id += 1;
+        state.threads.push(CreatedThread {
+            channel_id: thread_id.clone(),
+            parent_id: channel_id.clone(),
+            name: name.to_string(),
+        });
+        Ok(thread_id)
+    }
+
+    async fn add_thread_member(
+        &self,
+        thread_id: &DiscordChannelId,
+        user_id: &DiscordUserId,
+    ) -> Result<(), DiscordError> {
+        self.lock().thread_members.push(ThreadMember {
+            thread_id: thread_id.clone(),
+            user_id: user_id.clone(),
+        });
+        Ok(())
+    }
+
+    async fn send_file_to_channel(
+        &self,
+        channel_id: &DiscordChannelId,
+        file: OutboundFile,
+    ) -> Result<MessageId, DiscordError> {
+        let mut state = self.lock();
+        let message_id = Self::next_message_id(&mut state);
+        state.channel_files.push(SentChannelFile {
+            channel_id: channel_id.clone(),
+            file,
+        });
+        Ok(message_id)
+    }
+
     async fn fetch_dm_after(
         &self,
         user_id: &DiscordUserId,
         after: Option<&MessageId>,
     ) -> Result<Vec<InboundDm>, DiscordError> {
-        let state = self.lock();
+        let mut state = self.lock();
+        if let Some(error) = state.fail_next_fetch.take() {
+            return Err(error);
+        }
         let mut messages: Vec<InboundDm> = state
             .inbound
             .iter()

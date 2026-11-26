@@ -60,9 +60,10 @@ The caller dispatches the effects through `DiscordPort`. This keeps the event
 loop deterministic in tests and makes retries explicit.
 
 The current slice ships `swap-core`, `swap-db`, `swap-files`, `swap-discord`,
-`swap-engine`, and `src-tauri`. The live gateway, durable delivery loop, and
-restart recovery are in place. The async queue, deadline automation, reveal,
-and remaining UI screens land with their issues.
+`swap-engine`, and `src-tauri`. The live gateway, durable delivery loop,
+restart recovery, classic production loop, and gateway health are in place. The
+async queue, deadline automation, reveal presenter and exports, and remaining
+UI screens land with their issues.
 
 ## Data flow
 

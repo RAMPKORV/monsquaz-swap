@@ -6,8 +6,9 @@ they have never worked on, edit them, and pass them on. Nobody learns who
 worked on what until the reveal. The result is a collaborative album made by
 surprise.
 
-> Status: **spec-first scaffold.** The Tauri shell, Rust core invariant, tracker,
-> and release wiring exist. The classic event loop is the next milestone.
+> Status: **classic loop in place.** The Tauri shell, Rust core, durable
+> delivery, and classic production loop work. Deadlines and the reveal
+> presenter are the next milestone.
 
 ## Why
 

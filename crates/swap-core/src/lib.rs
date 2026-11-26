@@ -9,6 +9,7 @@
 //! The state machines here are intentionally small. The app layer composes
 //! them; the UI and the bot do not invent their own states.
 
+pub mod async_queue;
 pub mod groups;
 pub mod ids;
 pub mod ledger;
@@ -16,6 +17,7 @@ pub mod reveal;
 pub mod schedule;
 pub mod state;
 
+pub use async_queue::{AsyncCandidate, AsyncChoice, choose_async_offers};
 pub use groups::{
     GroupPhase, GroupSchedule, GroupScheduleError, GroupShape, GroupWarning, MAX_GROUP_COUNT,
     MAX_GROUP_SIZE, MAX_PHASES, MIN_GROUP_SIZE, MIN_PHASES, default_cadence, group_schedule,

@@ -16,9 +16,9 @@ use swap_db::{
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
-    edit_plan_assignment, generate_schedule, lock_roster, open_round, plan_edit_candidates,
-    redact_track_comment, repair_group_schedule, reveal_package, reveal_with_channel,
-    set_track_title, start_event_with_channel,
+    dispatch_async_wave, edit_plan_assignment, generate_schedule, lock_roster, open_round,
+    plan_edit_candidates, redact_track_comment, repair_group_schedule, reveal_package,
+    reveal_with_channel, set_track_title, start_async_event, start_event_with_channel,
 };
 
 #[derive(Debug, Serialize)]
@@ -1233,6 +1233,32 @@ pub fn host_repair_groups(app: AppHandle) -> Result<PlanDataDto, String> {
     repair_host_groups(&db)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsyncWaveDto {
+    offers: usize,
+}
+
+#[tauri::command]
+pub fn host_async_dispatch(app: AppHandle) -> Result<AsyncWaveDto, String> {
+    let db = open_db(&app)?;
+    let result = dispatch_host_async_wave(&db);
+    if result.as_ref().is_ok_and(|wave| wave.offers > 0) {
+        #[cfg(feature = "live")]
+        app.state::<crate::live_runtime::LiveRuntime>().wake();
+    }
+    result
+}
+
+fn dispatch_host_async_wave(db: &Db) -> Result<AsyncWaveDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    let outcome = dispatch_async_wave(db, &event.id, now).map_err(|error| error.to_string())?;
+    Ok(AsyncWaveDto {
+        offers: outcome.offers,
+    })
+}
+
 fn repair_host_groups(db: &Db) -> Result<PlanDataDto, String> {
     let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
@@ -1670,6 +1696,22 @@ pub fn host_start_event(app: AppHandle) -> Result<PlanDataDto, String> {
 fn start_host_event_with_channel(db: &Db, channel_id: Option<&str>) -> Result<PlanDataDto, String> {
     let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
     let now = now_secs();
+    let settings: swap_engine::EventSettings =
+        serde_json::from_str(&event.settings_json).unwrap_or_default();
+    if settings.mode == swap_engine::Mode::Async {
+        start_async_event(db, &event.id, now).map_err(|error| error.to_string())?;
+        AuditRepo::insert(
+            db.conn(),
+            &event.id,
+            now,
+            "Host",
+            "Event started",
+            None,
+            &serde_json::json!({ "mode": "async" }).to_string(),
+        )
+        .map_err(|error| error.to_string())?;
+        return plan_data(db);
+    }
     let outcome = start_event_with_channel(db, &event.id, channel_id, now)
         .map_err(|error| error.to_string())?;
     AuditRepo::insert(
@@ -2619,6 +2661,43 @@ mod tests {
             repair_host_groups(&db).unwrap_err(),
             "the groups do not need repair"
         );
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn async_start_and_dispatch_write_offers() {
+        let (db, directory) = test_db("async-dispatch");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Async Wave".to_string(),
+                mode: "Async".to_string(),
+                rounds: Some(3),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..4 {
+            let id = format!("u-{index:02}");
+            let name = format!("Person {index:02}");
+            let code = format!("T{index:02}");
+            seed_person(&db, &created.id, &id, &name);
+            seed_track(&db, &created.id, &code, &id);
+        }
+        lock_host_roster(&db).unwrap();
+        start_host_event_with_channel(&db, None).unwrap();
+        let wave = dispatch_host_async_wave(&db).unwrap();
+        assert_eq!(wave.offers, 4);
+        let entries = AuditRepo::list_for_event(db.conn(), &created.id).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.action == "Async wave dispatched")
+        );
+        assert!(entries.iter().any(|entry| entry.action == "Event started"
+            && entry.detail_json.contains("async")));
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

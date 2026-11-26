@@ -1,12 +1,14 @@
+use std::collections::{BTreeMap, HashMap, HashSet};
+
 use chrono::{TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use swap_core::{
-    AssignmentStatus, EventState, Membership, ParticipantId, Readiness, Role, Schedule, StateError,
-    TrackCode, TrackSpec, TrackState, album_order,
+    AssignmentStatus, AsyncCandidate, EventState, Membership, ParticipantId, Readiness, Role,
+    Schedule, StateError, TrackCode, TrackSpec, TrackState, album_order, choose_async_offers,
 };
 use swap_db::{
     AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, DbError, DeadlineRepo,
-    EventRecord, EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo,
+    EventRecord, EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo, MetaRepo,
     ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     ProcessedAttachmentRepo, SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord,
     TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction, TransactionBehavior,
@@ -138,6 +140,8 @@ pub enum EngineError {
     GroupSchedule(#[from] swap_core::GroupScheduleError),
     #[error("the groups do not need repair")]
     GroupRepairNotNeeded,
+    #[error("the event is not in async mode")]
+    NotAsyncMode,
     #[error("the comment is already redacted")]
     CommentAlreadyRedacted,
     #[error("the participant did not work on this track")]
@@ -212,6 +216,12 @@ pub struct GroupRepairOutcome {
     pub commitment: String,
     pub previous_sizes: Vec<u32>,
     pub sizes: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncWaveOutcome {
+    pub offers: usize,
+    pub effects: Vec<Effect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -352,6 +362,7 @@ pub struct DeadlineReport {
     pub overdue: usize,
     pub reminders: usize,
     pub decisions: usize,
+    pub expired_offers: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1267,6 +1278,245 @@ pub fn start_event_with_channel(
         commitment: plan.commitment,
         effects: effect.into_iter().collect(),
     })
+}
+
+pub fn start_async_event(db: &Db, event_id: &str, now: i64) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_state(
+        &event,
+        EventState::ScheduleReview,
+        "async event start",
+        "schedule review",
+    )?;
+    if parse_settings(&event)?.mode != Mode::Async {
+        return Err(EngineError::NotAsyncMode);
+    }
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::ScheduleReview {
+        return Err(EngineError::WrongEventState {
+            action: "async event start",
+            state: current.state,
+            expected: "schedule review",
+        });
+    }
+    EventRepo::set_state(&transaction, event_id, EventState::Active, now)?;
+    commit(transaction)?;
+    Ok(())
+}
+
+pub fn dispatch_async_wave(
+    db: &Db,
+    event_id: &str,
+    now: i64,
+) -> Result<AsyncWaveOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "async dispatch")?;
+    let settings = parse_settings(&event)?;
+    if settings.mode != Mode::Async {
+        return Err(EngineError::NotAsyncMode);
+    }
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let ready: Vec<&ParticipantRecord> = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == Readiness::Ready
+        })
+        .collect();
+    if ready.is_empty() {
+        return Ok(AsyncWaveOutcome {
+            offers: 0,
+            effects: Vec::new(),
+        });
+    }
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    let active = AssignmentRepo::list_active(db.conn(), event_id)?;
+    let active_people: HashSet<&str> = active
+        .iter()
+        .map(|assignment| assignment.participant_id.as_str())
+        .collect();
+    let active_tracks: HashSet<&str> = active
+        .iter()
+        .map(|assignment| assignment.track_code.as_str())
+        .collect();
+    let seen_pairs = SeenRepo::list_for_event(db.conn(), event_id)?;
+    let seen: HashSet<(&str, &str)> = seen_pairs
+        .iter()
+        .map(|pair| (pair.track_code.as_str(), pair.participant_id.as_str()))
+        .collect();
+    let expired: HashSet<(&str, &str)> = assignments
+        .iter()
+        .filter(|assignment| assignment.status == AssignmentStatus::Expired)
+        .map(|assignment| {
+            (
+                assignment.track_code.as_str(),
+                assignment.participant_id.as_str(),
+            )
+        })
+        .collect();
+    let tracks: Vec<TrackRecord> = TrackRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .filter(|track| {
+            !matches!(track.state, TrackState::Final | TrackState::Retired)
+                && !active_tracks.contains(track.code.as_str())
+        })
+        .collect();
+
+    let mut holders: HashMap<&str, HashSet<&str>> = HashMap::new();
+    for track in &tracks {
+        holders
+            .entry(track.code.as_str())
+            .or_default()
+            .insert(track.owner_id.as_str());
+    }
+    for assignment in &assignments {
+        if assignment.claimed_at.is_some()
+            || matches!(
+                assignment.status,
+                AssignmentStatus::Claimed | AssignmentStatus::Submitted | AssignmentStatus::Overdue
+            )
+        {
+            holders
+                .entry(assignment.track_code.as_str())
+                .or_default()
+                .insert(assignment.participant_id.as_str());
+        }
+    }
+    let mut pair_counts: HashMap<(&str, &str), u32> = HashMap::new();
+    for set in holders.values() {
+        let mut people: Vec<&str> = set.iter().copied().collect();
+        people.sort_unstable();
+        for left in 0..people.len() {
+            for right in (left + 1)..people.len() {
+                *pair_counts
+                    .entry(ordered_pair(people[left], people[right]))
+                    .or_default() += 1;
+            }
+        }
+    }
+
+    let ready_people: Vec<ParticipantId> = ready
+        .iter()
+        .filter(|participant| !active_people.contains(participant.user_id.as_str()))
+        .map(|participant| ParticipantId::new(participant.user_id.clone()))
+        .collect();
+    let mut candidates: BTreeMap<ParticipantId, Vec<AsyncCandidate>> = BTreeMap::new();
+    for participant in &ready_people {
+        let mut options = Vec::new();
+        for track in &tracks {
+            if track.owner_id == participant.0
+                || seen.contains(&(track.code.as_str(), participant.0.as_str()))
+                || expired.contains(&(track.code.as_str(), participant.0.as_str()))
+            {
+                continue;
+            }
+            let mut pair_meetings = 0u32;
+            if let Some(people) = holders.get(track.code.as_str()) {
+                for other in people {
+                    if *other == participant.0 {
+                        continue;
+                    }
+                    pair_meetings += pair_counts
+                        .get(&ordered_pair(&participant.0, other))
+                        .copied()
+                        .unwrap_or(0);
+                }
+            }
+            options.push(AsyncCandidate {
+                track: TrackCode::new(track.code.clone()),
+                pair_meetings,
+            });
+        }
+        if !options.is_empty() {
+            candidates.insert(participant.clone(), options);
+        }
+    }
+
+    let choices = choose_async_offers(
+        &ready_people,
+        &candidates,
+        event.seed.wrapping_add(now as u64),
+    );
+    if choices.is_empty() {
+        return Ok(AsyncWaveOutcome {
+            offers: 0,
+            effects: Vec::new(),
+        });
+    }
+    let round = assignments
+        .iter()
+        .map(|assignment| assignment.round)
+        .max()
+        .map(|round| round + 1)
+        .unwrap_or(0);
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::Active {
+        return Err(EngineError::WrongEventState {
+            action: "async dispatch",
+            state: current.state,
+            expected: "active",
+        });
+    }
+    let mut effects = Vec::with_capacity(choices.len());
+    for choice in &choices {
+        let id = assignment_id(event_id, round, &choice.track.0);
+        let due_at = now + settings.claim_window_secs;
+        AssignmentRepo::insert(
+            &transaction,
+            &AssignmentRecord {
+                id: id.clone(),
+                event_id: event_id.to_string(),
+                track_code: choice.track.0.clone(),
+                participant_id: choice.participant.0.clone(),
+                round,
+                status: AssignmentStatus::Offered,
+                offered_at: now,
+                claimed_at: None,
+                due_at: Some(due_at),
+                submitted_at: None,
+                created_at: now,
+                updated_at: now,
+            },
+        )?;
+        move_track(&transaction, event_id, &choice.track.0, TrackState::Offered)?;
+        let effect = Effect::Offer {
+            user_id: choice.participant.0.clone(),
+            event_id: event_id.to_string(),
+            assignment_id: id,
+            track_code: choice.track.0.clone(),
+            due_at,
+            claim_window_secs: settings.claim_window_secs,
+        };
+        enqueue_effect(&transaction, event_id, &effect, now)?;
+        effects.push(effect);
+    }
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "worker",
+        "Async wave dispatched",
+        None,
+        &serde_json::json!({ "offers": choices.len(), "round": round }).to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(AsyncWaveOutcome {
+        offers: effects.len(),
+        effects,
+    })
+}
+
+fn ordered_pair<'a>(left: &'a str, right: &'a str) -> (&'a str, &'a str) {
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    }
 }
 
 pub fn open_round(
@@ -2860,6 +3110,70 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
         let settings = parse_settings(&current)?;
         let participants = ParticipantRepo::list_for_event(&transaction, &event.id)?;
         let assignments = AssignmentRepo::list_active(&transaction, &event.id)?;
+        if settings.mode == Mode::Async {
+            for assignment in assignments
+                .iter()
+                .filter(|assignment| assignment.status == AssignmentStatus::Offered)
+            {
+                let Some(due_at) = assignment.due_at else {
+                    continue;
+                };
+                if now >= due_at {
+                    AssignmentRepo::update_status(
+                        &transaction,
+                        &assignment.id,
+                        AssignmentStatus::Expired,
+                        now,
+                    )?;
+                    move_track(
+                        &transaction,
+                        &event.id,
+                        &assignment.track_code,
+                        TrackState::Pool,
+                    )?;
+                    if let Some(mut participant) =
+                        ParticipantRepo::get(&transaction, &event.id, &assignment.participant_id)?
+                    {
+                        participant.readiness = Readiness::Paused;
+                        participant.updated_at = now;
+                        ParticipantRepo::upsert(&transaction, &participant)?;
+                    }
+                    AuditRepo::insert(
+                        &transaction,
+                        &event.id,
+                        now,
+                        "worker",
+                        "Offer expired",
+                        None,
+                        &serde_json::json!({
+                            "assignmentId": assignment.id,
+                            "trackCode": assignment.track_code,
+                            "participantId": assignment.participant_id
+                        })
+                        .to_string(),
+                    )?;
+                    report.expired_offers += 1;
+                } else if due_at - now <= 12 * 60 * 60 {
+                    let key = format!("async-claim-reminded:{}", assignment.id);
+                    if MetaRepo::get(&transaction, &key)?.is_none() {
+                        enqueue_effect(
+                            &transaction,
+                            &event.id,
+                            &Effect::Dm {
+                                user_id: assignment.participant_id.clone(),
+                                content: format!(
+                                    "Track {} expires in 12 hours. Claim it in the server.",
+                                    assignment.track_code
+                                ),
+                            },
+                            now,
+                        )?;
+                        MetaRepo::set(&transaction, &key, "1")?;
+                        report.reminders += 1;
+                    }
+                }
+            }
+        }
         for assignment in assignments {
             if assignment.status == AssignmentStatus::Offered {
                 continue;

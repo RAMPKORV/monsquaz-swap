@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 
 /// Stable Discord user identity. The string is a snowflake. Keep it as a
 /// string in DTOs so JavaScript never loses precision.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ParticipantId(pub String);
 
 /// Opaque track identity. Never derive it from an owner or a submission order.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct TrackCode(pub String);
 

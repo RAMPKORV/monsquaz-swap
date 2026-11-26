@@ -481,11 +481,10 @@ pub fn generate_schedule(
             owner: ParticipantId::new(track.owner_id.clone()),
         })
         .collect();
-    let strategy = settings
-        .scheduler
-        .as_deref()
-        .and_then(swap_core::ScheduleStrategy::parse)
-        .unwrap_or_default();
+    let strategy = match settings.scheduler.as_deref() {
+        Some(value) => swap_core::ScheduleStrategy::parse(value).ok_or(SettingsError::Scheduler)?,
+        None => swap_core::ScheduleStrategy::default(),
+    };
     let schedule = Schedule::generate_with(&people, &specs, rounds, event.seed, strategy)?;
 
     let previous = PlanRepo::latest(db.conn(), event_id)?;

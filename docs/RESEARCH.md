@@ -195,6 +195,14 @@ The event format itself is documented by the Monsquaz Collective:
 [Swap Album 8](https://monsquazcollective.bandcamp.com/album/monsquaz-swap-album-8-the-gachimuchi-edition),
 [Swap Album 9 notes](https://blog.jonasbengtson.se/monsquaz-swap-album-9).
 
+## Discord transport testing
+
+No official Discord bot emulator exists. Twilight supports a mock HTTP host
+through its proxy setting. `crates/swap-discord/tests/setup_http.rs` uses it
+with Wiremock for the setup, DM, and file serializers. Fake gateway sessions
+cover the supervisor. Gateway identification, rate limits, and Discord policy
+still need a live test guild and a human.
+
 ## Open evidence gaps
 
 - The fun metric and group weights are a design proxy, not validated human

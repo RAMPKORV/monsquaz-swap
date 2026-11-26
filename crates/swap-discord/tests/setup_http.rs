@@ -6,7 +6,8 @@
 //! or a live Discord connection.
 
 use swap_discord::{
-    DiscordPort, DiscordUserId, HttpDiscordPort, OutboundMessage, SetupDirectory, TwilightSetup,
+    DiscordPort, DiscordUserId, HttpDiscordPort, OutboundFile, OutboundMessage, SetupDirectory,
+    TwilightSetup,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -141,6 +142,29 @@ async fn the_http_port_sends_a_dm_through_the_mock() {
             &DiscordUserId::new("42"),
             OutboundMessage {
                 content: "Monsquaz Swap test message.".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(id.0, "555");
+}
+
+#[tokio::test]
+async fn the_http_port_sends_a_file_through_the_mock() {
+    install_crypto();
+    let server = MockServer::start().await;
+    mount_json(&server, "POST", "/api/v10/users/@me/channels", DM_CHANNEL).await;
+    mount_json(&server, "POST", "/api/v10/channels/100/messages", MESSAGE).await;
+
+    let token = "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc";
+    let port = HttpDiscordPort::with_proxy(token, proxy_host(&server)).unwrap();
+    let id = port
+        .send_file(
+            &DiscordUserId::new("42"),
+            OutboundFile {
+                filename: "S7F3A.it".to_string(),
+                bytes: vec![1, 2, 3],
+                caption: "Track S7F3A. Your turn.".to_string(),
             },
         )
         .await

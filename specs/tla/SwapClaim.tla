@@ -2,7 +2,7 @@
 \* Design model for the classic claim, offer, custody, and expiry rules.
 \* It proves the core safety invariants for a small finite roster. It does
 \* not model files, Discord, SQLite, the UI, or real time.
-EXTENDS Naturals, FiniteSets, TLC
+EXTENDS Naturals, Integers, FiniteSets, TLC
 
 CONSTANTS Participants, Tracks, Owner, NoOne, ClaimWindow, MaxTime
 

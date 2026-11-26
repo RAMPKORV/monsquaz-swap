@@ -25,21 +25,26 @@ run_tlc() {
     -workers auto -config "$config" "$module"
 }
 
-mutate_and_expect_failure() {
+# Replace one source fragment and require TLC to report the named invariant.
+# A parse error or an unrelated failure is not a detected mutation.
+run_mutation() {
   local label="$1"
-  local pattern="$2"
+  local expected="$2"
+  local old="$3"
+  local new="$4"
   local work
   work="$(mktemp -d)"
   trap 'rm -rf "$work"' RETURN
-  python3 - "$pattern" "$work/SwapClaim.tla" <<'PY'
+  python3 - "$old" "$new" "$work/SwapClaim.tla" <<'PY'
 import pathlib
 import sys
 
-pattern = sys.argv[1]
+old = sys.argv[1]
+new = sys.argv[2]
 source = pathlib.Path("specs/tla/SwapClaim.tla").read_text()
-if pattern not in source:
-    raise SystemExit(f"mutation pattern not found: {pattern}")
-pathlib.Path(sys.argv[2]).write_text(source.replace(pattern, "", 1))
+if old not in source:
+    raise SystemExit(f"mutation pattern not found: {old}")
+pathlib.Path(sys.argv[3]).write_text(source.replace(old, new, 1))
 PY
   cp specs/tla/SwapClaimNightly.tla "$work/SwapClaimNightly.tla"
   cp specs/tla/SwapClaimMutation.cfg "$work/SwapClaimMutation.cfg"
@@ -50,13 +55,24 @@ PY
     cat "$work/tlc.log" >&2
     return 1
   fi
-  echo "mutation detected: $label"
+  if ! grep -q "Invariant $expected is violated" "$work/tlc.log"; then
+    echo "mutation '$label' failed without violating $expected" >&2
+    cat "$work/tlc.log" >&2
+    return 1
+  fi
+  echo "mutation detected: $label ($expected)"
 }
 
 echo "TLA+ PR model"
 run_tlc specs/tla/SwapClaimPR.cfg specs/tla/SwapClaimPR.tla
-mutate_and_expect_failure "offer allows own track" "/\\ p /= Owner[t]"
-mutate_and_expect_failure "claim allows two held tracks" "/\\ \\A other \\in Tracks : holder[other] /= p"
+run_mutation "clock leaves the natural numbers" "TypeOK" "now' = now + 1" "now' = -1"
+run_mutation "offer allows own track" "NoOwnTrack" '/\ p /= Owner[t]' '/\ TRUE'
+run_mutation "claim allows two held tracks" "OneTrackPerPerson" \
+  '/\ \A other \in Tracks : holder[other] /= p' '/\ TRUE'
+run_mutation "claim leaves a seen pair offered" "NoRepeat" \
+  '[phase[t] EXCEPT ![p] = "claimed"]' '[phase[t] EXCEPT ![p] = "offered"]'
+run_mutation "expiry keeps a banned pair offered" "NoExpiredReoffer" \
+  '[phase[t] EXCEPT ![p] = "idle"]' '[phase[t] EXCEPT ![p] = "offered"]'
 
 if [ "$MODE" = "nightly" ]; then
   echo "TLA+ nightly model"

@@ -81,16 +81,17 @@ ignored.
 ## Mutation rule
 
 A property is not covered until a deliberately broken variant makes it fail.
-`scripts/formal/check.sh` removes the own-track guard and the one-track guard
-and expects TLC to find each violation. A property with no mutation is reported
-as uncovered.
+`scripts/formal/check.sh` replaces one guard or update at a time and requires
+TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
+`NoOwnTrack`, `OneTrackPerPerson`, and `NoExpiredReoffer`. A parse error or an
+unrelated failure is not counted as a detected mutation.
 
 ## Conformance
 
-The Rust test layer emits the same action vocabulary as the TLA+ model. The
-claim model is checked against `Assignment` and `SeenLedger` by
-`proptest-state-machine`. Tier 3 adds ITF replay after a spike; if the tool is
-not reliable, use NDJSON trace validation.
+The Rust state machine uses the same claim, submit, skip, and expiry
+vocabulary as the TLA+ model. The claim model is checked against `Assignment`
+and `SeenLedger` by `proptest-state-machine`. Tier 3 adds ITF replay after a
+spike; if the tool is not reliable, use NDJSON trace validation.
 
 ## Discord transport
 

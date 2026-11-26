@@ -247,6 +247,7 @@ export function PlannerView({
                   data.matrix.length > 16 ? "matrix-scroll--bounded" : ""
                 }`}
                 tabIndex={0}
+                role="region"
                 aria-label="Assignment matrix, scroll both axes"
               >
                 <table className="matrix">
@@ -267,7 +268,10 @@ export function PlannerView({
                         <th scope="row">
                           <code>{track.trackCode}</code>
                           {viewAsParticipant ? null : (
-                            <small title={`Group ${track.ownerGroup}`}>
+                            <small
+                              title={`Group ${track.ownerGroup}`}
+                              aria-label={`Group ${track.ownerGroup}`}
+                            >
                               {track.ownerGroup}
                             </small>
                           )}
@@ -516,12 +520,12 @@ function PlanGraph({
       <svg
         viewBox={`0 0 720 ${height}`}
         role="img"
-        aria-labelledby="graph-title graph-desc"
+        aria-labelledby="graph-figure-title graph-figure-desc"
         className="plan-graph"
         preserveAspectRatio="xMidYMid meet"
       >
-        <title id="graph-title">Round {data.graph.round + 1} assignment graph</title>
-        <desc id="graph-desc">
+        <title id="graph-figure-title">Round {data.graph.round + 1} assignment graph</title>
+        <desc id="graph-figure-desc">
           Tracks on the left connect to the people who hold them in this round.
           The graph does not show owners or group membership. The assignment
           matrix above lists every track and person pair.

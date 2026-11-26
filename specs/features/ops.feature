@@ -57,7 +57,7 @@ Feature: Host operations and recovery
     When the app restarts
     Then the app retries the send
     And the recipient can receive the same message again
-    And the app records the recovery attempt
+    And the delivery row records the recovery attempt
     And the app does not repeat the state transition
 
   Scenario: A crash before a send does not lose the effect
@@ -65,7 +65,7 @@ Feature: Host operations and recovery
     When the app crashes and restarts
     Then the app retries the send once
     And the recipient receives the message
-    And the app records the recovery
+    And the delivery row records the recovery
 
   Scenario: The host restarts during an active event
     Given an active event with committed assignments

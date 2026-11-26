@@ -1465,22 +1465,29 @@ impl DmCursorRepo {
             .optional()?)
     }
 
+    /// Record an outbound message. An offer also seeds the inbound cursor to
+    /// the offer message, so backfill cannot return older history.
     pub fn set_sent(
         conn: &Connection,
         user_id: &str,
         channel_id: &str,
         message_id: &str,
+        seed_seen: bool,
         now: i64,
     ) -> Result<(), DbError> {
         conn.execute(
             "INSERT INTO dm_cursors
                 (user_id, channel_id, last_seen_message_id, last_sent_message_id, updated_at)
-             VALUES (?1, ?2, NULL, ?3, ?4)
+             VALUES (?1, ?2, CASE WHEN ?5 THEN ?3 ELSE NULL END, ?3, ?4)
              ON CONFLICT(user_id) DO UPDATE SET
                  channel_id = COALESCE(NULLIF(dm_cursors.channel_id, ''), excluded.channel_id),
+                 last_seen_message_id = COALESCE(
+                     dm_cursors.last_seen_message_id,
+                     excluded.last_seen_message_id
+                 ),
                  last_sent_message_id = excluded.last_sent_message_id,
                  updated_at = excluded.updated_at",
-            params![user_id, channel_id, message_id, now],
+            params![user_id, channel_id, message_id, now, seed_seen],
         )?;
         Ok(())
     }

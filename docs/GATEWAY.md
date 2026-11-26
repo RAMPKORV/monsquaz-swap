@@ -39,10 +39,11 @@ normalized events and decides what to do.
 9. On a stop signal, close the shard with code 1000 and publish `Stopped`.
 10. On an authentication or configuration error, publish `Failed` and stop.
 
-A handler error increments the `handler_errors` counter. A handler error does
-not close the session. The supervisor gives each handler 5 seconds. The inbound
-service starts a background task and returns at once, so a file render or a
-delivery retry cannot cancel the state change.
+The supervisor gives each handler 5 seconds. The inbound service queues the
+event per participant and returns at once, so a file render or a delivery retry
+cannot cancel the state change. A processing error is logged by the queue
+worker. The supervisor `handler_errors` counter covers queue and transport
+errors, not processing errors. MSW-045 tracks a full health surface.
 
 ## Secrets
 
@@ -111,11 +112,13 @@ Backfill can only visit a participant who has an inbound cursor. Discord does
 not replay a direct message that arrives while the gateway is offline. A
 first-time submitter must send the file again after the gateway reconnects.
 
-Inbound events for one participant run in arrival order. A live event for a
-participant with a saved cursor waits until that participant's startup backfill
-succeeds. The dispatcher retries a failed backfill every 30 seconds and posts
+An offer seeds the inbound cursor to the offer message, so backfill cannot
+return older history. Inbound events for one participant run in arrival order.
+A live event for a participant with a saved cursor waits until that
+participant's startup backfill succeeds. The dispatcher retries a failed backfill every 30 seconds and posts
 one host alert for each failure streak. A later message never advances the
-cursor past a failed attachment.
+cursor past a failed attachment. A transient send retries for about ten
+minutes before the worker marks the delivery failed and alerts the host.
 
 A crash after Discord accepts a send and before the sent mark can duplicate a
 message. The delivery id is stable. A future transport nonce or reconciliation

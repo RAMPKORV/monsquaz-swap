@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{Notify, mpsc};
 
 use async_trait::async_trait;
-use swap_db::{AssignmentRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
+use swap_db::{AssignmentRepo, AuditRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
 use swap_discord::{
     Action, AttachmentFetcher, DiscordChannelId, DiscordError, DiscordPort, DiscordUserId,
     DmAttachment, InboundEvent, InboundHandler, MessageId,
@@ -215,6 +215,7 @@ impl InboundService {
             DmCursorRepo::list(db.conn()).map_err(|error| error.to_string())?
         };
         let mut report = BackfillReport::default();
+        let mut failure_event: Option<String> = None;
         for cursor in cursors {
             if only.is_some_and(|only| !only.contains(&cursor.user_id)) {
                 continue;
@@ -226,6 +227,13 @@ impl InboundService {
                 Err(error) => {
                     eprintln!("DM backfill failed for one participant: {error}");
                     report.failed += 1;
+                    if failure_event.is_none() {
+                        let db = self.lock();
+                        failure_event = EventRepo::active_for_user(db.conn(), &cursor.user_id)
+                            .ok()
+                            .flatten()
+                            .map(|event| event.id);
+                    }
                     if permanent_backfill_error(&error) {
                         self.finish_backfill_user(&cursor.user_id);
                     }
@@ -275,6 +283,13 @@ impl InboundService {
             } else {
                 self.finish_backfill_user(&cursor.user_id);
             }
+            if user_failed && failure_event.is_none() {
+                let db = self.lock();
+                failure_event = EventRepo::active_for_user(db.conn(), &cursor.user_id)
+                    .ok()
+                    .flatten()
+                    .map(|event| event.id);
+            }
         }
         if report.failed > 0 {
             if !self.backfill_warned.swap(true, Ordering::SeqCst) {
@@ -287,6 +302,20 @@ impl InboundService {
                         ),
                     )
                     .await;
+                if let Some(event_id) = failure_event {
+                    let db = self.lock();
+                    if let Err(error) = AuditRepo::insert(
+                        db.conn(),
+                        &event_id,
+                        self.now(),
+                        "worker",
+                        "backfill.failed",
+                        None,
+                        &format!("{{\"failed\":{}}}", report.failed),
+                    ) {
+                        eprintln!("backfill audit entry failed: {error}");
+                    }
+                }
             }
         } else {
             self.backfill_warned.store(false, Ordering::SeqCst);

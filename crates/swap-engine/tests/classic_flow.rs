@@ -1,7 +1,7 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
 use swap_db::{
-    AssignmentRepo, Db, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo, ParticipantRepo, PlanRepo,
-    SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
+    ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
@@ -1119,6 +1119,12 @@ async fn a_failed_backfill_is_retried_for_the_same_participant() {
             .unwrap()
             .len(),
         1
+    );
+    assert!(
+        AuditRepo::list_for_event(db.lock().unwrap().conn(), EVENT)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.action == "backfill.failed")
     );
 
     let report = service.retry_backfill().await.unwrap();

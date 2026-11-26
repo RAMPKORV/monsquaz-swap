@@ -1,9 +1,10 @@
 //! Durable delivery outbox and dispatcher.
 //!
 //! The engine enqueues a delivery in the same transaction as the state change.
-//! The caller dispatches pending rows after the command and again on startup.
-//! The outbox id is a deterministic dedupe key, so a retry never creates a
-//! second row.
+//! The worker drains pending rows at startup, on a timer, and when inbound work
+//! wakes it. The outbox id dedupes effects inside one transaction. Message and
+//! channel keys also include the command time, so a later equal message is a
+//! distinct delivery.
 
 use std::sync::{Arc, Mutex};
 
@@ -21,7 +22,7 @@ use thiserror::Error;
 
 use crate::effects::Effect;
 
-const MAX_DELIVERY_ATTEMPTS: i64 = 5;
+const MAX_DELIVERY_ATTEMPTS: i64 = 20;
 const PAYLOAD_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,7 +348,14 @@ impl DeliveryWorker {
                     if let Some(user_id) = user_of(&delivery)
                         && let Some(message_id) = message_id
                     {
-                        DmCursorRepo::set_sent(db.conn(), user_id, "dm", &message_id.0, now)?;
+                        DmCursorRepo::set_sent(
+                            db.conn(),
+                            user_id,
+                            "dm",
+                            &message_id.0,
+                            matches!(&delivery, PendingDelivery::Offer { .. }),
+                            now,
+                        )?;
                     }
                     DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
                     report.sent += 1;

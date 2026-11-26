@@ -85,12 +85,13 @@ impl LiveRuntime {
         let wake = service.wake_notifier();
         let dispatcher = tauri::async_runtime::spawn(async move {
             let _ = task_service.drain_pending().await;
-            let _ = task_service.backfill().await;
+            let _ = tokio::time::timeout(Duration::from_secs(60), task_service.backfill()).await;
             let drain_service = task_service;
             run_dispatch_loop(Duration::from_secs(30), wake, stop_rx, move || {
                 let service = drain_service.clone();
                 async move {
-                    let _ = service.retry_backfill().await;
+                    let _ = tokio::time::timeout(Duration::from_secs(60), service.retry_backfill())
+                        .await;
                     let _ = service.drain_pending().await;
                 }
             })

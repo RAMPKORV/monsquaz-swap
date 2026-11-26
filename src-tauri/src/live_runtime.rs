@@ -182,4 +182,33 @@ mod tests {
         handle.await.unwrap();
         assert_eq!(ticks.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn the_dispatch_loop_drains_on_the_interval() {
+        let wake = Arc::new(Notify::new());
+        let (stop, stop_rx) = watch::channel(false);
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let counter = ticks.clone();
+        let handle = tokio::spawn(run_dispatch_loop(
+            Duration::from_millis(10),
+            wake,
+            stop_rx,
+            move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                }
+            },
+        ));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while ticks.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        stop.send(true).unwrap();
+        handle.await.unwrap();
+        assert!(ticks.load(Ordering::SeqCst) >= 1);
+    }
 }

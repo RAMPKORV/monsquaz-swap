@@ -1317,7 +1317,7 @@ impl DeliveryRepo {
     ) -> Result<bool, DbError> {
         let changed = conn.execute(
             "UPDATE deliveries
-             SET status = 'failed', attempts = attempts + 1, updated_at = ?2, last_error = ?3
+             SET status = 'failed', updated_at = ?2, last_error = ?3
              WHERE id = ?1 AND status = 'pending'",
             params![id, now, error],
         )?;
@@ -1403,7 +1403,7 @@ mod delivery_tests {
         assert!(DeliveryRepo::mark_failed(db.conn(), "key-2", 30, "dm closed").unwrap());
         let row = DeliveryRepo::get(db.conn(), "key-2").unwrap().unwrap();
         assert_eq!(row.status, "failed");
-        assert_eq!(row.attempts, 2);
+        assert_eq!(row.attempts, 1);
     }
 }
 

@@ -426,7 +426,7 @@ impl DeliveryWorker {
         if !DeliveryRepo::mark_failed(conn, &row.id, now, error)? {
             return Ok(false);
         }
-        AuditRepo::insert(
+        if let Err(error) = AuditRepo::insert(
             conn,
             &row.event_id,
             now,
@@ -438,7 +438,9 @@ impl DeliveryWorker {
                 row.kind,
                 serde_json::to_string(error).unwrap_or_else(|_| "\"unknown\"".to_string())
             ),
-        )?;
+        ) {
+            eprintln!("delivery audit entry failed: {error}");
+        }
         Ok(true)
     }
 

@@ -142,6 +142,7 @@ impl InboundService {
                 }
             }
         }
+        self.wake.notify_one();
         Ok(handled)
     }
 

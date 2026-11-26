@@ -1267,6 +1267,11 @@ async fn a_join_command_creates_a_signed_up_participant() {
     assert_eq!(participant.membership, Membership::SignedUp);
     assert_eq!(participant.timezone, "Europe/Stockholm");
     assert_eq!(participant.max_handoffs, 6);
+    let cursor = {
+        let db = db.lock().unwrap();
+        DmCursorRepo::get(db.conn(), "user-join").unwrap().unwrap()
+    };
+    assert!(cursor.last_seen_message_id.is_some());
     service
         .process(InboundEvent::SlashCommand {
             interaction: InteractionRef::new("i-join-2", "token"),

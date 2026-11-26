@@ -777,13 +777,24 @@ impl InboundService {
             .collect::<Vec<_>>()
             .join(", ");
         let max_mib = settings.max_file_bytes / (1024 * 1024);
-        self.notify(
-            user_id,
-            &format!(
-                "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. The bot stores the file locally."
-            ),
-        )
-        .await;
+        let content = format!(
+            "You are signed up. Send one seed file ({formats}) no larger than {max_mib} MiB to this direct message. The bot stores the file locally."
+        );
+        if let Ok(message_id) = self
+            .discord
+            .send_dm(
+                &DiscordUserId::new(user_id),
+                swap_discord::OutboundMessage { content },
+            )
+            .await
+        {
+            let db = self.lock();
+            if let Err(error) =
+                DmCursorRepo::set_sent(db.conn(), user_id, "dm", &message_id.0, true, self.now())
+            {
+                eprintln!("join cursor seed failed: {error}");
+            }
+        }
         Ok(())
     }
 

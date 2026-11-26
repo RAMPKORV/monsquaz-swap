@@ -21,6 +21,7 @@ import type {
   SetupData,
   Theme,
   ViewKey,
+  Decision,
 } from "./types";
 import {
   exportAuditCsv,
@@ -30,6 +31,8 @@ import {
   initialView,
   isDemoMode,
   createEvent,
+  decideDeadline,
+  decideExtension,
   generatePlan,
   lockRoster,
   openRound,
@@ -236,6 +239,16 @@ export default function App() {
   }, [dialogOpen, botDialogOpen, paletteOpen]);
 
   useEffect(() => {
+    if (view !== "mission") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setReloadToken((value) => value + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [view]);
+
+  useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const modal = document.querySelector(
         '[role="dialog"][aria-modal="true"]',
@@ -281,7 +294,9 @@ export default function App() {
       return;
     }
     if (label === "Review decisions") {
-      document.getElementById("decisions-title")?.scrollIntoView({ block: "start" });
+      const heading = document.getElementById("decisions-title");
+      heading?.scrollIntoView({ block: "start" });
+      heading?.focus();
       setToast("Review the decisions below. Nothing moves until you choose.");
       return;
     }
@@ -384,6 +399,48 @@ export default function App() {
             ? error.message
             : "The participant was not changed.";
       setToast(`Could not update the participant. ${detail}`);
+      reloadView();
+    }
+  }
+
+  async function handleDecision(decision: Decision, action: string) {
+    if (demo) {
+      setToast(`Preview: the host action “${action}” is applied to this decision.`);
+      return;
+    }
+    try {
+      if (decision.kind === "Extension" && decision.decisionId) {
+        const status = await decideExtension(
+          decision.decisionId,
+          action === "approve",
+          "Host decision",
+        );
+        setToast(
+          status === "approved"
+            ? "Extension approved."
+            : status === "pending"
+              ? "The extension request is still open."
+              : "Extension refused.",
+        );
+      } else if (decision.assignmentId) {
+        const hours = action === "extend" ? 6 : 0;
+        await decideDeadline(
+          decision.assignmentId,
+          action,
+          hours,
+          "Host decision",
+        );
+        setToast(
+          action === "missed"
+            ? "Turn marked missed. The pair counts as seen."
+            : action === "extend"
+              ? "Deadline extended by six hours."
+              : "Deadline kept open.",
+        );
+      }
+      reloadView();
+    } catch (error) {
+      setToast(`Could not apply the decision. ${errorDetail(error)}`);
       reloadView();
     }
   }
@@ -511,6 +568,7 @@ export default function App() {
       <MissionControlView
         data={mission}
         onAction={notify}
+        onDecision={handleDecision}
         onNavigate={(next) => setView(next)}
       />
     ) : view === "setup" && setup ? (

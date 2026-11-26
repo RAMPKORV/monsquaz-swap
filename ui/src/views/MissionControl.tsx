@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
-import type { MissionControl } from "../types";
+import type { Decision, MissionControl } from "../types";
 import {
   Button,
   Dialog,
@@ -22,15 +22,24 @@ function stageTone(stage: string) {
 export function MissionControlView({
   data,
   onAction,
+  onDecision,
   onNavigate,
 }: {
   data: MissionControl;
   onAction: (label: string) => void;
+  onDecision: (decision: Decision, action: string) => void;
   onNavigate: (view: "audit" | "settings") => void;
 }) {
   const initialDialog = new URLSearchParams(window.location.search).get("dialog");
   const [confirmReveal, setConfirmReveal] = useState(initialDialog === "reveal");
   const [confirmLock, setConfirmLock] = useState(initialDialog === "lock");
+  const [selectedDecision, setSelectedDecision] = useState<Decision | null>(
+    initialDialog === "decision" ? (data.decisions[0] ?? null) : null,
+  );
+  const [confirmMiss, setConfirmMiss] = useState(
+    initialDialog === "decision" &&
+      new URLSearchParams(window.location.search).get("confirm") === "missed",
+  );
   if (data.firstRun || !data.event) {
     return <FirstRun onAction={onAction} />;
   }
@@ -195,7 +204,9 @@ export function MissionControlView({
           <section className="card" aria-labelledby="decisions-title">
             <div className="card__header">
               <div>
-                <h2 id="decisions-title">Decisions waiting</h2>
+                <h2 id="decisions-title" tabIndex={-1}>
+                  Decisions waiting
+                </h2>
                 <p className="card__subtitle">
                   Nothing moves until you choose. No silent auto-advance.
                 </p>
@@ -244,6 +255,18 @@ export function MissionControlView({
                           variant="secondary"
                           ariaLabel={`${decision.actionLabel}: ${decision.title}`}
                           onClick={() => onAction("Open schedule planner")}
+                        >
+                          {decision.actionLabel}
+                        </Button>
+                      ) : decision.kind === "Deadline" ||
+                        decision.kind === "Extension" ? (
+                        <Button
+                          variant="secondary"
+                          ariaLabel={`${decision.actionLabel}: ${decision.title}`}
+                          onClick={() => {
+                            setSelectedDecision(decision);
+                            setConfirmMiss(false);
+                          }}
                         >
                           {decision.actionLabel}
                         </Button>
@@ -335,6 +358,136 @@ export function MissionControlView({
 
         </aside>
       </div>
+
+      {selectedDecision ? (
+        <Dialog
+          key={confirmMiss ? "missed-confirm" : "decision-review"}
+          title={
+            confirmMiss ? "Mark the turn missed?" : selectedDecision.title
+          }
+          initialFocusId="decision-cancel"
+          onClose={() => {
+            setSelectedDecision(null);
+            setConfirmMiss(false);
+          }}
+          footer={
+            <>
+              <Button
+                id="decision-cancel"
+                variant="secondary"
+                onClick={() => {
+                  if (confirmMiss) {
+                    setConfirmMiss(false);
+                  } else {
+                    setSelectedDecision(null);
+                  }
+                }}
+              >
+                Cancel
+              </Button>
+              {confirmMiss ? (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    onDecision(selectedDecision, "missed");
+                    setSelectedDecision(null);
+                    setConfirmMiss(false);
+                  }}
+                >
+                  Mark turn missed
+                </Button>
+              ) : selectedDecision.kind === "Extension" ? (
+                <>
+                  <Button
+                    variant="danger"
+                    className="dialog__danger-action"
+                    onClick={() => {
+                      onDecision(selectedDecision, "refuse");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Refuse
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "approve");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Approve
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "wait");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Keep waiting
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="dialog__danger-action"
+                    onClick={() => setConfirmMiss(true)}
+                  >
+                    Mark turn missed
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={(selectedDecision.extensionsUsed ?? 0) >= 2}
+                    onClick={() => {
+                      onDecision(selectedDecision, "extend");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    {(selectedDecision.extensionsUsed ?? 0) >= 2
+                      ? "Extension limit reached"
+                      : "Extend 6 hours"}
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        >
+          {confirmMiss ? (
+            <>
+              <p>
+                The pair counts as seen. The track returns to the pool and the
+                participant is notified. This cannot be undone.
+              </p>
+              <p className="dialog__meta">
+                Cancel returns to the decision without a change.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>{selectedDecision.detail}</p>
+              {selectedDecision.kind === "Extension" ? (
+                <p className="dialog__meta">
+                  Deadline {selectedDecision.deadline ?? "not set"}. Approving
+                  moves it to {selectedDecision.newDeadline ?? "a later time"} and
+                  uses extension {(selectedDecision.extensionsUsed ?? 0) + 1} of
+                  2. Refusing keeps the deadline. The participant is notified
+                  either way.
+                </p>
+              ) : (
+                <p className="dialog__meta">
+                  Nothing has moved. Deadline {selectedDecision.deadline ?? "passed"}. Extend adds
+                  6 hours to {selectedDecision.newDeadline ?? "a later time"} and
+                  uses extension {(selectedDecision.extensionsUsed ?? 0) + 1} of
+                  2. Mark turn
+                  missed counts the pair as seen, returns the track to the pool,
+                  and cannot be undone. Keep waiting leaves this card open.
+                </p>
+              )}
+            </>
+          )}
+        </Dialog>
+      ) : null}
 
       {confirmLock ? (
         <Dialog

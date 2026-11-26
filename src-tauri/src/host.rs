@@ -11,8 +11,8 @@ use tauri::{AppHandle, Manager, State};
 
 use swap_core::{EventState, Membership, Role};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, EventRecord, EventRepo, MetaRepo, ParticipantRepo, PlanRepo,
-    TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeadlineRepo, EventRecord, EventRepo, MetaRepo, ParticipantRepo,
+    PlanRepo, TrackRepo,
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, create_event, generate_schedule,
@@ -116,6 +116,12 @@ struct DecisionDto {
     detail: String,
     due: String,
     action_label: String,
+    assignment_id: Option<String>,
+    decision_id: Option<String>,
+    requested_hours: Option<i64>,
+    deadline: Option<String>,
+    new_deadline: Option<String>,
+    extensions_used: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -259,6 +265,8 @@ pub struct EventDraftDto {
     rounds: Option<u32>,
     claim_window_hours: i64,
     round_window_hours: i64,
+    quiet_hours_start: u8,
+    quiet_hours_end: u8,
     allowlist: Vec<String>,
     pack_type: String,
     pack_required: bool,
@@ -389,6 +397,8 @@ fn default_draft() -> EventDraftDto {
         rounds: None,
         claim_window_hours: 24,
         round_window_hours: 24,
+        quiet_hours_start: 22,
+        quiet_hours_end: 8,
         allowlist: swap_files::DEFAULT_EXTENSIONS
             .iter()
             .map(|extension| (*extension).to_string())
@@ -414,6 +424,8 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
         rounds: settings.rounds,
         claim_window_hours: settings.claim_window_secs / 3600,
         round_window_hours: settings.round_window_secs / 3600,
+        quiet_hours_start: settings.quiet_hours_start,
+        quiet_hours_end: settings.quiet_hours_end,
         allowlist: settings.allowed_extensions.clone(),
         pack_type: settings
             .pack_type
@@ -894,6 +906,8 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         scheduler: None,
         swap_cadence: Some(draft.swap_cadence),
         schedule_visibility: Some(draft.schedule_visibility),
+        quiet_hours_start: draft.quiet_hours_start,
+        quiet_hours_end: draft.quiet_hours_end,
     };
     settings.validate().map_err(|error| error.to_string())?;
     let now = now_secs();
@@ -1053,6 +1067,42 @@ fn reveal_track_dto(track: TrackCredits) -> RevealTrackDto {
             })
             .collect(),
     }
+}
+
+#[tauri::command]
+pub fn host_decide_extension(
+    app: AppHandle,
+    decision_id: String,
+    approve: bool,
+    reason: String,
+) -> Result<String, String> {
+    let db = open_db(&app)?;
+    let outcome = swap_engine::decide_extension(&db, &decision_id, approve, &reason, now_secs())
+        .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(match outcome.status {
+        swap_engine::ExtensionStatus::Approved => "approved",
+        swap_engine::ExtensionStatus::Refused => "refused",
+        swap_engine::ExtensionStatus::PendingHost => "pending",
+    }
+    .to_string())
+}
+
+#[tauri::command]
+pub fn host_decide_deadline(
+    app: AppHandle,
+    assignment_id: String,
+    action: String,
+    hours: i64,
+    reason: String,
+) -> Result<(), String> {
+    let db = open_db(&app)?;
+    swap_engine::decide_deadline(&db, &assignment_id, &action, hours, &reason, now_secs())
+        .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(())
 }
 
 #[tauri::command]
@@ -1312,7 +1362,77 @@ fn mission_control_with_health(
             detail: "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.".to_string(),
             due: "Before roster lock".to_string(),
             action_label: "Review".to_string(),
+            assignment_id: None,
+            decision_id: None,
+            requested_hours: None,
+            deadline: None,
+            new_deadline: None,
+            extensions_used: None,
         });
+    }
+    if let Ok(open) = swap_db::HostDecisionRepo::list_open(db.conn(), &event.id) {
+        let assignments = AssignmentRepo::list_for_event(db.conn(), &event.id).unwrap_or_default();
+        let participants =
+            ParticipantRepo::list_for_event(db.conn(), &event.id).unwrap_or_default();
+        for decision in open {
+            let assignment = decision
+                .assignment_id
+                .as_deref()
+                .and_then(|id| assignments.iter().find(|assignment| assignment.id == id));
+            let track_code = assignment
+                .map(|assignment| assignment.track_code.clone())
+                .unwrap_or_else(|| "the track".to_string());
+            let participant = assignment.and_then(|assignment| {
+                participants
+                    .iter()
+                    .find(|participant| participant.user_id == assignment.participant_id)
+            });
+            let (kind, title, detail) = if decision.kind == "extension" {
+                (
+                    "Extension",
+                    format!(
+                        "{} asked for {} more hours",
+                        participant
+                            .map(|participant| participant.display_name.as_str())
+                            .unwrap_or("A participant"),
+                        decision.requested_hours.unwrap_or(6)
+                    ),
+                    format!(
+                        "Track {track_code} keeps its holder until the host decides. The deadline does not move yet."
+                    ),
+                )
+            } else {
+                (
+                    "Deadline",
+                    format!("Track {track_code} passed its deadline"),
+                    "The track stays with its holder. Extend, mark missed, or keep waiting."
+                        .to_string(),
+                )
+            };
+            let due_at = assignment.and_then(|assignment| assignment.due_at);
+            let hours = decision.requested_hours.unwrap_or(6);
+            let deadline = due_at.map(|at| format_local_time(at, &settings.timezone));
+            let new_deadline = due_at.map(|at| {
+                format_local_time(at.max(now_secs()) + hours * 3_600, &settings.timezone)
+            });
+            let extensions_used = assignment
+                .and_then(|assignment| DeadlineRepo::get(db.conn(), &assignment.id).ok().flatten())
+                .map(|deadline| deadline.extension_count);
+            decisions.push(DecisionDto {
+                id: format!("host-{}", decision.id),
+                kind: kind.to_string(),
+                title,
+                detail,
+                due: "Awaiting host".to_string(),
+                action_label: "Review".to_string(),
+                assignment_id: decision.assignment_id.clone(),
+                decision_id: Some(decision.id),
+                requested_hours: decision.requested_hours,
+                deadline,
+                new_deadline,
+                extensions_used,
+            });
+        }
     }
     let facts = vec![
         EventFactDto {

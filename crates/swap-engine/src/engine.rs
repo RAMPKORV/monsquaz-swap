@@ -1,10 +1,13 @@
+use chrono::{TimeZone, Timelike, Utc};
+use chrono_tz::Tz;
 use swap_core::{
     AssignmentStatus, EventState, Membership, ParticipantId, Readiness, Role, Schedule, StateError,
     TrackCode, TrackSpec, TrackState,
 };
 use swap_db::{
-    AssignmentRecord, AssignmentRepo, Connection, Db, DbError, EventRecord, EventRepo, FileRecord,
-    FileRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
+    AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, DbError, DeadlineRepo,
+    EventRecord, EventRepo, FileRecord, FileRepo, HostDecisionRecord, HostDecisionRepo,
+    ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     ProcessedAttachmentRepo, SeenRepo, TrackRecord, TrackRepo, Transaction, TransactionBehavior,
 };
 use swap_files::{BlobStore, FileError, StoredBlob, ValidatedFile};
@@ -100,6 +103,18 @@ pub enum EngineError {
     PendingAssignments { count: usize, ids: Vec<String> },
     #[error("the attachment was already processed")]
     AttachmentAlreadyProcessed,
+    #[error("an extension must be between 1 and 12 hours")]
+    InvalidExtensionHours,
+    #[error("host decision not found: {0}")]
+    DecisionNotFound(String),
+    #[error("the host decision is not open")]
+    DecisionNotOpen,
+    #[error("the host decision has an unexpected kind: {0}")]
+    WrongDecisionKind(String),
+    #[error("the assignment has used the maximum number of extensions")]
+    ExtensionLimit,
+    #[error("the assignment has no edit deadline")]
+    NoDeadline,
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +221,33 @@ pub struct TrackCredits {
 pub struct RevealOutcome {
     pub tracks: Vec<TrackCredits>,
     pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DeadlineReport {
+    pub overdue: usize,
+    pub reminders: usize,
+    pub decisions: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtensionStatus {
+    Approved,
+    PendingHost,
+    Refused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionOutcome {
+    pub status: ExtensionStatus,
+    pub due_at: Option<i64>,
+    pub decision_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeadlineDecisionOutcome {
+    pub action: String,
+    pub due_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -923,6 +965,19 @@ fn submit_inner(
         "submit",
         now,
     )?;
+    for kind in ["extension", "overdue"] {
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, kind)?
+        {
+            HostDecisionRepo::close(
+                &transaction,
+                &open.id,
+                "addressed",
+                now,
+                "a submission arrived",
+            )?;
+        }
+    }
     move_track(
         &transaction,
         request.event_id,
@@ -975,6 +1030,19 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
     };
     let transaction = begin(db)?;
     open_event_in(&transaction, event_id, "skip")?;
+    for kind in ["extension", "overdue"] {
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, kind)?
+        {
+            HostDecisionRepo::close(
+                &transaction,
+                &open.id,
+                "addressed",
+                now,
+                "the participant skipped",
+            )?;
+        }
+    }
     AssignmentRepo::update_status(&transaction, &assignment.id, status, now)?;
     if let Some(reason) = seen_reason {
         SeenRepo::record(
@@ -1184,6 +1252,628 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
         }
     }
     bounded
+}
+
+pub fn request_extension(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+    hours: i64,
+    now: i64,
+) -> Result<ExtensionOutcome, EngineError> {
+    if !matches!(hours, 1 | 6 | 12) {
+        return Err(EngineError::InvalidExtensionHours);
+    }
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "extension")?;
+    let transaction = begin(db)?;
+    open_event_in(&transaction, event_id, "extension")?;
+    let assignment = AssignmentRepo::latest_for_participant(&transaction, event_id, user_id)?
+        .ok_or(EngineError::NoActiveAssignment)?;
+    if !matches!(
+        assignment.status,
+        AssignmentStatus::Claimed | AssignmentStatus::Overdue
+    ) {
+        return Err(EngineError::NoActiveAssignment);
+    }
+    let track = TrackRepo::get(&transaction, event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;
+    DeadlineRepo::ensure(&transaction, &assignment.id)?;
+    let deadline =
+        DeadlineRepo::get(&transaction, &assignment.id)?.ok_or_else(|| EngineError::NoDeadline)?;
+    if deadline.extension_count >= 2 {
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "worker",
+            "Extension refused",
+            None,
+            &serde_json::json!({ "reason": "extension limit", "assignmentId": assignment.id })
+                .to_string(),
+        )?;
+        enqueue_effect(
+            &transaction,
+            event_id,
+            &Effect::Dm {
+                user_id: user_id.to_string(),
+                content: "This assignment has used its extensions. Submit, skip, or ask the host."
+                    .to_string(),
+            },
+            now,
+        )?;
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::Refused,
+            due_at: None,
+            decision_id: None,
+        });
+    }
+    if let Some(open) =
+        HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, "extension")?
+    {
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::PendingHost,
+            due_at: Some(due_at),
+            decision_id: Some(open.id),
+        });
+    }
+    if assignment.status == AssignmentStatus::Claimed && deadline.extension_count == 0 && hours <= 6
+    {
+        let base = due_at.max(now);
+        let new_due = base + hours * 3_600;
+        if !AssignmentRepo::extend(&transaction, &assignment.id, new_due, now)? {
+            return Err(EngineError::NoActiveAssignment);
+        }
+        DeadlineRepo::increment_extension(&transaction, &assignment.id)?;
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, "overdue")?
+        {
+            HostDecisionRepo::close(
+                &transaction,
+                &open.id,
+                "addressed",
+                now,
+                "extension approved",
+            )?;
+        }
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "worker",
+            "Extension approved",
+            None,
+            &serde_json::json!({ "hours": hours, "assignmentId": assignment.id }).to_string(),
+        )?;
+        enqueue_effect(
+            &transaction,
+            event_id,
+            &Effect::Dm {
+                user_id: user_id.to_string(),
+                content: format!(
+                    "Extension approved for {hours} hours. Track {} keeps its current holder.",
+                    assignment.track_code
+                ),
+            },
+            now,
+        )?;
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::Approved,
+            due_at: Some(new_due),
+            decision_id: None,
+        });
+    }
+    if let Some(open) =
+        HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, "extension")?
+    {
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::PendingHost,
+            due_at: Some(due_at),
+            decision_id: Some(open.id),
+        });
+    }
+    let decision_id = format!("{}:extension:{now}", assignment.id);
+    HostDecisionRepo::insert(
+        &transaction,
+        &HostDecisionRecord {
+            id: decision_id.clone(),
+            event_id: event_id.to_string(),
+            assignment_id: Some(assignment.id.clone()),
+            kind: "extension".to_string(),
+            status: "open".to_string(),
+            requested_hours: Some(hours),
+            created_at: now,
+            decided_at: None,
+            reason: None,
+        },
+    )?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "worker",
+        "Extension requested",
+        None,
+        &serde_json::json!({ "hours": hours, "assignmentId": assignment.id }).to_string(),
+    )?;
+    enqueue_effect(
+        &transaction,
+        event_id,
+        &Effect::HostAlert {
+            key: decision_id.clone(),
+            content: "A participant requested an extension. Open the host decision card."
+                .to_string(),
+        },
+        now,
+    )?;
+    enqueue_effect(
+        &transaction,
+        event_id,
+        &Effect::Dm {
+            user_id: user_id.to_string(),
+            content: "The host will review your extension request.".to_string(),
+        },
+        now,
+    )?;
+    commit(transaction)?;
+    Ok(ExtensionOutcome {
+        status: ExtensionStatus::PendingHost,
+        due_at: Some(due_at),
+        decision_id: Some(decision_id),
+    })
+}
+
+pub fn decide_extension(
+    db: &Db,
+    decision_id: &str,
+    approve: bool,
+    reason: &str,
+    now: i64,
+) -> Result<ExtensionOutcome, EngineError> {
+    let transaction = begin(db)?;
+    let decision = HostDecisionRepo::get(&transaction, decision_id)?
+        .ok_or_else(|| EngineError::DecisionNotFound(decision_id.to_string()))?;
+    if decision.status != "open" {
+        return Err(EngineError::DecisionNotOpen);
+    }
+    if decision.kind != "extension" {
+        return Err(EngineError::WrongDecisionKind(decision.kind));
+    }
+    let event = EventRepo::get(&transaction, &decision.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(decision.event_id.clone()))?;
+    require_open_event(&event, "extension decision")?;
+    let assignment_id = decision
+        .assignment_id
+        .clone()
+        .ok_or_else(|| EngineError::DecisionNotFound(decision_id.to_string()))?;
+    let assignment = AssignmentRepo::get(&transaction, &assignment_id)?
+        .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.clone()))?;
+    let track = TrackRepo::get(&transaction, &assignment.event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;
+    if approve {
+        DeadlineRepo::ensure(&transaction, &assignment_id)?;
+        let deadline = DeadlineRepo::get(&transaction, &assignment_id)?
+            .ok_or_else(|| EngineError::NoDeadline)?;
+        if deadline.extension_count >= 2 {
+            HostDecisionRepo::close(&transaction, decision_id, "refused", now, "extension limit")?;
+            AuditRepo::insert(
+                &transaction,
+                &decision.event_id,
+                now,
+                "Host",
+                "Extension refused",
+                None,
+                &serde_json::json!({ "reason": "extension limit", "assignmentId": assignment_id })
+                    .to_string(),
+            )?;
+            enqueue_effect(
+                &transaction,
+                &decision.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content:
+                        "The assignment has used its extensions. Submit, skip, or ask the host."
+                            .to_string(),
+                },
+                now,
+            )?;
+            commit(transaction)?;
+            return Ok(ExtensionOutcome {
+                status: ExtensionStatus::Refused,
+                due_at: Some(due_at),
+                decision_id: Some(decision_id.to_string()),
+            });
+        }
+        let hours = decision.requested_hours.unwrap_or(6);
+        let new_due = due_at.max(now) + hours * 3_600;
+        if !AssignmentRepo::extend(&transaction, &assignment_id, new_due, now)? {
+            return Err(EngineError::NoActiveAssignment);
+        }
+        DeadlineRepo::increment_extension(&transaction, &assignment_id)?;
+        HostDecisionRepo::close(&transaction, decision_id, "approved", now, reason)?;
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment_id, "overdue")?
+        {
+            HostDecisionRepo::close(&transaction, &open.id, "addressed", now, reason)?;
+        }
+        AuditRepo::insert(
+            &transaction,
+            &decision.event_id,
+            now,
+            "Host",
+            "Extension approved",
+            None,
+            &serde_json::json!({ "hours": hours, "assignmentId": assignment_id }).to_string(),
+        )?;
+        enqueue_effect(
+            &transaction,
+            &decision.event_id,
+            &Effect::Dm {
+                user_id: assignment.participant_id.clone(),
+                content: format!("The host approved your extension for {hours} hours."),
+            },
+            now,
+        )?;
+        commit(transaction)?;
+        return Ok(ExtensionOutcome {
+            status: ExtensionStatus::Approved,
+            due_at: Some(new_due),
+            decision_id: Some(decision_id.to_string()),
+        });
+    }
+    HostDecisionRepo::close(&transaction, decision_id, "refused", now, reason)?;
+    AuditRepo::insert(
+        &transaction,
+        &decision.event_id,
+        now,
+        "Host",
+        "Extension refused",
+        None,
+        &serde_json::json!({ "assignmentId": assignment_id }).to_string(),
+    )?;
+    enqueue_effect(
+        &transaction,
+        &decision.event_id,
+        &Effect::Dm {
+            user_id: assignment.participant_id.clone(),
+            content:
+                "The host refused the extension. Submit, skip, or ask the host for a decision."
+                    .to_string(),
+        },
+        now,
+    )?;
+    commit(transaction)?;
+    Ok(ExtensionOutcome {
+        status: ExtensionStatus::Refused,
+        due_at: Some(due_at),
+        decision_id: Some(decision_id.to_string()),
+    })
+}
+
+pub fn decide_deadline(
+    db: &Db,
+    assignment_id: &str,
+    action: &str,
+    hours: i64,
+    reason: &str,
+    now: i64,
+) -> Result<DeadlineDecisionOutcome, EngineError> {
+    let transaction = begin(db)?;
+    let assignment = AssignmentRepo::get(&transaction, assignment_id)?
+        .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.to_string()))?;
+    let event = EventRepo::get(&transaction, &assignment.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(assignment.event_id.clone()))?;
+    require_open_event(&event, "deadline decision")?;
+    if !matches!(
+        assignment.status,
+        AssignmentStatus::Claimed | AssignmentStatus::Overdue
+    ) {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let track = TrackRepo::get(&transaction, &assignment.event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;
+    let decision = HostDecisionRepo::open_for_assignment(&transaction, assignment_id, "overdue")?;
+    match action {
+        "extend" => {
+            if !matches!(hours, 1 | 6 | 12) {
+                return Err(EngineError::InvalidExtensionHours);
+            }
+            DeadlineRepo::ensure(&transaction, assignment_id)?;
+            let deadline = DeadlineRepo::get(&transaction, assignment_id)?
+                .ok_or_else(|| EngineError::NoDeadline)?;
+            if deadline.extension_count >= 2 {
+                return Err(EngineError::ExtensionLimit);
+            }
+            let new_due = due_at.max(now) + hours * 3_600;
+            if !AssignmentRepo::extend(&transaction, assignment_id, new_due, now)? {
+                return Err(EngineError::NoActiveAssignment);
+            }
+            DeadlineRepo::increment_extension(&transaction, assignment_id)?;
+            if let Some(decision) = decision {
+                HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, reason)?;
+            }
+            AuditRepo::insert(
+                &transaction,
+                &assignment.event_id,
+                now,
+                "Host",
+                "Deadline extended",
+                None,
+                &serde_json::json!({ "hours": hours, "assignmentId": assignment_id }).to_string(),
+            )?;
+            enqueue_effect(
+                &transaction,
+                &assignment.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content: format!("The host extended your deadline by {hours} hours."),
+                },
+                now,
+            )?;
+            commit(transaction)?;
+            Ok(DeadlineDecisionOutcome {
+                action: "extend".to_string(),
+                due_at: Some(new_due),
+            })
+        }
+        "missed" => {
+            if assignment.status != AssignmentStatus::Overdue {
+                return Err(EngineError::WrongAssignmentState(assignment.status));
+            }
+            SeenRepo::record(
+                &transaction,
+                &assignment.event_id,
+                &assignment.track_code,
+                &assignment.participant_id,
+                "deadline_missed",
+                now,
+            )?;
+            AssignmentRepo::update_status(
+                &transaction,
+                assignment_id,
+                AssignmentStatus::SkippedAfterClaim,
+                now,
+            )?;
+            move_track(
+                &transaction,
+                &assignment.event_id,
+                &assignment.track_code,
+                TrackState::Pool,
+            )?;
+            if let Some(decision) = decision {
+                HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, reason)?;
+            }
+            AuditRepo::insert(
+                &transaction,
+                &assignment.event_id,
+                now,
+                "Host",
+                "Turn marked missed",
+                None,
+                &serde_json::json!({ "assignmentId": assignment_id }).to_string(),
+            )?;
+            enqueue_effect(
+                &transaction,
+                &assignment.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content: format!(
+                        "The host marked the turn for track {} as missed. The track returns to the pool.",
+                        assignment.track_code
+                    ),
+                },
+                now,
+            )?;
+            commit(transaction)?;
+            Ok(DeadlineDecisionOutcome {
+                action: "missed".to_string(),
+                due_at: None,
+            })
+        }
+        "wait" => {
+            AuditRepo::insert(
+                &transaction,
+                &assignment.event_id,
+                now,
+                "Host",
+                "Deadline kept open",
+                None,
+                &serde_json::json!({ "assignmentId": assignment_id }).to_string(),
+            )?;
+            commit(transaction)?;
+            Ok(DeadlineDecisionOutcome {
+                action: "wait".to_string(),
+                due_at: Some(due_at),
+            })
+        }
+        _ => Err(EngineError::WrongAssignmentState(assignment.status)),
+    }
+}
+
+pub fn open_decisions(db: &Db, event_id: &str) -> Result<Vec<HostDecisionRecord>, EngineError> {
+    Ok(HostDecisionRepo::list_open(db.conn(), event_id)?)
+}
+
+pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> {
+    let events = EventRepo::list_active(db.conn())?;
+    let mut report = DeadlineReport::default();
+    for event in events {
+        let transaction = begin(db)?;
+        let current = EventRepo::get(&transaction, &event.id)?
+            .ok_or_else(|| EngineError::EventNotFound(event.id.clone()))?;
+        if current.state != EventState::Active {
+            continue;
+        }
+        let settings = parse_settings(&current)?;
+        let participants = ParticipantRepo::list_for_event(&transaction, &event.id)?;
+        let assignments = AssignmentRepo::list_active(&transaction, &event.id)?;
+        for assignment in assignments {
+            if assignment.status == AssignmentStatus::Offered {
+                continue;
+            }
+            let Some(due_at) = assignment.due_at else {
+                continue;
+            };
+            DeadlineRepo::ensure(&transaction, &assignment.id)?;
+            let claimed_at = assignment.claimed_at.unwrap_or(assignment.offered_at);
+            if now >= due_at {
+                if assignment.status == AssignmentStatus::Claimed {
+                    AssignmentRepo::update_status(
+                        &transaction,
+                        &assignment.id,
+                        AssignmentStatus::Overdue,
+                        now,
+                    )?;
+                    report.overdue += 1;
+                    if HostDecisionRepo::open_for_assignment(
+                        &transaction,
+                        &assignment.id,
+                        "overdue",
+                    )?
+                    .is_none()
+                    {
+                        HostDecisionRepo::insert(
+                            &transaction,
+                            &HostDecisionRecord {
+                                id: format!("{}:overdue:{now}", assignment.id),
+                                event_id: event.id.clone(),
+                                assignment_id: Some(assignment.id.clone()),
+                                kind: "overdue".to_string(),
+                                status: "open".to_string(),
+                                requested_hours: None,
+                                created_at: now,
+                                decided_at: None,
+                                reason: None,
+                            },
+                        )?;
+                        AuditRepo::insert(
+                            &transaction,
+                            &event.id,
+                            now,
+                            "worker",
+                            "Deadline passed",
+                            None,
+                            &serde_json::json!({ "assignmentId": assignment.id }).to_string(),
+                        )?;
+                        enqueue_effect(
+                            &transaction,
+                            &event.id,
+                            &Effect::HostAlert {
+                                key: assignment.id.clone(),
+                                content: "A track deadline needs a host decision.".to_string(),
+                            },
+                            now,
+                        )?;
+                        report.decisions += 1;
+                    }
+                }
+                if DeadlineRepo::mark_reminder(&transaction, &assignment.id, "deadline_reminded")? {
+                    enqueue_effect(
+                        &transaction,
+                        &event.id,
+                        &Effect::Dm {
+                            user_id: assignment.participant_id.clone(),
+                            content: format!(
+                                "The edit deadline for track {} has passed. The host decides the next step.",
+                                assignment.track_code
+                            ),
+                        },
+                        now,
+                    )?;
+                    report.reminders += 1;
+                }
+                continue;
+            }
+            let total = due_at - claimed_at;
+            if total <= 0 || now < claimed_at {
+                continue;
+            }
+            let percent = ((now - claimed_at) * 100) / total;
+            let quiet = participant_timezone(&participants, &assignment.participant_id)
+                .is_some_and(|tz| {
+                    quiet_hours(
+                        now,
+                        tz,
+                        settings.quiet_hours_start,
+                        settings.quiet_hours_end,
+                    )
+                });
+            if quiet {
+                continue;
+            }
+            let mut pending = Vec::new();
+            for (step, column) in [
+                (50_i64, "reminded_50"),
+                (80, "reminded_80"),
+                (95, "reminded_95"),
+            ] {
+                if percent >= step {
+                    pending.push((step, column));
+                }
+            }
+            let highest = pending.last().map(|(step, _)| *step);
+            let mut marked = false;
+            for (_, column) in &pending {
+                marked |= DeadlineRepo::mark_reminder(&transaction, &assignment.id, column)?;
+            }
+            if marked && let Some(step) = highest {
+                enqueue_effect(
+                    &transaction,
+                    &event.id,
+                    &Effect::Dm {
+                        user_id: assignment.participant_id.clone(),
+                        content: format!(
+                            "Track {}: {step} percent of the edit window has passed. Send your edit before the deadline.",
+                            assignment.track_code
+                        ),
+                    },
+                    now,
+                )?;
+                report.reminders += 1;
+            }
+        }
+        commit(transaction)?;
+    }
+    Ok(report)
+}
+
+fn participant_timezone(participants: &[ParticipantRecord], user_id: &str) -> Option<Tz> {
+    participants
+        .iter()
+        .find(|participant| participant.user_id == user_id)
+        .and_then(|participant| participant.timezone.parse().ok())
+}
+
+fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {
+    if start == end {
+        return false;
+    }
+    Utc.timestamp_opt(now, 0)
+        .single()
+        .map(|time| u8::try_from(time.with_timezone(&timezone).hour()).unwrap_or(0))
+        .is_some_and(|hour| {
+            if start < end {
+                (start..end).contains(&hour)
+            } else {
+                hour >= start || hour < end
+            }
+        })
 }
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {

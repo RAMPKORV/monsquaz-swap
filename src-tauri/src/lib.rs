@@ -149,6 +149,8 @@ pub fn run() {
             host::host_lock_roster,
             host::host_open_round,
             host::host_reveal,
+            host::host_decide_extension,
+            host::host_decide_deadline,
             host::host_start_event,
             host::host_create_event,
             setup_host::host_bot_validate,

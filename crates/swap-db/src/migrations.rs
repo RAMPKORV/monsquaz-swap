@@ -196,6 +196,31 @@ ALTER TABLE dm_cursors ADD COLUMN last_sent_message_id TEXT;
 -- Migration 006: retried rows move behind untouched rows in one pass.
 CREATE INDEX deliveries_pending_updated ON deliveries(status, updated_at);
 "#,
+    r#"
+-- Migration 007: soft deadlines, reminders, extensions, host decisions.
+CREATE TABLE assignment_deadlines (
+    assignment_id TEXT PRIMARY KEY REFERENCES assignments(id) ON DELETE CASCADE,
+    extension_count INTEGER NOT NULL DEFAULT 0,
+    reminded_50 INTEGER NOT NULL DEFAULT 0,
+    reminded_80 INTEGER NOT NULL DEFAULT 0,
+    reminded_95 INTEGER NOT NULL DEFAULT 0,
+    deadline_reminded INTEGER NOT NULL DEFAULT 0
+) STRICT;
+
+CREATE TABLE host_decisions (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    assignment_id TEXT REFERENCES assignments(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_hours INTEGER,
+    created_at INTEGER NOT NULL,
+    decided_at INTEGER,
+    reason TEXT
+) STRICT;
+
+CREATE INDEX host_decisions_open ON host_decisions(event_id, status);
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

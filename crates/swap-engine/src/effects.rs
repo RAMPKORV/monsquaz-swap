@@ -32,6 +32,10 @@ pub enum Effect {
         channel_id: String,
         content: String,
     },
+    HostAlert {
+        key: String,
+        content: String,
+    },
 }
 
 /// Deliver every effect. Failures are returned per effect so the caller can
@@ -102,6 +106,9 @@ pub async fn dispatch(
                     )
                     .await
             }
+            Effect::HostAlert { .. } => Err(DiscordError::Other(
+                "host alerts must use the delivery worker".to_string(),
+            )),
         };
         results.push(result);
     }

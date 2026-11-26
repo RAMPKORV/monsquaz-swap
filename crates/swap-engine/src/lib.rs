@@ -20,11 +20,13 @@ pub use delivery::{
 };
 pub use effects::{Effect, dispatch};
 pub use engine::{
-    ClaimOutcome, CreditEntry, EngineError, EventStatus, ExpireOutcome, JoinOutcome, JoinRequest,
-    LockOutcome, OpenRoundOutcome, RevealOutcome, ScheduleOutcome, SkipOutcome, SubmissionSource,
-    SubmitOutcome, SubmitRequest, TrackCredits, claim, create_event, event_status, expire_offer,
-    generate_schedule, join_with_seed, lock_roster, open_round, reveal, reveal_with_channel,
-    signup, skip, start_event, submit, submit_attachment,
+    ClaimOutcome, CreditEntry, DeadlineDecisionOutcome, DeadlineReport, EngineError, EventStatus,
+    ExpireOutcome, ExtensionOutcome, ExtensionStatus, JoinOutcome, JoinRequest, LockOutcome,
+    OpenRoundOutcome, RevealOutcome, ScheduleOutcome, SkipOutcome, SubmissionSource, SubmitOutcome,
+    SubmitRequest, TrackCredits, claim, create_event, decide_deadline, decide_extension,
+    event_status, expire_offer, generate_schedule, join_with_seed, lock_roster, open_decisions,
+    open_round, request_extension, reveal, reveal_with_channel, signup, skip, start_event, submit,
+    submit_attachment, tick_deadlines,
 };
 pub use ids::{assignment_id, plan_commitment, track_code};
 pub use inbound::InboundService;

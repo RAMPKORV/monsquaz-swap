@@ -1,7 +1,7 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo, MetaRepo,
-    ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
+    HostDecisionRepo, MetaRepo, ParticipantRepo, PlanRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
@@ -1371,6 +1371,350 @@ async fn a_join_is_refused_while_another_event_is_not_started() {
             .sent_dms()
             .iter()
             .any(|dm| dm.message.content.contains("has not started"))
+    );
+}
+
+#[tokio::test]
+async fn the_deadline_tick_is_idempotent_and_marks_overdue_without_moving_the_track() {
+    use swap_engine::{DeadlineReport, tick_deadlines};
+
+    let base = T4;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(3, 0, settings);
+    fixture
+        .db
+        .conn()
+        .execute("UPDATE participants SET timezone = 'Asia/Tokyo'", [])
+        .unwrap();
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    let discord = swap_discord::FakeDiscord::new();
+
+    let early: DeadlineReport = tick_deadlines(&fixture.db, base + 40).unwrap();
+    assert_eq!(early.reminders, 0);
+    assert_eq!(early.overdue, 0);
+
+    let half = tick_deadlines(&fixture.db, base + 50).unwrap();
+    assert_eq!(half.reminders, 1);
+    dispatch_pending(&fixture.db, &fixture.store, &discord, base + 50, 100)
+        .await
+        .unwrap();
+    let sent_before = discord.sent_dms().len();
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|dm| dm.message.content.contains(&track_code))
+    );
+    assert_eq!(tick_deadlines(&fixture.db, base + 51).unwrap().reminders, 0);
+    assert_eq!(discord.sent_dms().len(), sent_before);
+
+    assert_eq!(tick_deadlines(&fixture.db, base + 80).unwrap().reminders, 1);
+    assert_eq!(tick_deadlines(&fixture.db, base + 95).unwrap().reminders, 1);
+    let overdue = tick_deadlines(&fixture.db, base + 100).unwrap();
+    assert_eq!(overdue.overdue, 1);
+    let assignment = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(assignment.status, AssignmentStatus::Overdue);
+    let track = TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+        .unwrap()
+        .unwrap();
+    assert_eq!(track.state, TrackState::InCustody);
+    assert!(
+        !fixture
+            .db
+            .conn()
+            .query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM host_decisions WHERE assignment_id = ?1 AND status = 'open'",
+                [&assignment_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+            .eq(&0)
+    );
+}
+
+#[test]
+fn quiet_hours_delay_a_reminder_without_moving_the_deadline() {
+    use swap_engine::tick_deadlines;
+
+    let base = 25_130_i64;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    let due = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap()
+        .due_at
+        .unwrap();
+    assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 0);
+    assert_eq!(tick_deadlines(&fixture.db, base + 70).unwrap().reminders, 1);
+    let after = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap()
+        .due_at
+        .unwrap();
+    assert_eq!(after, due);
+}
+
+#[test]
+fn quiet_hours_can_be_turned_off() {
+    use swap_engine::tick_deadlines;
+
+    let base = 25_130_i64;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        quiet_hours_start: 8,
+        quiet_hours_end: 8,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 1);
+}
+
+#[test]
+fn reminders_do_not_burst_after_quiet_hours() {
+    use swap_engine::tick_deadlines;
+
+    let base = 25_130_i64;
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        base,
+    )
+    .unwrap();
+    assert_eq!(tick_deadlines(&fixture.db, base + 20).unwrap().reminders, 0);
+    assert_eq!(tick_deadlines(&fixture.db, base + 50).unwrap().reminders, 0);
+    assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 1);
+    assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 0);
+}
+
+#[test]
+fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
+    use swap_engine::{ExtensionStatus, decide_extension, open_decisions, request_extension};
+
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let original_due = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap()
+        .due_at
+        .unwrap();
+
+    assert!(matches!(
+        request_extension(&fixture.db, EVENT, &user_id, 2, T4 + 5),
+        Err(EngineError::InvalidExtensionHours)
+    ));
+    let first = request_extension(&fixture.db, EVENT, &user_id, 6, T4 + 10).unwrap();
+    assert_eq!(first.status, ExtensionStatus::Approved);
+    assert_eq!(first.due_at, Some(original_due + 6 * 3_600));
+    let assignment = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(assignment.status, AssignmentStatus::Claimed);
+    assert_eq!(
+        TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+            .unwrap()
+            .unwrap()
+            .state,
+        TrackState::InCustody
+    );
+
+    let second = request_extension(&fixture.db, EVENT, &user_id, 6, T4 + 20).unwrap();
+    assert_eq!(second.status, ExtensionStatus::PendingHost);
+    let decisions = open_decisions(&fixture.db, EVENT).unwrap();
+    assert_eq!(decisions.len(), 1);
+    let decision_id = decisions[0].id.clone();
+    let approved =
+        decide_extension(&fixture.db, &decision_id, true, "extra time", T4 + 30).unwrap();
+    assert_eq!(approved.status, ExtensionStatus::Approved);
+
+    let third = request_extension(&fixture.db, EVENT, &user_id, 6, T4 + 40).unwrap();
+    assert_eq!(third.status, ExtensionStatus::Refused);
+    assert_eq!(
+        TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+            .unwrap()
+            .unwrap()
+            .state,
+        TrackState::InCustody
+    );
+}
+
+#[test]
+fn a_missed_deadline_decision_records_seen_and_returns_the_track() {
+    use swap_engine::{decide_deadline, open_decisions, tick_deadlines};
+
+    let settings = EventSettings {
+        round_window_secs: 100,
+        ..EventSettings::default()
+    };
+    let fixture = Fixture::with_settings(2, 0, settings);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let due = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap()
+        .due_at
+        .unwrap();
+    tick_deadlines(&fixture.db, due).unwrap();
+    assert_eq!(open_decisions(&fixture.db, EVENT).unwrap().len(), 1);
+
+    decide_deadline(
+        &fixture.db,
+        &assignment_id,
+        "missed",
+        0,
+        "no submission",
+        due + 1,
+    )
+    .unwrap();
+    let assignment = AssignmentRepo::get(fixture.db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(assignment.status, AssignmentStatus::SkippedAfterClaim);
+    assert_eq!(
+        TrackRepo::get(fixture.db.conn(), EVENT, &track_code)
+            .unwrap()
+            .unwrap()
+            .state,
+        TrackState::Pool
+    );
+    assert!(SeenRepo::has(fixture.db.conn(), EVENT, &track_code, &user_id).unwrap());
+    assert!(open_decisions(&fixture.db, EVENT).unwrap().is_empty());
+}
+
+#[test]
+fn deadline_flags_and_decisions_survive_a_restart() {
+    use swap_engine::tick_deadlines;
+
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("deadlines.db");
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let (user_id, assignment_id) = {
+        let db = Db::open(&database).unwrap();
+        create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+        MetaRepo::set(db.conn(), "host.current_event", EVENT).unwrap();
+        for index in 0..2 {
+            join(&db, &store, index);
+        }
+        lock_roster(&db, EVENT, T1).unwrap();
+        generate_schedule(&db, EVENT, T2).unwrap();
+        start_event(&db, EVENT, T3).unwrap();
+        let offers = offers(&open_round(&db, EVENT, 0, T4).unwrap().effects);
+        let (user_id, assignment_id, _) = offers[0].clone();
+        claim(&db, &store, EVENT, &assignment_id, &user_id, T4).unwrap();
+        tick_deadlines(&db, T4 + 43_200).unwrap();
+        let deadline = DeadlineRepo::get(db.conn(), &assignment_id)
+            .unwrap()
+            .unwrap();
+        assert!(deadline.reminded_50);
+        tick_deadlines(&db, T4 + 86_400).unwrap();
+        assert_eq!(
+            HostDecisionRepo::list_open(db.conn(), EVENT).unwrap().len(),
+            1
+        );
+        (user_id, assignment_id)
+    };
+
+    let db = Db::open(&database).unwrap();
+    let report = tick_deadlines(&db, T4 + 86_401).unwrap();
+    assert_eq!(report.reminders, 0);
+    let deadline = DeadlineRepo::get(db.conn(), &assignment_id)
+        .unwrap()
+        .unwrap();
+    assert!(deadline.reminded_50);
+    assert_eq!(
+        HostDecisionRepo::list_open(db.conn(), EVENT).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        AssignmentRepo::get(db.conn(), &assignment_id)
+            .unwrap()
+            .unwrap()
+            .participant_id,
+        user_id
     );
 }
 

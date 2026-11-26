@@ -11,6 +11,7 @@ export type Scenario =
   | "reconnecting"
   | "not-started"
   | "lock-ready"
+  | "extension-ready"
   | "round-ready"
   | "reveal-ready"
   | "infeasible";
@@ -57,11 +58,23 @@ export type NextAction = {
 
 export type Decision = {
   id: string;
-  kind: "Deadline" | "Offer" | "Schedule" | "Delivery" | "Seeds";
+  kind:
+    | "Deadline"
+    | "Extension"
+    | "Offer"
+    | "Schedule"
+    | "Delivery"
+    | "Seeds";
   title: string;
   detail: string;
   due: string;
   actionLabel: string;
+  assignmentId?: string;
+  decisionId?: string;
+  requestedHours?: number;
+  deadline?: string;
+  newDeadline?: string;
+  extensionsUsed?: number;
 };
 
 export type ActivityEntry = {
@@ -171,6 +184,8 @@ export type EventDraft = {
   rounds: number | null;
   claimWindowHours: number;
   roundWindowHours: number;
+  quietHoursStart: number;
+  quietHoursEnd: number;
   allowlist: string[];
   packType: "Module template + samples" | "Samples only" | "Reference track" | "None";
   packRequired: boolean;

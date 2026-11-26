@@ -2980,6 +2980,16 @@ select.input {
   font-weight: 650;
 }
 
+.dialog__meta {
+  margin: 10px 0 0;
+  color: var(--faint-raised);
+  font-size: 11.5px;
+}
+
+.dialog__danger-action {
+  margin-right: 10px;
+}
+
 .dialog__body {
   display: flex;
   min-height: 0;

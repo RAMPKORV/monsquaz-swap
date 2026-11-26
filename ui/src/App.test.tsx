@@ -94,6 +94,39 @@ describe("App", () => {
     expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
   });
 
+  it("reviews an extension decision", async () => {
+    setUrl("?demo=1&state=extension-ready&dialog=decision");
+    render(<App />);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Noor asked for 6 more hours",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    expect(
+      await screen.findByText(/host action “approve”/i),
+    ).toBeInTheDocument();
+  });
+
+  it("confirms a missed turn before it changes seen state", async () => {
+    setUrl("?demo=1&state=default&dialog=decision");
+    render(<App />);
+    const review = await screen.findByRole("dialog", {
+      name: "Track S7F3A is overdue",
+    });
+    fireEvent.click(
+      within(review).getByRole("button", { name: "Mark turn missed" }),
+    );
+    const confirm = await screen.findByRole("dialog", {
+      name: "Mark the turn missed?",
+    });
+    expect(document.activeElement).toHaveTextContent("Cancel");
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "Mark turn missed" }),
+    );
+    expect(
+      await screen.findByText(/host action “missed”/i),
+    ).toBeInTheDocument();
+  });
+
   it("shows the first-run state", async () => {
     setUrl("?demo=1&state=empty");
     render(<App />);

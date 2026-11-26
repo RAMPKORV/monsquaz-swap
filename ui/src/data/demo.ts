@@ -57,11 +57,15 @@ const defaultDecisions: Decision[] = [
   {
     id: "decision-1",
     kind: "Deadline",
-    title: "S7F3A passed its deadline",
+    title: "Track S7F3A is overdue",
     detail:
-      "The current holder still has the track. Other participants cannot see it until the reveal. Decide whether to extend, skip, or wait.",
+      "Noor still holds Track S7F3A. Only the host can see this decision. Extend 6 hours, mark the turn missed, or keep waiting.",
     due: "42 minutes ago",
     actionLabel: "Review",
+    assignmentId: "assignment-1",
+    deadline: "25 Nov, 18:00 CET",
+    newDeadline: "26 Nov, 00:42 CET",
+    extensionsUsed: 0,
   },
   {
     id: "decision-2",
@@ -89,7 +93,7 @@ const defaultActivity: ActivityEntry[] = [
     at: "17:12",
     actor: "Host",
     action: "extended a deadline",
-    subject: "S7F3A, +6 hours",
+    subject: "S9Q1B, +6 hours",
   },
   {
     id: "activity-2",
@@ -306,6 +310,36 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
           "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.",
         due: "Before roster lock",
         actionLabel: "Review",
+      },
+    ];
+    return mission;
+  }
+
+  if (scenario === "extension-ready") {
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Review the extension request",
+      detail:
+        "Noor asked for 6 more hours on Track S7F3A. The deadline does not move until you decide.",
+      actionLabel: "Review decisions",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.decisions = [
+      {
+        id: "extension-ready",
+        kind: "Extension",
+        title: "Noor asked for 6 more hours",
+        detail:
+          "Noor has used 1 of 2 extensions. This is the second request. Noor keeps Track S7F3A until you decide.",
+        due: "Awaiting host",
+        actionLabel: "Review",
+        assignmentId: "assignment-1",
+        decisionId: "decision-1",
+        requestedHours: 6,
+        deadline: "26 Nov, 09:00 CET",
+        newDeadline: "26 Nov, 15:00 CET",
+        extensionsUsed: 1,
       },
     ];
     return mission;
@@ -756,6 +790,8 @@ function defaultDraft(): EventDraft {
     rounds: 8,
     claimWindowHours: 12,
     roundWindowHours: 24,
+    quietHoursStart: 22,
+    quietHoursEnd: 8,
     allowlist: ["it", "mptm", "xm", "mod", "s3m", "mtm", "669", "wav", "flac", "mp3", "ogg", "zip"],
     packType: "Module template + samples",
     packRequired: true,

@@ -1,6 +1,6 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Readiness, Role, TrackState};
 use swap_db::{
-    AssignmentRecord, AssignmentRepo, Db, EventRecord, EventRepo, FileRecord, FileRepo,
+    AssignmentRecord, AssignmentRepo, Connection, Db, EventRecord, EventRepo, FileRecord, FileRepo,
     ParticipantRecord, ParticipantRepo, SeenRepo, TrackRecord, TrackRepo, migrations,
 };
 
@@ -95,6 +95,47 @@ fn migrations_apply_and_enable_foreign_keys() {
         .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
         .unwrap();
     assert_eq!(foreign_keys, 1);
+}
+
+#[test]
+fn migration_seven_upgrades_a_version_six_database() {
+    let mut connection = Connection::open_in_memory().unwrap();
+    for (index, sql) in migrations::MIGRATIONS.iter().take(6).enumerate() {
+        connection.execute_batch(sql).unwrap();
+        connection
+            .pragma_update(None, "user_version", index as i64 + 1)
+            .unwrap();
+    }
+    connection
+        .execute(
+            "INSERT INTO events (id, name, state, seed, settings_json, created_at, updated_at)
+             VALUES ('evt-1', 'Old Swap', 'draft', 42, '{}', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+    migrations::migrate(&mut connection).unwrap();
+
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, migrations::LATEST_VERSION);
+    let name: String = connection
+        .query_row("SELECT name FROM events WHERE id = 'evt-1'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(name, "Old Swap");
+    for table in ["assignment_deadlines", "host_decisions"] {
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "{table} is missing");
+    }
 }
 
 #[test]

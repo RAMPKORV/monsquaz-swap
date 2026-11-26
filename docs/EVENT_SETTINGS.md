@@ -175,7 +175,7 @@ Rules:
 |---|---|---|---|
 | Deadline type | Soft | Soft; hard with grace; hard auto-skip | Yes |
 | Reminder ladder | 50%, 80%, 95%, deadline | Percentage; fixed offsets; daily; host-set | No |
-| Quiet hours | 22:00–08:00 local | Any window; off; per-participant | No |
+| Quiet hours | 22:00–08:00 local | Any window; off when start equals end; per-participant | No |
 | At-deadline prompt | On | On; off | No |
 | Extensions | +1h, +6h, +12h | Host-defined presets | No |
 | First extension | Auto-approve up to 6h | Auto; host approval | No |

@@ -36,9 +36,13 @@ pub fn comment_id(
     body: &str,
     now: i64,
 ) -> String {
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let hash = sha256_hex(
-        format!("msw-comment-v1:{event_id}:{track_code}:{participant_id}:{kind}:{now}:{body}")
-            .as_bytes(),
+        format!(
+            "msw-comment-v1:{event_id}:{track_code}:{participant_id}:{kind}:{now}:{sequence}:{body}"
+        )
+        .as_bytes(),
     );
     format!("c{}", &hash[..16])
 }

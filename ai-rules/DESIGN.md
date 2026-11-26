@@ -7,11 +7,12 @@ adjustable, but a locked rule is a contract.
 ## Current status
 
 - **Locked:** color tokens, no `!important`, WCAG AA text contrast, visible
-  keyboard focus, and the Refract overflow findings.
-- **Advisory:** spacing scale, type scale, radius scale, shadow tokens, and
-  reduced motion.
-- The target is to lock the advisory scales after the existing UI is cleaned
-  up. Until then, agents can fix violations or improve the rules.
+  keyboard focus, the Refract overflow findings, and the spacing, type, and
+  radius scales.
+- **Advisory:** shadow tokens and reduced motion.
+- The scales became locked in D-029 and ADR 0006 after the UI cleanup. A
+  reviewed exception needs a baseline entry with a reason and an issue or an
+  expiry.
 
 Agents may change an advisory rule, fix code, or add a page to the matrix in a
 normal pull request. Agents must not silently weaken a locked rule. A locked
@@ -39,8 +40,9 @@ and a re-run of the gate.
 4. Do not use `!important`. Fix the component or the selector.
 5. Visible text meets WCAG AA: 4.5:1 for normal text, 3:1 for large text.
 6. Every keyboard-focusable control shows a visible focus indicator.
-7. Use the spacing, type, radius, and shadow scales. These are advisory until
-   the baseline is empty and the decision record locks them.
+7. Use the spacing, type, radius, and shadow scales. The spacing, type, and
+   radius scales are locked. Shadow tokens are advisory. A reviewed exception
+   needs a baseline entry with a reason and an issue or an expiry.
 8. Respect `prefers-reduced-motion` for every animation or transition.
 9. Empty, loading, error, long-content, and dense states are part of the
    design. They belong in the page matrix when the view can show them.

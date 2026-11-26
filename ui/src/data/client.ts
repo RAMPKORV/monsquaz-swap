@@ -429,12 +429,12 @@ export async function decideExtension(
   decisionId: string,
   approve: boolean,
   reason: string,
-): Promise<void> {
+): Promise<string> {
   if (isDemoMode()) {
     await pause(260);
-    return;
+    return approve ? "approved" : "refused";
   }
-  return invoke<void>("host_decide_extension", {
+  return invoke<string>("host_decide_extension", {
     decisionId,
     approve,
     reason,

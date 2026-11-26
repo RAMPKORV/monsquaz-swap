@@ -143,6 +143,21 @@ and one acknowledgement.
 - The gateway health appears in the mission control and settings views. The
   states are starting, online, reconnecting, stopped, and failed.
 
+## Deadlines and reminders
+
+The dispatcher calls the deadline tick at startup and every 30 seconds. The
+tick reads active events. A claimed assignment whose `due_at` has passed becomes
+`Overdue`. The track stays in custody. The tick creates one open host decision
+and one durable host alert. The host extends, marks the turn missed, or keeps
+waiting. The tick never moves a track or marks a turn missed.
+
+Reminders follow the 50, 80, and 95 percent ladder and the deadline prompt. A
+reminder row on the assignment prevents a duplicate. A non-urgent reminder waits
+during 22:00 to 08:00 in the participant timezone. The deadline prompt is
+exempt. The first extension of six hours or less is automatic. Later requests
+need the host. Two extensions are the maximum. Every decision writes an audit
+entry and a direct message.
+
 ## Deferred work
 
 - The app must enforce the host permission for `host-lock`, `host-reveal`, and

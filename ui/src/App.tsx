@@ -398,13 +398,15 @@ export default function App() {
     }
     try {
       if (decision.kind === "Extension" && decision.decisionId) {
-        await decideExtension(
+        const status = await decideExtension(
           decision.decisionId,
           action === "approve",
           "Host decision",
         );
         setToast(
-          action === "approve" ? "Extension approved." : "Extension refused.",
+          status === "approved"
+            ? "Extension approved."
+            : "Extension refused.",
         );
       } else if (decision.assignmentId) {
         const hours = action === "extend" ? 6 : 0;

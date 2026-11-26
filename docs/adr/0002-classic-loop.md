@@ -19,9 +19,8 @@ The host UI has no lock, open-round, or reveal action.
    auto-advance invariant.
 
 2. **The roster lock is explicit.** `host_lock_roster` calls `lock_roster` and
-   writes an audit entry. `host_generate_plan` keeps its compatibility auto-lock
-   for the signup state and audits that lock. A second lock returns a clear
-   error.
+   writes an audit entry. `host_generate_plan` refuses the signup state and
+   requires a locked roster. A second lock returns a clear error.
 
 3. **The current round is derived, not stored.** The current round is the
    highest opened round plus one. An event with no assignment is at round zero.

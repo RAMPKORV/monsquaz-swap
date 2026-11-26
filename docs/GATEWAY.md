@@ -130,7 +130,7 @@ and one acknowledgement.
 ## Classic host actions
 
 - `host_lock_roster` closes seed intake and classifies unseeded signups as
-  fill-ins.
+  fill-ins. The planner refuses to generate a schedule before the lock.
 - `host_open_round` opens one round. The host must call it. No timer opens a
   round.
 - `host_reveal` checks the reveal gate and writes one credits message to the

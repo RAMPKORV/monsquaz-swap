@@ -398,6 +398,15 @@ pub fn lock_roster(db: &Db, event_id: &str, now: i64) -> Result<LockOutcome, Eng
     let event = load_event(db, event_id)?;
     require_state(&event, EventState::Signup, "roster lock", "signup")?;
     let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::Signup {
+        return Err(EngineError::WrongEventState {
+            action: "roster lock",
+            state: current.state,
+            expected: "signup",
+        });
+    }
     let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
     if participants.is_empty() {
         return Err(EngineError::NoParticipants);
@@ -631,6 +640,15 @@ pub fn open_round(
     let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
     let mut effects = Vec::with_capacity(for_round.len());
     let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if current.state != EventState::Active {
+        return Err(EngineError::WrongEventState {
+            action: "round open",
+            state: current.state,
+            expected: "active",
+        });
+    }
     if let Some(active) = AssignmentRepo::list_active(&transaction, event_id)?.first() {
         return Err(EngineError::RoundNotResolved {
             round: active.round,
@@ -993,6 +1011,15 @@ pub fn reveal_with_channel(
         }
     }
     let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
+    if !matches!(current.state, EventState::Active | EventState::Paused) {
+        return Err(EngineError::WrongEventState {
+            action: "reveal",
+            state: current.state,
+            expected: "active or paused",
+        });
+    }
     let active = AssignmentRepo::list_active(&transaction, event_id)?;
     if !active.is_empty() {
         return Err(EngineError::PendingAssignments {
@@ -1062,10 +1089,11 @@ pub fn reveal_with_channel(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let next = event.state.transition_to(EventState::Reveal)?;
+    let next = current.state.transition_to(EventState::Reveal)?;
     EventRepo::set_state(&transaction, event_id, next, now)?;
-    for effect in &effects {
-        enqueue_effect(&transaction, event_id, effect, now)?;
+    for (index, effect) in effects.iter().enumerate() {
+        // Keep split reveal messages in order. The id remains stable per chunk.
+        enqueue_effect(&transaction, event_id, effect, now + index as i64)?;
     }
     commit(transaction)?;
     Ok(RevealOutcome { tracks, effects })

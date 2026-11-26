@@ -207,7 +207,7 @@ export type EventDraft = {
   groupCount: number;
   groupSize: number;
   rotation: "Participants" | "Track pools" | "Both";
-  swapCadence: "K rounds" | "Calendar" | "Host-triggered";
+  swapCadence: "K rounds" | "Calendar" | "Host-triggered" | "Exhausted";
   scheduleVisibility: "Hidden" | "Visible assignments";
 };
 

@@ -1154,7 +1154,8 @@ textarea {
   color: var(--accent);
 }
 
-.note-card h2 {
+.note-card h2,
+.note-card h3 {
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
@@ -1402,6 +1403,21 @@ textarea {
 
 .input::placeholder {
   color: var(--faint);
+}
+
+.input:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--faint-raised);
+  cursor: not-allowed;
+}
+
+.input:disabled::placeholder {
+  color: var(--faint-raised);
+}
+
+.input:disabled:hover {
+  border-color: var(--field-line);
 }
 
 .input:hover {
@@ -2721,9 +2737,15 @@ select.input {
   margin-top: 14px;
 }
 
+.wizard-card h2 {
+  margin-left: -11px;
+  padding-left: 8px;
+  border-left: 3px solid transparent;
+}
+
 .wizard-card h2:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
+  outline: none;
+  border-left-color: var(--accent);
 }
 
 .wizard-actions {
@@ -3341,9 +3363,9 @@ select.input {
   }
 
   .wizard-card h2:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 4px;
-}
+    outline: none;
+    border-left-color: var(--accent);
+  }
 
 .wizard-actions {
     margin-top: 6px;

@@ -67,6 +67,11 @@ wizard selector is a follow-up. `ScheduleOutcome.fallback` reports when a
 strategy used random matching. The plan record and UI do not persist that flag
 yet.
 
+The group lookup runs when the planner generates the plan, because the active
+roster is known then. The plan stores the effective group count and size. The
+manual count and size controls are enabled only for the Manual group mode.
+Soft-bound and cadence warnings do not block the plan.
+
 Rules:
 
 - The planner must show the fun estimate and the guardrails. The fun score is

@@ -832,8 +832,13 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
     };
     let tracks =
         TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
-    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    let settings: EventSettings = if plan.settings_json.trim() == "{}" {
+        serde_json::from_str(&event.settings_json).unwrap_or_default()
+    } else {
+        serde_json::from_str(&plan.settings_json).unwrap_or_default()
+    };
     let (groups, group_of) = planner_groups(&settings, &participants, &tracks);
+    let warnings = planner_group_warnings(&settings, &participants, plan.rounds);
     let group_for = |owner_id: &str| {
         group_of
             .get(owner_id)
@@ -889,7 +894,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         matrix,
         graph: GraphDto { round: 0, edges },
         groups,
-        warnings: Vec::new(),
+        warnings,
         fun_score: None,
         fun_guardrails: Vec::new(),
     })
@@ -921,10 +926,18 @@ fn planner_groups(
         return (Vec::new(), std::collections::BTreeMap::new());
     }
     let count = count.min(active.len());
-    let size = active.len().div_ceil(count);
+    let sizes =
+        swap_core::group_sizes(active.len(), count as u32, settings.group_size.unwrap_or(0));
+    if sizes.len() <= 1 {
+        return (Vec::new(), std::collections::BTreeMap::new());
+    }
     let mut groups = Vec::new();
     let mut group_of = std::collections::BTreeMap::new();
-    for (index, members) in active.chunks(size).enumerate() {
+    let mut start = 0;
+    for (index, group_size) in sizes.iter().enumerate() {
+        let end = start + *group_size as usize;
+        let members = &active[start..end];
+        start = end;
         let name = group_name(index);
         let owned = tracks
             .iter()
@@ -952,6 +965,81 @@ fn planner_groups(
 
 fn group_name(index: usize) -> String {
     char::from(b'A' + (index % 26) as u8).to_string()
+}
+
+fn planner_group_warnings(
+    settings: &EventSettings,
+    participants: &[swap_db::ParticipantRecord],
+    rounds: u32,
+) -> Vec<PlannerWarningDto> {
+    if settings.mode != Mode::Classic
+        || matches!(settings.group_mode.as_deref(), Some("Single group"))
+    {
+        return Vec::new();
+    }
+    let active = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active
+                && participant.role == Role::Participant
+                && participant.readiness == swap_core::Readiness::Ready
+        })
+        .count();
+    if active == 0 {
+        return Vec::new();
+    }
+    let count = settings
+        .group_count
+        .unwrap_or(1)
+        .clamp(1, swap_core::MAX_GROUP_COUNT);
+    let size = settings.group_size.unwrap_or(0);
+    let sizes = swap_core::group_sizes(active, count, size);
+    let cadence = settings.swap_cadence.as_deref().unwrap_or("K rounds");
+    swap_core::group_warnings(&sizes, rounds, cadence)
+        .into_iter()
+        .map(|warning| match warning {
+            swap_core::GroupWarning::Small { size } => PlannerWarningDto {
+                id: "group-size-small".to_string(),
+                severity: "info".to_string(),
+                title: "Group size is below the soft minimum".to_string(),
+                detail: format!(
+                    "The smallest group has {size} people. The soft minimum is 5. The host can continue."
+                ),
+            },
+            swap_core::GroupWarning::Large { size } => PlannerWarningDto {
+                id: "group-size-large".to_string(),
+                severity: "info".to_string(),
+                title: "Group size is above the soft maximum".to_string(),
+                detail: format!(
+                    "The largest group has {size} people. The soft maximum is 12. The host can continue."
+                ),
+            },
+            swap_core::GroupWarning::Unequal { smallest, largest } => PlannerWarningDto {
+                id: "group-size-unequal".to_string(),
+                severity: "info".to_string(),
+                title: "Groups are unequal".to_string(),
+                detail: format!(
+                    "The groups have {smallest} and {largest} people. Rebalance them if the event allows it."
+                ),
+            },
+            swap_core::GroupWarning::Cadence { phases } => PlannerWarningDto {
+                id: "group-cadence".to_string(),
+                severity: "info".to_string(),
+                title: "The swap cadence is outside the target".to_string(),
+                detail: format!(
+                    "The default cadence gives {phases} phases. The target is 3 to 5 phases. The host can continue."
+                ),
+            },
+            swap_core::GroupWarning::Exhausted { size, rounds } => PlannerWarningDto {
+                id: "group-exhausted".to_string(),
+                severity: "info".to_string(),
+                title: "The group cannot exhaust before the event ends".to_string(),
+                detail: format!(
+                    "A group of {size} cannot exhaust in {rounds} rounds. Use a K-round swap."
+                ),
+            },
+        })
+        .collect()
 }
 
 fn event_rounds(db: &Db, event: &EventRecord) -> Result<u32, String> {
@@ -2275,9 +2363,73 @@ mod tests {
                 .iter()
                 .any(|cell| cell.participant_name == "Bob")
         );
+        assert!(plan.groups.is_empty());
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_planner_applies_lookup_groups() {
+        let (db, directory) = test_db("lookup-groups");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Two Groups".to_string(),
+                rounds: Some(9),
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..10 {
+            let id = format!("u-{index:02}");
+            let name = format!("Person {index:02}");
+            let code = format!("T{index:02}");
+            seed_person(&db, &created.id, &id, &name);
+            seed_track(&db, &created.id, &code, &id);
+        }
+        lock_host_roster(&db).unwrap();
+        let plan = generate_host_plan(&db).unwrap();
         assert_eq!(plan.groups.len(), 2);
-        assert_eq!(plan.groups[0].participants, vec!["Alice"]);
-        assert_eq!(plan.groups[0].tracks, 1);
+        assert!(plan.groups.iter().all(|group| group.size == 5));
+        assert!(plan.groups.iter().all(|group| group.tracks == 5));
+        assert!(plan.warnings.is_empty());
+
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_small_group_produces_a_soft_warning() {
+        let (db, directory) = test_db("small-group");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Small Group".to_string(),
+                rounds: Some(2),
+                group_mode: "Manual".to_string(),
+                group_count: 1,
+                group_size: 3,
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..3 {
+            let id = format!("u-{index:02}");
+            let name = format!("Person {index:02}");
+            let code = format!("T{index:02}");
+            seed_person(&db, &created.id, &id, &name);
+            seed_track(&db, &created.id, &code, &id);
+        }
+        lock_host_roster(&db).unwrap();
+        let plan = generate_host_plan(&db).unwrap();
+        let warning = plan
+            .warnings
+            .iter()
+            .find(|warning| warning.id == "group-size-small")
+            .expect("the small group warning is present");
+        assert_eq!(warning.severity, "info");
+        assert!(warning.detail.contains("3"));
 
         drop(db);
         fs::remove_dir_all(directory).unwrap();

@@ -111,6 +111,18 @@ plan has no valid single-cell swap, because every legal pairing is already
 used. The UI then reports that no valid swap exists and offers a new draft or a
 shorter plan. See `docs/adr/0005-manual-schedule-edits.md`.
 
+## Classic group lookup
+
+The planner applies the group lookup when it generates a classic plan. The
+lookup reads the active ready roster. It uses one group up to 9 people, two
+groups for 10 to 13, three for 14 to 18 and 23 to 32, and four for 19 to 22
+and 33 to 40. The plan stores the effective count and size. A manual group
+count and size override the lookup. The soft bounds are 5 to 12 people per
+group. A small group, a large group, unequal groups, a cadence outside 3 to 5
+phases, or an exhausted policy that cannot fire produces an information
+warning. A warning does not block the plan. Group rotation and infeasible
+phase fallback are the next slices.
+
 ## Simulation
 
 `swap-sim` drives the real classic engine with deterministic participants:

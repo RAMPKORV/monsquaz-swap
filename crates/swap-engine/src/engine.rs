@@ -1615,6 +1615,11 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
     let mut report = DeadlineReport::default();
     for event in events {
         let transaction = begin(db)?;
+        let current = EventRepo::get(&transaction, &event.id)?
+            .ok_or_else(|| EngineError::EventNotFound(event.id.clone()))?;
+        if current.state != EventState::Active {
+            continue;
+        }
         let participants = ParticipantRepo::list_for_event(&transaction, &event.id)?;
         let assignments = AssignmentRepo::list_active(&transaction, &event.id)?;
         for assignment in assignments {

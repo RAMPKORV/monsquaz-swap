@@ -17,6 +17,7 @@ import type {
   MissionControl,
   PeopleData,
   PlanData,
+  RevealPackage,
   Scenario,
   SetupData,
   Theme,
@@ -42,10 +43,14 @@ import {
   loadMissionControl,
   loadPeople,
   loadPlan,
+  loadRevealPackage,
   loadSettings,
   loadSetup,
   saveSettings,
   setParticipantPaused,
+  setTrackTitle,
+  addTrackComment,
+  redactTrackComment,
   sendTestNotification,
 } from "./data/client";
 import {
@@ -58,6 +63,7 @@ import { AuditLogSkeleton, AuditLogView } from "./views/AuditLog";
 import { SetupSkeleton, SetupView } from "./views/Setup";
 import { PeopleSkeleton, PeopleView } from "./views/People";
 import { PlannerSkeleton, PlannerView } from "./views/Planner";
+import { RevealSkeleton, RevealView } from "./views/Reveal";
 
 type LoadStatus = "loading" | "ready" | "error";
 
@@ -75,6 +81,7 @@ const toolItems: Array<{
   { label: "Event setup", icon: "plus", view: "setup" },
   { label: "Participants", icon: "users", view: "people" },
   { label: "Schedule", icon: "shuffle", view: "plan" },
+  { label: "Reveal show", icon: "sparkles", view: "reveal" },
   { label: "Round board", icon: "disc" },
   { label: "Files", icon: "folder" },
 ];
@@ -92,6 +99,7 @@ export default function App() {
   const [setup, setSetup] = useState<SetupData | null>(null);
   const [people, setPeople] = useState<PeopleData | null>(null);
   const [plan, setPlan] = useState<PlanData | null>(null);
+  const [revealPackage, setRevealPackage] = useState<RevealPackage | null>(null);
   const [settings, setSettings] = useState<HostSettings | null>(null);
   const [originalSettings, setOriginalSettings] =
     useState<HostSettings | null>(null);
@@ -160,8 +168,18 @@ export default function App() {
       loadSetup(scenario),
       loadPeople(scenario),
       loadPlan(scenario),
+      loadRevealPackage(scenario),
     ])
-      .then(([nextMission, nextSettings, nextAudit, nextSetup, nextPeople, nextPlan]) => {
+      .then(
+        ([
+          nextMission,
+          nextSettings,
+          nextAudit,
+          nextSetup,
+          nextPeople,
+          nextPlan,
+          nextReveal,
+        ]) => {
         if (cancelled) {
           return;
         }
@@ -178,12 +196,14 @@ export default function App() {
         setSetup(nextSetup);
         setPeople(nextPeople);
         setPlan(nextPlan);
+        setRevealPackage(nextReveal);
         setDirty(
           isDemoMode() &&
             new URLSearchParams(window.location.search).get("dirty") === "1",
         );
         setStatus("ready");
-      })
+        },
+      )
       .catch((error: unknown) => {
         if (cancelled) {
           return;
@@ -206,6 +226,7 @@ export default function App() {
       setup: "Event setup",
       people: "Participants",
       plan: "Schedule planner",
+      reveal: "Reveal show",
       settings: "Settings",
       audit: "Audit log",
     };
@@ -336,6 +357,7 @@ export default function App() {
           setToast(
             `Reveal recorded. ${revealed.tracks.length} track credits are queued for the reveal channel.`,
           );
+          setView("reveal");
         }
         reloadView();
       } catch (error) {
@@ -555,6 +577,8 @@ export default function App() {
         <PeopleSkeleton />
       ) : view === "plan" ? (
         <PlannerSkeleton />
+      ) : view === "reveal" ? (
+        <RevealSkeleton />
       ) : view === "settings" ? (
         <SettingsSkeleton />
       ) : (
@@ -586,6 +610,37 @@ export default function App() {
         onGeneratePlan={handleGeneratePlan}
         onStartEvent={handleStartEvent}
         onRedactionChange={setRedactionPreview}
+      />
+    ) : view === "reveal" && revealPackage ? (
+      <RevealView
+        data={revealPackage}
+        onAction={setToast}
+        onSetTitle={async (trackCode, title) => {
+          try {
+            setRevealPackage(await setTrackTitle(trackCode, title));
+          } catch (error) {
+            setToast(`Could not save the title. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
+        onAddComment={async (trackCode, participantId, kind, body) => {
+          try {
+            setRevealPackage(
+              await addTrackComment(trackCode, participantId, kind, body),
+            );
+          } catch (error) {
+            setToast(`Could not add the comment. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
+        onRedact={async (commentId) => {
+          try {
+            setRevealPackage(await redactTrackComment(commentId));
+          } catch (error) {
+            setToast(`Could not redact the comment. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
       />
     ) : view === "settings" && settings ? (
       <SettingsView

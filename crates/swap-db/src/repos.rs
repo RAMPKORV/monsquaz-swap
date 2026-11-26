@@ -999,18 +999,17 @@ impl FileRepo {
     }
 
     pub fn get(conn: &Connection, id: &str) -> Result<Option<FileRecord>, DbError> {
-        Ok(conn
-            .query_row(
-                "SELECT id, event_id, track_code, version, holder_id, sha256, size,
-                        extension, storage_path, original_sha256, original_storage_path,
-                        audio_verified, scrub_summary_json, created_at
-                 FROM files WHERE id = ?1",
-                params![id],
-                row_to_raw_file,
-            )
-            .optional()?
-            .map(FileRecord::try_from)
-            .transpose()?)
+        conn.query_row(
+            "SELECT id, event_id, track_code, version, holder_id, sha256, size,
+                    extension, storage_path, original_sha256, original_storage_path,
+                    audio_verified, scrub_summary_json, created_at
+             FROM files WHERE id = ?1",
+            params![id],
+            row_to_raw_file,
+        )
+        .optional()?
+        .map(FileRecord::try_from)
+        .transpose()
     }
 
     pub fn list_for_track(

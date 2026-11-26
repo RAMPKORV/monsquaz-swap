@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import App from "./App";
+import { resetDemoReveal } from "./data/client";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -17,6 +18,7 @@ function setUrl(search: string) {
 }
 
 beforeEach(() => {
+  resetDemoReveal();
   setUrl("?demo=1");
   Object.defineProperty(window, "matchMedia", {
     writable: true,
@@ -125,6 +127,54 @@ describe("App", () => {
     expect(
       await screen.findByText(/host action “missed”/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows the reveal album and hides names in stream-safe mode", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Reveal show" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/seeded by Noor/)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stream-safe off" }),
+    );
+    expect(screen.getByText("Stream-safe is on")).toBeInTheDocument();
+    expect(screen.queryByText(/seeded by Noor/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Host tools")).not.toBeInTheDocument();
+    expect(screen.getByText(/seeded by the seed owner/)).toBeInTheDocument();
+  });
+
+  it("saves a title from the reveal show", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Reveal show" });
+    const field = screen.getByLabelText("Track title");
+    fireEvent.change(field, { target: { value: "New Name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+    expect(await screen.findByText("Track title saved.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "New Name" }),
+    ).toBeInTheDocument();
+  });
+
+  it("redacts a comment before the reveal", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Reveal show" });
+    const text = "The bassline answer in the second half is the best thing I heard all week.";
+    expect(screen.getByText(text)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Redact" })[0]);
+    const dialog = await screen.findByRole("dialog", {
+      name: "Redact this comment?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Redact comment" }),
+    );
+    expect(
+      await screen.findByText("Comment redacted. It will not appear in the reveal."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
   it("shows the first-run state", async () => {

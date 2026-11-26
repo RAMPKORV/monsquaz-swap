@@ -15,8 +15,9 @@ use swap_db::{
     PlanRepo, TrackRepo,
 };
 use swap_engine::{
-    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, create_event, generate_schedule,
-    lock_roster, open_round, reveal_with_channel, start_event,
+    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, add_track_comment, create_event,
+    generate_schedule, lock_roster, open_round, redact_track_comment, reveal_package,
+    reveal_with_channel, set_track_title, start_event,
 };
 
 #[derive(Debug, Serialize)]
@@ -85,6 +86,74 @@ pub struct RevealEntryDto {
     display_name: String,
     status: String,
     fill_in: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealPackageDto {
+    event_name: String,
+    event_state: String,
+    published: bool,
+    album: Vec<RevealShowTrackDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealShowTrackDto {
+    position: u32,
+    track_code: String,
+    title: Option<String>,
+    seed_owner_id: String,
+    seed_owner_name: String,
+    credits: Vec<RevealShowCreditDto>,
+    comments: Vec<RevealShowCommentDto>,
+    versions: Vec<RevealShowVersionDto>,
+    stats: RevealShowStatsDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealShowCreditDto {
+    round: u32,
+    participant_id: String,
+    display_name: String,
+    status: String,
+    fill_in: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealShowCommentDto {
+    id: String,
+    participant_id: String,
+    author_name: String,
+    kind: String,
+    body: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealShowVersionDto {
+    version: u32,
+    holder_id: String,
+    holder_name: String,
+    role: String,
+    round: Option<u32>,
+    file_id: String,
+    extension: String,
+    created_at: i64,
+    playable: bool,
+    final_version: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealShowStatsDto {
+    edits: u32,
+    fill_ins: u32,
+    skips: u32,
+    contributors: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -1067,6 +1136,127 @@ fn reveal_track_dto(track: TrackCredits) -> RevealTrackDto {
             })
             .collect(),
     }
+}
+
+fn reveal_package_dto(db: &Db) -> Result<RevealPackageDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let package = reveal_package(db, &event.id).map_err(|error| error.to_string())?;
+    Ok(RevealPackageDto {
+        event_name: package.event_name,
+        event_state: format!("{:?}", package.event_state),
+        published: package.published,
+        album: package
+            .album
+            .into_iter()
+            .map(|track| RevealShowTrackDto {
+                position: track.position,
+                track_code: track.track_code,
+                title: track.title,
+                seed_owner_id: track.seed_owner_id,
+                seed_owner_name: track.seed_owner_name,
+                credits: track
+                    .credits
+                    .into_iter()
+                    .map(|entry| RevealShowCreditDto {
+                        round: entry.round,
+                        participant_id: entry.participant_id,
+                        display_name: entry.display_name,
+                        status: format!("{:?}", entry.status),
+                        fill_in: entry.fill_in,
+                    })
+                    .collect(),
+                comments: track
+                    .comments
+                    .into_iter()
+                    .map(|comment| RevealShowCommentDto {
+                        id: comment.id,
+                        participant_id: comment.participant_id,
+                        author_name: comment.author_name,
+                        kind: comment.kind,
+                        body: comment.body,
+                        created_at: comment.created_at,
+                    })
+                    .collect(),
+                versions: track
+                    .versions
+                    .into_iter()
+                    .map(|version| RevealShowVersionDto {
+                        version: version.version,
+                        holder_id: version.holder_id,
+                        holder_name: version.holder_name,
+                        role: match version.role {
+                            swap_engine::RevealVersionRole::Seed => "seed".to_string(),
+                            swap_engine::RevealVersionRole::Edit => "edit".to_string(),
+                        },
+                        round: version.round,
+                        file_id: version.file_id,
+                        extension: version.extension,
+                        created_at: version.created_at,
+                        playable: version.playable,
+                        final_version: version.final_version,
+                    })
+                    .collect(),
+                stats: RevealShowStatsDto {
+                    edits: track.stats.edits,
+                    fill_ins: track.stats.fill_ins,
+                    skips: track.stats.skips,
+                    contributors: track.stats.contributors,
+                },
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+pub fn host_reveal_package(app: AppHandle) -> Result<RevealPackageDto, String> {
+    let db = open_db(&app)?;
+    reveal_package_dto(&db)
+}
+
+#[tauri::command]
+pub fn host_set_track_title(
+    app: AppHandle,
+    track_code: String,
+    title: String,
+) -> Result<RevealPackageDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    set_track_title(&db, &event.id, &track_code, &title, "host", now_secs())
+        .map_err(|error| error.to_string())?;
+    reveal_package_dto(&db)
+}
+
+#[tauri::command]
+pub fn host_add_track_comment(
+    app: AppHandle,
+    track_code: String,
+    participant_id: String,
+    kind: String,
+    body: String,
+) -> Result<RevealPackageDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    add_track_comment(
+        &db,
+        &event.id,
+        &track_code,
+        &participant_id,
+        &kind,
+        &body,
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    reveal_package_dto(&db)
+}
+
+#[tauri::command]
+pub fn host_redact_track_comment(
+    app: AppHandle,
+    comment_id: String,
+) -> Result<RevealPackageDto, String> {
+    let db = open_db(&app)?;
+    redact_track_comment(&db, &comment_id, now_secs()).map_err(|error| error.to_string())?;
+    reveal_package_dto(&db)
 }
 
 #[tauri::command]

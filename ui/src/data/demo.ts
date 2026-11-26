@@ -7,6 +7,8 @@ import type {
   GuildOption,
   HostSettings,
   MissionControl,
+  RevealAlbumTrack,
+  RevealPackage,
   Scenario,
   TimelineStep,
 } from "../types";
@@ -1143,5 +1145,149 @@ export function demoPlan(scenario: Scenario): PlanData {
       { label: "Fairness", value: "Within bounds" },
       { label: "Freshness", value: dense ? "Moderate" : "High" },
     ],
+  };
+}
+
+
+const revealSeeds = [
+  ["S8G4H", "Midnight Draft", "Noor"],
+  ["S1P7J", "Glass Elevator", "Fay"],
+  ["S0U7V", "Paper Lanterns", "Nils"],
+  ["S8T2V", "Low Tide", "Zoe"],
+  ["S9D5Z", "Static Bloom", "Hana"],
+  ["S6H7J", "Neon Orchard", "Kira"],
+  ["S9Q3R", "Copper Wires", "Ari"],
+  ["S5S5T", "Slow Machines", "Remy"],
+  ["S0W3X", "Afterglow", "Jules"],
+  ["S3J6K", "Blue Hour", "Sasha"],
+  ["S6L8M", "Night Bus", "Ada"],
+  ["S2N1P", "Soft Static", "Wen"],
+] as const;
+
+const revealEditors = [
+  ["Remy", "Sam", "Ari"],
+  ["Xena", "Nils", "Kira"],
+  ["Ari", "Zoe", "Xena"],
+  ["Joss", "Hana", "Ari"],
+  ["Remy", "Kira", "Joss"],
+  ["Ada", "Xena", "Remy"],
+  ["Bo", "Mira", "Tove"],
+  ["Eli", "Rui", "Sasha"],
+  ["Wen", "Ada", "Bo"],
+  ["Cy", "Dara", "Emre"],
+  ["Fay", "Gus", "Hana"],
+  ["Ines", "Joss", "Kira"],
+] as const;
+
+function revealTrack(index: number, long: boolean): RevealAlbumTrack {
+  const [trackCode, baseTitle, seedOwner] = revealSeeds[index];
+  const editors = revealEditors[index];
+  const title =
+    long && index === 0
+      ? "Midnight Draft (The Extremely Long and Slightly Haunted Remix)"
+      : baseTitle;
+  const credits = editors.map((name, round) => ({
+    round,
+    participantId:
+      round === 2 && index % 4 === 1 ? "" : `user-${name.toLowerCase()}`,
+    displayName: round === 2 && index % 4 === 1 ? "No edit" : name,
+    status: round === 2 && index % 4 === 1 ? "SkippedAfterClaim" : "Submitted",
+    fillIn: index === 0 && round === 1,
+  }));
+  const submitted = credits.filter((credit) => credit.status === "Submitted");
+  const versions = [
+    {
+      version: 1,
+      holderId: `user-${seedOwner.toLowerCase()}`,
+      holderName: seedOwner,
+      role: "seed" as const,
+      round: null,
+      fileId: `demo-${trackCode.toLowerCase()}-v1`,
+      extension: "it",
+      createdAt: Date.UTC(2026, 10, 18, 18, 0),
+      playable: true,
+      finalVersion: false,
+    },
+    ...submitted.map((credit, position) => ({
+      version: position + 2,
+      holderId: `user-${credit.displayName.toLowerCase()}`,
+      holderName: credit.displayName,
+      role: "edit" as const,
+      round: credit.round,
+      fileId: `demo-${trackCode.toLowerCase()}-v${position + 2}`,
+      extension: "it",
+      createdAt: Date.UTC(2026, 10, 19 + position, 17, 0),
+      playable: true,
+      finalVersion: position + 1 === submitted.length,
+    })),
+  ];
+  return {
+    position: index + 1,
+    trackCode,
+    title,
+    seedOwnerId: `user-${seedOwner.toLowerCase()}`,
+    seedOwnerName: seedOwner,
+    credits,
+    comments:
+      index === 0
+        ? [
+            {
+              id: `comment-${trackCode}-1`,
+              participantId: "user-remy",
+              authorName: "Remy",
+              kind: "comment",
+              body: long
+                ? "The bassline answer in the second half is the best thing I heard all week. I kept the seed melody in the bridge and let the drums drift out of phase."
+                : "The bassline answer in the second half is the best thing I heard all week.",
+              createdAt: Date.UTC(2026, 10, 21, 19, 12),
+            },
+            {
+              id: `comment-${trackCode}-2`,
+              participantId: "user-sam",
+              authorName: "Sam",
+              kind: "questionnaire",
+              body: "I used the seed melody in the bridge and left the ending open.",
+              createdAt: Date.UTC(2026, 10, 21, 20, 4),
+            },
+          ]
+        : index === 2
+          ? [
+              {
+                id: `comment-${trackCode}-1`,
+                participantId: "user-ari",
+                authorName: "Ari",
+                kind: "comment",
+                body: "The tempo lift at the last pattern made me smile.",
+                createdAt: Date.UTC(2026, 10, 22, 18, 40),
+              },
+            ]
+          : [],
+    versions,
+    stats: {
+      edits: submitted.length,
+      fillIns: credits.filter((credit) => credit.fillIn).length,
+      skips: credits.filter((credit) => credit.status !== "Submitted").length,
+      contributors: new Set([seedOwner, ...submitted.map((credit) => credit.displayName)])
+        .size,
+    },
+  };
+}
+
+export function demoRevealPackage(scenario: Scenario): RevealPackage {
+  if (scenario === "empty") {
+    return {
+      eventName: "Night Shift Vol. 2",
+      eventState: "Active",
+      published: false,
+      album: [],
+    };
+  }
+  const count = scenario === "dense" ? 12 : 6;
+  const long = scenario === "long";
+  return {
+    eventName: long ? longEventName : "Night Shift Vol. 2",
+    eventState: "Active",
+    published: false,
+    album: Array.from({ length: count }, (_, index) => revealTrack(index, long)),
   };
 }

@@ -1561,6 +1561,19 @@ pub fn set_track_title(
     Ok(record)
 }
 
+pub fn set_track_title_for_user(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+    title: &str,
+    now: i64,
+) -> Result<TrackTitleRecord, EngineError> {
+    let assignment = AssignmentRepo::latest_for_participant(db.conn(), event_id, user_id)?
+        .filter(|assignment| assignment.status == AssignmentStatus::Submitted)
+        .ok_or(EngineError::NotTitleHolder)?;
+    set_track_title(db, event_id, &assignment.track_code, title, user_id, now)
+}
+
 pub fn add_track_comment(
     db: &Db,
     event_id: &str,

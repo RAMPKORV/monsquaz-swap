@@ -4,6 +4,7 @@ mod gateway_host;
 mod host;
 #[cfg(feature = "live")]
 mod live_runtime;
+mod preview;
 mod setup_host;
 
 use serde::Serialize;
@@ -86,7 +87,8 @@ fn health() -> Health {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = preview::register(tauri::Builder::default());
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -149,6 +151,10 @@ pub fn run() {
             host::host_lock_roster,
             host::host_open_round,
             host::host_reveal,
+            host::host_reveal_package,
+            host::host_set_track_title,
+            host::host_add_track_comment,
+            host::host_redact_track_comment,
             host::host_decide_extension,
             host::host_decide_deadline,
             host::host_start_event,

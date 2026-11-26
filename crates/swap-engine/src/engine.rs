@@ -1276,6 +1276,11 @@ pub fn request_extension(
     ) {
         return Err(EngineError::NoActiveAssignment);
     }
+    let track = TrackRepo::get(&transaction, event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
     let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;
     DeadlineRepo::ensure(&transaction, &assignment.id)?;
     let deadline =
@@ -1416,6 +1421,11 @@ pub fn decide_extension(
         .ok_or_else(|| EngineError::DecisionNotFound(decision_id.to_string()))?;
     let assignment = AssignmentRepo::get(&transaction, &assignment_id)?
         .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.clone()))?;
+    let track = TrackRepo::get(&transaction, &assignment.event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
     let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;
     if approve {
         DeadlineRepo::ensure(&transaction, &assignment_id)?;
@@ -1514,6 +1524,11 @@ pub fn decide_deadline(
         assignment.status,
         AssignmentStatus::Claimed | AssignmentStatus::Overdue
     ) {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
+    let track = TrackRepo::get(&transaction, &assignment.event_id, &assignment.track_code)?
+        .ok_or_else(|| EngineError::NoFile(assignment.track_code.clone()))?;
+    if track.state != TrackState::InCustody {
         return Err(EngineError::WrongAssignmentState(assignment.status));
     }
     let due_at = assignment.due_at.ok_or(EngineError::NoDeadline)?;

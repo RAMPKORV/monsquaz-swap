@@ -25,6 +25,10 @@ All timestamps are UTC in the database and local in the UI.
 | Async completeness | Exposure: every participant receives every planned track | Exposure; capped rounds with coverage report; no completeness promise | Yes |
 | Async length | `N-1` for 12 or fewer; 6–8 rounds above 12 | Host can choose full exposure; the planner shows the projected duration | Yes |
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
+| Async expected songs | Seeded track count | 1–1000; must be reached before start | Yes |
+| Async claims per participant | Tracks minus one | 1–40; must be below the track count | Yes |
+| Async release | 18:00 UTC, two waves two hours apart | Host time; second offset fixed at two hours | Yes |
+| Async late seeds | Off | Off; host review with a feasibility check | Yes |
 | Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
 | Participation | Strict full exposure | Strict; Flexible earliest rounds with gaps | Yes |
 | Schedule visibility | Own assignments only | Own assignments only; Open schedule (full transparency) | Yes |

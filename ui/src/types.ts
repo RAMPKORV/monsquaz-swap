@@ -26,7 +26,8 @@ export type Scenario =
   | "join-open"
   | "seed-setup"
   | "infeasible"
-  | "flexible";
+  | "flexible"
+  | "async";
 
 export type MissionControl = {
   firstRun: boolean;
@@ -39,6 +40,23 @@ export type MissionControl = {
   facts: EventFact[];
   join: JoinInfo;
   lateSeeds: LateSeed[];
+  asyncOverview: AsyncOverview | null;
+};
+
+export type AsyncOverview = {
+  expectedSongs: number | null;
+  tracks: number;
+  people: number;
+  exposedPairs: number;
+  possiblePairs: number;
+  claimedHandoffs: number;
+  targetHandoffs: number;
+  paused: number;
+  gapCount: number;
+  gapReasons: Array<{ reason: string; count: number }>;
+  gaps: Array<{ trackCode: string; participantId: string; reason: string }>;
+  nextWave: number;
+  nextReleaseAt: number;
 };
 
 export type JoinInfo = {
@@ -243,6 +261,10 @@ export type EventDraft = {
   swapCadence: "K rounds" | "Calendar" | "Host-triggered" | "Exhausted";
   scheduleVisibility: "Hidden" | "Open";
   handoffPolicy: "Strict" | "Flexible";
+  asyncExpectedSongs: number | null;
+  asyncClaimsPerParticipant: number | null;
+  asyncReleaseTime: string;
+  asyncLateSeeds: boolean;
 };
 
 export type SetupData = {

@@ -13,6 +13,7 @@ export function JoinInstructions({
   showOpenBanner = openSchedule,
   exchangeRounds = 0,
   handoffPolicy = "Strict",
+  mode = "Classic",
 }: {
   formats: string[];
   maxMib: number;
@@ -24,6 +25,7 @@ export function JoinInstructions({
   showOpenBanner?: boolean;
   exchangeRounds?: number;
   handoffPolicy?: "Strict" | "Flexible";
+  mode?: "Classic" | "Async";
 }) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<number | null>(null);
@@ -36,8 +38,8 @@ export function JoinInstructions({
     Intl.DateTimeFormat().resolvedOptions().timeZone ||
     "Europe/Stockholm";
   const text = [
-    joinInstructions(zone, formats, maxMib),
-    exchangeRounds > 0
+    joinInstructions(zone, formats, maxMib, mode),
+    mode === "Classic" && exchangeRounds > 0
       ? handoffPolicy === "Strict"
         ? `For this event, set max_handoffs to at least ${exchangeRounds}. A lower cap blocks the schedule. The command accepts 1 to 20.`
         : `For this event, choose max_handoffs from 1 to 20. The planner gives you your earliest exchange rounds up to your cap.`

@@ -16,12 +16,12 @@ use swap_db::{
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, accept_late_seed,
-    add_availability, add_track_comment, create_event, dispatch_async_wave, edit_plan_assignment,
-    extend_seed_deadline, generate_schedule, lock_roster, move_round_deadline, open_round,
-    open_seed_round, pending_late_seeds, plan_edit_candidates, redact_track_comment,
-    reject_late_seed, remove_availability, reopen_seed_round, repair_group_schedule,
-    reveal_package, reveal_with_channel, set_track_title, start_async_event,
-    start_event_with_channel, upload_pack, verify_commitment,
+    add_availability, add_track_comment, async_coverage, create_event, dispatch_async_wave,
+    edit_plan_assignment, extend_seed_deadline, generate_schedule, lock_roster,
+    move_round_deadline, next_async_release, open_round, open_seed_round, pending_late_seeds,
+    plan_edit_candidates, redact_track_comment, reject_late_seed, remove_availability,
+    reopen_seed_round, repair_group_schedule, reveal_package, reveal_with_channel, set_track_title,
+    start_async_event, start_event_with_channel, upload_pack, verify_commitment,
 };
 
 #[derive(Debug, Serialize)]
@@ -37,6 +37,40 @@ pub struct MissionControlDto {
     facts: Vec<EventFactDto>,
     join: JoinInfoDto,
     late_seeds: Vec<LateSeedDto>,
+    async_overview: Option<AsyncOverviewDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsyncOverviewDto {
+    expected_songs: Option<u32>,
+    tracks: usize,
+    people: usize,
+    exposed_pairs: usize,
+    possible_pairs: usize,
+    claimed_handoffs: usize,
+    target_handoffs: usize,
+    paused: usize,
+    gap_count: usize,
+    gap_reasons: Vec<GapReasonDto>,
+    gaps: Vec<AsyncGapDto>,
+    next_wave: u32,
+    next_release_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsyncGapDto {
+    track_code: String,
+    participant_id: String,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GapReasonDto {
+    reason: String,
+    count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -393,6 +427,10 @@ pub struct EventDraftDto {
     swap_cadence: String,
     schedule_visibility: String,
     handoff_policy: String,
+    async_expected_songs: Option<u32>,
+    async_claims_per_participant: Option<u32>,
+    async_release_time: String,
+    async_late_seeds: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -575,6 +613,10 @@ fn default_draft() -> EventDraftDto {
         swap_cadence: "K rounds".to_string(),
         schedule_visibility: "Hidden".to_string(),
         handoff_policy: "Strict".to_string(),
+        async_expected_songs: None,
+        async_claims_per_participant: None,
+        async_release_time: "18:00".to_string(),
+        async_late_seeds: false,
     }
 }
 
@@ -618,6 +660,13 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
             .handoff_policy
             .clone()
             .unwrap_or_else(|| "Strict".to_string()),
+        async_expected_songs: settings.async_expected_songs,
+        async_claims_per_participant: settings.async_claims_per_participant,
+        async_release_time: settings
+            .async_release_time
+            .clone()
+            .unwrap_or_else(|| "18:00".to_string()),
+        async_late_seeds: settings.async_late_seeds.unwrap_or(false),
     }
 }
 
@@ -1385,6 +1434,11 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         swap_cadence: Some(draft.swap_cadence),
         schedule_visibility: Some(draft.schedule_visibility),
         handoff_policy: Some(draft.handoff_policy),
+        async_expected_songs: draft.async_expected_songs,
+        async_claims_per_participant: draft.async_claims_per_participant,
+        async_release_time: Some(draft.async_release_time),
+        async_wave_offset_secs: 2 * 60 * 60,
+        async_late_seeds: Some(draft.async_late_seeds),
         quiet_hours_start: draft.quiet_hours_start,
         quiet_hours_end: draft.quiet_hours_end,
     };
@@ -1489,6 +1543,15 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
     )
     .map_err(|error| error.to_string())?;
     plan_data(db)
+}
+
+#[tauri::command]
+pub fn host_start_async_event(app: AppHandle) -> Result<EventSummaryDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    start_async_event(&db, &event.id, now_secs()).map_err(|error| error.to_string())?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    summary(&db, &event)
 }
 
 #[tauri::command]
@@ -2083,6 +2146,7 @@ fn mission_control_with_health(
                 max_file_mib: swap_files::DEFAULT_MAX_SIZE / (1024 * 1024),
             },
             late_seeds: Vec::new(),
+            async_overview: None,
         });
     };
     let event_summary = summary(db, &event)?;
@@ -2255,6 +2319,15 @@ fn mission_control_with_health(
             secondary_label: None,
             tone: "info".to_string(),
         })
+    } else if settings_json.mode == Mode::Async {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Start the async queue".to_string(),
+            detail: "The roster is locked. Starting the queue freezes the claim and edit windows and opens the first release wave.".to_string(),
+            action_label: "Start async queue".to_string(),
+            secondary_label: None,
+            tone: "attention".to_string(),
+        })
     } else if !planned {
         Some(NextActionDto {
             eyebrow: "Next action".to_string(),
@@ -2358,7 +2431,7 @@ fn mission_control_with_health(
             });
         }
     }
-    let facts = vec![
+    let mut facts = vec![
         EventFactDto {
             label: "Mode".to_string(),
             value: match settings_json.mode {
@@ -2398,6 +2471,42 @@ fn mission_control_with_health(
             value: settings.timezone.clone(),
         },
     ];
+    if settings_json.mode == Mode::Async {
+        facts.retain(|fact| fact.label != "Seed round" && fact.label != "Exchange round");
+        facts.insert(
+            3,
+            EventFactDto {
+                label: "Expected songs".to_string(),
+                value: settings_json
+                    .async_expected_songs
+                    .map(|songs| songs.to_string())
+                    .unwrap_or_else(|| event_summary.tracks.to_string()),
+            },
+        );
+        facts.insert(
+            4,
+            EventFactDto {
+                label: "Claims target".to_string(),
+                value: settings_json
+                    .async_claims_per_participant
+                    .map(|claims| claims.to_string())
+                    .unwrap_or_else(|| "From roster".to_string()),
+            },
+        );
+        facts.insert(
+            5,
+            EventFactDto {
+                label: "Release".to_string(),
+                value: format!(
+                    "{} UTC, two waves",
+                    settings_json
+                        .async_release_time
+                        .as_deref()
+                        .unwrap_or("18:00")
+                ),
+            },
+        );
+    }
     let late_seeds = pending_late_seeds(db, &event.id)
         .map_err(|error| error.to_string())?
         .into_iter()
@@ -2408,6 +2517,52 @@ fn mission_control_with_health(
             created_at: seed.created_at,
         })
         .collect();
+    let async_overview = if settings_json.mode == Mode::Async {
+        let coverage = async_coverage(db, &event.id).map_err(|error| error.to_string())?;
+        let release = next_async_release(db, &event.id, now_secs()).ok();
+        let mut counts: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        for gap in &coverage.gaps {
+            *counts.entry(gap.reason.clone()).or_default() += 1;
+        }
+        Some(AsyncOverviewDto {
+            expected_songs: settings_json.async_expected_songs,
+            tracks: coverage.tracks,
+            people: coverage.participants,
+            exposed_pairs: coverage.exposed_pairs,
+            possible_pairs: coverage.possible_pairs,
+            claimed_handoffs: coverage.claimed_handoffs,
+            target_handoffs: coverage.target_handoffs,
+            paused: ParticipantRepo::list_for_event(db.conn(), &event.id)
+                .map_err(|error| error.to_string())?
+                .iter()
+                .filter(|participant| {
+                    participant.membership == Membership::Active
+                        && participant.role == Role::Participant
+                        && participant.readiness == swap_core::Readiness::Paused
+                })
+                .count(),
+            gap_count: coverage.gaps.len(),
+            gap_reasons: counts
+                .into_iter()
+                .map(|(reason, count)| GapReasonDto { reason, count })
+                .collect(),
+            gaps: coverage
+                .gaps
+                .iter()
+                .take(50)
+                .map(|gap| AsyncGapDto {
+                    track_code: gap.track_code.clone(),
+                    participant_id: gap.participant_id.clone(),
+                    reason: gap.reason.clone(),
+                })
+                .collect(),
+            next_wave: release.map(|release| release.next_wave).unwrap_or(0),
+            next_release_at: release.map(|release| release.next_at).unwrap_or(0),
+        })
+    } else {
+        None
+    };
     Ok(MissionControlDto {
         first_run: false,
         event: Some(event_summary),
@@ -2422,6 +2577,7 @@ fn mission_control_with_health(
             max_file_mib: settings_json.max_file_bytes / (1024 * 1024),
         },
         late_seeds,
+        async_overview,
     })
 }
 

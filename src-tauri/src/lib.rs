@@ -173,6 +173,7 @@ pub fn run() {
             host::host_decide_extension,
             host::host_decide_deadline,
             host::host_start_event,
+            host::host_start_async_event,
             host::host_create_event,
             setup_host::host_bot_validate,
             setup_host::host_bot_guilds,

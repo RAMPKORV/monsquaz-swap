@@ -84,6 +84,7 @@ export function initialScenario(): Scenario {
     "seed-setup",
     "infeasible",
     "flexible",
+    "async",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";
 }
@@ -365,6 +366,21 @@ export async function loadPeople(scenario: Scenario): Promise<PeopleData> {
     return demoPeople(scenario);
   }
   return invoke<PeopleData>("host_people");
+}
+
+export async function startAsyncEvent(): Promise<EventSummary> {
+  if (isDemoMode()) {
+    await pause(300);
+    return demoEventSummary({ stage: "Active" });
+  }
+  return invoke<EventSummary>("host_start_async_event");
+}
+
+export async function dispatchAsyncWave(): Promise<{ offers: number }> {  if (isDemoMode()) {
+    await pause(320);
+    return { offers: 4 };
+  }
+  return invoke<{ offers: number }>("host_async_dispatch");
 }
 
 export async function setParticipantPaused(

@@ -192,6 +192,7 @@ function baseMission(): MissionControl {
       maxFileMib: 20,
     },
     lateSeeds: [],
+    asyncOverview: null,
   };
 }
 
@@ -216,10 +217,71 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
         maxFileMib: 20,
       },
       lateSeeds: [],
+    asyncOverview: null,
     };
   }
 
   const mission = baseMission();
+
+  if (scenario === "async") {
+    mission.event = {
+      ...mission.event!,
+      mode: "Async",
+      stage: "Active",
+      participants: 12,
+      seeded: 12,
+      fillIns: 0,
+      tracks: 12,
+      round: 0,
+      rounds: 0,
+      exchangeRounds: 0,
+    };
+    mission.asyncOverview = {
+      expectedSongs: 12,
+      tracks: 12,
+      people: 12,
+      exposedPairs: 64,
+      possiblePairs: 132,
+      claimedHandoffs: 64,
+      targetHandoffs: 96,
+      paused: 2,
+      gapCount: 68,
+      gapReasons: [
+        { reason: "not offered", count: 42 },
+        { reason: "expired", count: 14 },
+        { reason: "handoff cap", count: 9 },
+        { reason: "skipped before claim", count: 3 },
+      ],
+      gaps: [
+        { trackCode: "S4K2M", participantId: "user-02", reason: "expired" },
+        { trackCode: "S7F3A", participantId: "user-05", reason: "not offered" },
+        { trackCode: "S9Q1B", participantId: "user-07", reason: "handoff cap" },
+      ],
+      nextWave: 2,
+      nextReleaseAt: Math.floor(Date.now() / 1000) + 2 * 3600,
+    };
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Wave 2 is next",
+      detail:
+        "The queue sends wave 1 at 18:00 and wave 2 two hours later. You can dispatch a wave now if the group is active.",
+      actionLabel: "Dispatch async wave",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.decisions = [];
+    mission.activity = [];
+    mission.facts = [
+      { label: "Mode", value: "Async queue" },
+      { label: "People", value: "12 active" },
+      { label: "Tracks", value: "12 anonymous tracks" },
+      { label: "Expected songs", value: "12" },
+      { label: "Claims target", value: "8 per person" },
+      { label: "Release", value: "18:00 UTC, two waves" },
+      { label: "Timezone", value: "Europe/Stockholm" },
+    ];
+    return mission;
+  }
 
   if (scenario === "seed-setup") {
     mission.event = {
@@ -949,6 +1011,10 @@ function defaultDraft(): EventDraft {
     swapCadence: "K rounds",
     scheduleVisibility: "Hidden",
     handoffPolicy: "Strict",
+    asyncExpectedSongs: null,
+    asyncClaimsPerParticipant: null,
+    asyncReleaseTime: "18:00",
+    asyncLateSeeds: false,
   };
 }
 
@@ -978,6 +1044,30 @@ export function demoSetup(scenario: Scenario): SetupData {
     };
   }
   const draft = defaultDraft();
+  if (scenario === "async") {
+    return {
+      firstRun: false,
+      event: null,
+      draft: {
+        ...draft,
+        mode: "Async",
+        rounds: null,
+        claimWindowHours: 24,
+        asyncExpectedSongs: 12,
+        asyncClaimsPerParticipant: 8,
+        asyncReleaseTime: "18:00",
+        asyncLateSeeds: false,
+      },
+      warnings: [
+        warning(
+          "setup-async-1",
+          "info",
+          "Target claims: 96",
+          "12 seed tracks and 8 claims per participant give 8 editors per track. The queue reports every missing pair.",
+        ),
+      ],
+    };
+  }
   if (scenario === "long") {
     return {
       firstRun: false,

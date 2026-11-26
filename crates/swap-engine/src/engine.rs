@@ -182,6 +182,16 @@ pub enum EngineError {
     GroupRepairNotNeeded,
     #[error("the event is not in async mode")]
     NotAsyncMode,
+    #[error(
+        "the async event has {tracks} tracks and {people} seeded participants; expected {expected:?} songs"
+    )]
+    AsyncTargetMismatch {
+        people: usize,
+        tracks: usize,
+        expected: Option<u32>,
+    },
+    #[error("claims per participant {claims} exceeds the {tracks} available tracks")]
+    AsyncClaimTarget { claims: u32, tracks: usize },
     #[error("the comment is already redacted")]
     CommentAlreadyRedacted,
     #[error("the participant did not work on this track")]
@@ -2336,6 +2346,31 @@ pub fn start_async_event(db: &Db, event_id: &str, now: i64) -> Result<(), Engine
     if parse_settings(&event)?.mode != Mode::Async {
         return Err(EngineError::NotAsyncMode);
     }
+    let settings = parse_settings(&event)?;
+    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let people = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Active && participant.role == Role::Participant
+        })
+        .count();
+    let tracks = TrackRepo::list_for_event(db.conn(), event_id)?.len();
+    if people != tracks
+        || settings
+            .async_expected_songs
+            .is_some_and(|expected| expected as usize != tracks)
+    {
+        return Err(EngineError::AsyncTargetMismatch {
+            people,
+            tracks,
+            expected: settings.async_expected_songs,
+        });
+    }
+    if let Some(claims) = settings.async_claims_per_participant
+        && claims as usize >= tracks
+    {
+        return Err(EngineError::AsyncClaimTarget { claims, tracks });
+    }
     let transaction = begin(db)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
@@ -2349,6 +2384,248 @@ pub fn start_async_event(db: &Db, event_id: &str, now: i64) -> Result<(), Engine
     EventRepo::set_state(&transaction, event_id, EventState::Active, now)?;
     commit(transaction)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncGap {
+    pub track_code: String,
+    pub participant_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncCoverage {
+    pub tracks: usize,
+    pub participants: usize,
+    pub exposed_pairs: usize,
+    pub possible_pairs: usize,
+    pub claimed_handoffs: usize,
+    pub target_handoffs: usize,
+    pub gaps: Vec<AsyncGap>,
+}
+
+/// Coverage and gaps for the async queue. A pair is exposed when the seen
+/// ledger has a claim or a claimed miss. Expired offers and pre-claim skips
+/// are gaps. Full pair coverage is T*(P-1) when nobody touches their own
+/// track.
+pub fn set_participant_ready(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+    ready: bool,
+    now: i64,
+) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    require_open_event(&event, "ready")?;
+    let transaction = begin(db)?;
+    let mut participant = ParticipantRepo::get(&transaction, event_id, user_id)?
+        .ok_or_else(|| EngineError::ParticipantNotFound(user_id.to_string()))?;
+    participant.readiness = if ready {
+        Readiness::Ready
+    } else {
+        Readiness::Paused
+    };
+    participant.updated_at = now;
+    ParticipantRepo::upsert(&transaction, &participant)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Participant",
+        if ready {
+            "Participant ready"
+        } else {
+            "Participant paused"
+        },
+        Some(user_id),
+        "{}",
+    )?;
+    commit(transaction)?;
+    Ok(())
+}
+
+pub fn async_coverage(db: &Db, event_id: &str) -> Result<AsyncCoverage, EngineError> {
+    let event = load_event(db, event_id)?;
+    if parse_settings(&event)?.mode != Mode::Async {
+        return Err(EngineError::NotAsyncMode);
+    }
+    let settings = parse_settings(&event)?;
+    let participants: Vec<ParticipantRecord> =
+        ParticipantRepo::list_for_event(db.conn(), event_id)?
+            .into_iter()
+            .filter(|participant| {
+                participant.membership == Membership::Active
+                    && participant.role == Role::Participant
+            })
+            .collect();
+    let tracks = TrackRepo::list_for_event(db.conn(), event_id)?;
+    let seen = SeenRepo::list_for_event(db.conn(), event_id)?;
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    let target_claims = settings
+        .async_claims_per_participant
+        .map(|claims| claims as usize)
+        .unwrap_or_else(|| tracks.len().saturating_sub(1));
+    let mut seen_per_person: HashMap<&str, usize> = HashMap::new();
+    for pair in &seen {
+        *seen_per_person
+            .entry(pair.participant_id.as_str())
+            .or_default() += 1;
+    }
+    let mut gaps = Vec::new();
+    for track in &tracks {
+        for participant in &participants {
+            if track.owner_id == participant.user_id {
+                continue;
+            }
+            if seen.iter().any(|pair| {
+                pair.track_code == track.code && pair.participant_id == participant.user_id
+            }) {
+                continue;
+            }
+            let latest = assignments
+                .iter()
+                .filter(|assignment| {
+                    assignment.track_code == track.code
+                        && assignment.participant_id == participant.user_id
+                })
+                .max_by_key(|assignment| assignment.updated_at);
+            if latest.is_some_and(|assignment| {
+                matches!(
+                    assignment.status,
+                    AssignmentStatus::Offered
+                        | AssignmentStatus::Claimed
+                        | AssignmentStatus::Overdue
+                )
+            }) {
+                continue;
+            }
+            let reason = match latest.map(|assignment| assignment.status) {
+                Some(AssignmentStatus::Expired) => "expired",
+                Some(AssignmentStatus::SkippedBeforeClaim) => "skipped before claim",
+                _ => {
+                    if seen_per_person
+                        .get(participant.user_id.as_str())
+                        .copied()
+                        .unwrap_or(0)
+                        >= target_claims
+                    {
+                        "handoff cap"
+                    } else {
+                        "not offered"
+                    }
+                }
+            };
+            gaps.push(AsyncGap {
+                track_code: track.code.clone(),
+                participant_id: participant.user_id.clone(),
+                reason: reason.to_string(),
+            });
+        }
+    }
+    let possible_pairs = tracks
+        .len()
+        .saturating_mul(participants.len().saturating_sub(1));
+    Ok(AsyncCoverage {
+        tracks: tracks.len(),
+        participants: participants.len(),
+        exposed_pairs: seen.len(),
+        possible_pairs,
+        claimed_handoffs: seen.len(),
+        target_handoffs: participants.len().saturating_mul(target_claims),
+        gaps,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AsyncRelease {
+    pub next_wave: u32,
+    pub next_at: i64,
+}
+
+fn async_release_anchor(settings: &EventSettings, now: i64) -> i64 {
+    let (hour, minute) = settings
+        .async_release_time
+        .as_deref()
+        .and_then(|value| {
+            let hour = value.get(..2)?.parse::<i64>().ok()?;
+            let minute = value.get(3..)?.parse::<i64>().ok()?;
+            Some((hour, minute))
+        })
+        .unwrap_or((18, 0));
+    let day = now.div_euclid(86_400) * 86_400;
+    day + hour * 3_600 + minute * 60
+}
+
+pub fn next_async_release(db: &Db, event_id: &str, now: i64) -> Result<AsyncRelease, EngineError> {
+    let event = load_event(db, event_id)?;
+    let settings = parse_settings(&event)?;
+    if settings.mode != Mode::Async {
+        return Err(EngineError::NotAsyncMode);
+    }
+    let first = async_release_anchor(&settings, now);
+    let second = first + settings.async_wave_offset_secs;
+    if now < first {
+        Ok(AsyncRelease {
+            next_wave: 1,
+            next_at: first,
+        })
+    } else if now < second {
+        Ok(AsyncRelease {
+            next_wave: 2,
+            next_at: second,
+        })
+    } else {
+        Ok(AsyncRelease {
+            next_wave: 1,
+            next_at: first + 86_400,
+        })
+    }
+}
+
+/// Dispatch the release wave that is due now. The host can call this from the
+/// periodic worker. It never sends the same wave twice for one day.
+pub fn dispatch_async_release(
+    db: &Db,
+    event_id: &str,
+    now: i64,
+) -> Result<AsyncWaveOutcome, EngineError> {
+    let event = load_event(db, event_id)?;
+    let settings = parse_settings(&event)?;
+    if settings.mode != Mode::Async {
+        return Err(EngineError::NotAsyncMode);
+    }
+    let first = async_release_anchor(&settings, now);
+    let second = first + settings.async_wave_offset_secs;
+    let (wave, wave_at) = if now >= second {
+        (2, second)
+    } else if now >= first {
+        (1, first)
+    } else {
+        return Ok(AsyncWaveOutcome {
+            offers: 0,
+            effects: Vec::new(),
+        });
+    };
+    let day = wave_at.div_euclid(86_400);
+    let key = format!("async-release:{event_id}:{day}:{wave}");
+    if MetaRepo::get(db.conn(), &key)?.is_some() {
+        return Ok(AsyncWaveOutcome {
+            offers: 0,
+            effects: Vec::new(),
+        });
+    }
+    let outcome = dispatch_async_wave(db, event_id, now)?;
+    MetaRepo::set(db.conn(), &key, "1")?;
+    AuditRepo::insert(
+        db.conn(),
+        event_id,
+        now,
+        "worker",
+        "Async release wave",
+        Some(&format!("Wave {wave}")),
+        &serde_json::json!({ "wave": wave, "offers": outcome.offers }).to_string(),
+    )?;
+    Ok(outcome)
 }
 
 pub fn dispatch_async_wave(
@@ -2369,6 +2646,14 @@ pub fn dispatch_async_wave(
             participant.membership == Membership::Active
                 && participant.role == Role::Participant
                 && participant.readiness == Readiness::Ready
+                && MetaRepo::get(
+                    db.conn(),
+                    &format!("async-cooldown:{}:{}", event_id, participant.user_id),
+                )
+                .ok()
+                .flatten()
+                .and_then(|value| value.parse::<i64>().ok())
+                .is_none_or(|until| until <= now)
         })
         .collect();
     if ready.is_empty() {
@@ -4335,6 +4620,9 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
     let events = EventRepo::list_active(db.conn())?;
     let mut report = DeadlineReport::default();
     for event in events {
+        if parse_settings(&event)?.mode == Mode::Async {
+            let _ = dispatch_async_release(db, &event.id, now);
+        }
         let transaction = begin(db)?;
         let current = EventRepo::get(&transaction, &event.id)?
             .ok_or_else(|| EngineError::EventNotFound(event.id.clone()))?;
@@ -4409,9 +4697,46 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                     if let Some(mut participant) =
                         ParticipantRepo::get(&transaction, &event.id, &assignment.participant_id)?
                     {
-                        participant.readiness = Readiness::Paused;
-                        participant.updated_at = now;
-                        ParticipantRepo::upsert(&transaction, &participant)?;
+                        let strike_key =
+                            format!("async-strikes:{}:{}", event.id, assignment.participant_id);
+                        let strikes = MetaRepo::get(&transaction, &strike_key)?
+                            .and_then(|value| value.parse::<u32>().ok())
+                            .unwrap_or(0)
+                            + 1;
+                        MetaRepo::set(&transaction, &strike_key, &strikes.to_string())?;
+                        if strikes >= 2 {
+                            participant.readiness = Readiness::Paused;
+                            participant.updated_at = now;
+                            ParticipantRepo::upsert(&transaction, &participant)?;
+                            enqueue_effect(
+                                &transaction,
+                                &event.id,
+                                &Effect::Dm {
+                                    user_id: assignment.participant_id.clone(),
+                                    content: "A second offer expired. The queue paused your offers until you use /swap resume.".to_string(),
+                                },
+                                now,
+                            )?;
+                        } else {
+                            let cooldown_key = format!(
+                                "async-cooldown:{}:{}",
+                                event.id, assignment.participant_id
+                            );
+                            MetaRepo::set(
+                                &transaction,
+                                &cooldown_key,
+                                &(now + 24 * 60 * 60).to_string(),
+                            )?;
+                            enqueue_effect(
+                                &transaction,
+                                &event.id,
+                                &Effect::Dm {
+                                    user_id: assignment.participant_id.clone(),
+                                    content: "Your offer expired. The queue waits 24 hours before the next offer.".to_string(),
+                                },
+                                now,
+                            )?;
+                        }
                     }
                     AuditRepo::insert(
                         &transaction,
@@ -4629,6 +4954,10 @@ pub struct ParticipantScheduleView {
     pub open: bool,
     pub own: Vec<ParticipantTurn>,
     pub full: Option<Vec<ParticipantCell>>,
+    pub seen: usize,
+    pub edited: usize,
+    pub days_remaining: i64,
+    pub current_offer: Option<ParticipantTurn>,
 }
 
 /// The participant schedule surface. With the default visibility it returns
@@ -4638,6 +4967,7 @@ pub fn participant_schedule(
     db: &Db,
     event_id: &str,
     user_id: &str,
+    now: i64,
 ) -> Result<ParticipantScheduleView, EngineError> {
     let event = load_event(db, event_id)?;
     if ParticipantRepo::get(db.conn(), event_id, user_id)?.is_none() {
@@ -4698,7 +5028,39 @@ pub fn participant_schedule(
     } else {
         None
     };
-    Ok(ParticipantScheduleView { open, own, full })
+    let seen = SeenRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .filter(|pair| pair.participant_id == user_id)
+        .count();
+    let edited = assignments
+        .iter()
+        .filter(|assignment| {
+            assignment.participant_id == user_id && assignment.status == AssignmentStatus::Submitted
+        })
+        .count();
+    let current_offer = assignments
+        .iter()
+        .find(|assignment| {
+            assignment.participant_id == user_id && assignment.status == AssignmentStatus::Offered
+        })
+        .map(|assignment| ParticipantTurn {
+            round_no: assignment.round + 2,
+            track_code: assignment.track_code.clone(),
+            status: assignment.status,
+            due_at: assignment.due_at,
+        });
+    let days_remaining = EventRepo::reveal_at(db.conn(), event_id)?
+        .map(|at| (at - now).max(0) / 86_400)
+        .unwrap_or(0);
+    Ok(ParticipantScheduleView {
+        open,
+        own,
+        full,
+        seen,
+        edited,
+        days_remaining,
+        current_offer,
+    })
 }
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {

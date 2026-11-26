@@ -121,6 +121,9 @@ shot setup-long-dark-1280 "view=setup&state=long" 1280 800
 shot setup-populated-light-1280 "view=setup&theme=light" 1280 800
 shot setup-populated-dark-1024 "view=setup" 1024 700
 shot setup-review-dark-1280 "view=setup&step=review" 1280 800
+shot setup-async-review-dark-1280 "view=setup&step=review&state=async" 1280 800
+shot setup-async-review-dark-1024 "view=setup&step=review&state=async" 1024 700
+shot setup-async-review-light-1280 "view=setup&step=review&state=async&theme=light" 1280 800
 shot setup-review-dark-1024 "view=setup&step=review" 1024 700
 shot setup-review-light-1280 "view=setup&step=review&theme=light" 1280 800
 shot setup-review-dark-1280x1400 "view=setup&step=review" 1280 1400
@@ -141,6 +144,10 @@ shot mission-join-open-dark-1024 "view=mission&state=join-open" 1024 700
 shot mission-seed-setup-dark-1280 "view=mission&state=seed-setup" 1280 800
 shot mission-seed-setup-dark-1024 "view=mission&state=seed-setup" 1024 700
 shot mission-seed-setup-light-1280 "view=mission&state=seed-setup&theme=light" 1280 800
+shot mission-async-dark-1280 "view=mission&state=async" 1280 800
+shot mission-async-dark-1024 "view=mission&state=async" 1024 700
+shot mission-async-light-1280 "view=mission&state=async&theme=light" 1280 800
+shot mission-async-dark-zoom200 "view=mission&state=async" 640 400
 shot mission-seed-error-dark-1280 "view=mission&state=seed-setup&seedError=1" 1280 800
 
 shot people-empty-dark-1280 "view=people&state=empty" 1280 800

@@ -50,13 +50,21 @@ export function SetupView({
     titleRef.current?.focus();
   }, [step]);
   const [draft, setDraft] = useState<EventDraft>(data.draft);
+  const activeSteps =
+    draft.mode === "Async"
+      ? steps.map((entry) =>
+          entry.id === "groups"
+            ? { ...entry, label: "Queue", detail: "Claims, waves, late seeds" }
+            : entry,
+        )
+      : steps;
 
   function update<K extends keyof EventDraft>(key: K, value: EventDraft[K]) {
     setDraft({ ...draft, [key]: value });
   }
 
   const canContinue = step !== 0 || draft.name.trim().length > 0;
-  const isLast = step === steps.length - 1;
+  const isLast = step === activeSteps.length - 1;
 
   return (
     <div className="view">
@@ -75,7 +83,7 @@ export function SetupView({
       />
 
       <ol className="wizard-steps" aria-label="Setup steps" role="list">
-        {steps.map((entry, index) => (
+        {activeSteps.map((entry, index) => (
           <li key={entry.id}>
             <button
               type="button"
@@ -104,16 +112,32 @@ export function SetupView({
         <div className="card__header">
           <div>
             <h2 id="wizard-title" ref={titleRef} tabIndex={-1}>
-              {steps[step]?.label}
+              {activeSteps[step]?.label}
             </h2>
-            <p className="card__subtitle">{intros[step]}</p>
+            <p className="card__subtitle">
+              {step === 2 && draft.mode === "Async"
+                ? "Async uses one global queue. Claims, release waves, and late seeds are set in Basics. There are no groups."
+                : intros[step]}
+            </p>
           </div>
 
         </div>
 
         {step === 0 ? <BasicsStep draft={draft} update={update} /> : null}
         {step === 1 ? <FilesStep draft={draft} update={update} /> : null}
-        {step === 2 ? <GroupsStep draft={draft} update={update} /> : null}
+        {step === 2 ? (
+          draft.mode === "Async" ? (
+            <div className="wizard-grid">
+              <p className="field-help">
+                The queue has no rounds and no groups. The host sets the claim
+                window, edit window, expected songs, claims per participant,
+                release time, and late-seed policy in Basics.
+              </p>
+            </div>
+          ) : (
+            <GroupsStep draft={draft} update={update} />
+          )
+        ) : null}
         {step === 3 ? (
           <ReviewStep data={data} draft={draft} timezone={timezone} />
         ) : null}
@@ -205,26 +229,31 @@ function BasicsStep({
       </fieldset>
 
       <div className="form-grid">
-        <Field
-          label="Exchange rounds (R2..RN)"
-          htmlFor="rounds"
-          helpId="rounds-help"
-          help="Classic events have one seed round plus one exchange round for each other track. Leave empty to use the seeded track count."
-        >
-          <input
-            id="rounds"
-            aria-describedby="rounds-help"
-            className="input"
-            type="number"
-            min={1}
-            max={40}
-            value={draft.rounds ?? ""}
-            placeholder="Automatic"
-            onChange={(event) =>
-              update("rounds", event.target.value ? Number(event.target.value) : null)
-            }
-          />
-        </Field>
+        {draft.mode !== "Async" ? (
+          <Field
+            label="Exchange rounds (R2..RN)"
+            htmlFor="rounds"
+            helpId="rounds-help"
+            help="Classic events have one seed round plus one exchange round for each other track. Leave empty to use the seeded track count."
+          >
+            <input
+              id="rounds"
+              aria-describedby="rounds-help"
+              className="input"
+              type="number"
+              min={1}
+              max={40}
+              value={draft.rounds ?? ""}
+              placeholder="Automatic"
+              onChange={(event) =>
+                update(
+                  "rounds",
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+            />
+          </Field>
+        ) : null}
         <Field
           label="Schedule visibility"
           htmlFor="visibility"
@@ -251,32 +280,34 @@ function BasicsStep({
             <option value="Open">Open schedule (no anonymity)</option>
           </select>
         </Field>
-        <Field
-          label="Participation"
-          htmlFor="handoff-policy"
-          helpId="handoff-policy-help"
-          help={
-            draft.handoffPolicy === "Strict"
-              ? "Full coverage. Every active person must set a handoff cap at least equal to the exchange rounds. A lower cap blocks the schedule."
-              : "Cap-limited. Each person edits their earliest exchange rounds up to their cap. Empty cells become coverage gaps."
-          }
-        >
-          <select
-            id="handoff-policy"
-            aria-describedby="handoff-policy-help"
-            className="input"
-            value={draft.handoffPolicy}
-            onChange={(event) =>
-              update(
-                "handoffPolicy",
-                event.target.value as EventDraft["handoffPolicy"],
-              )
+        {draft.mode !== "Async" ? (
+          <Field
+            label="Participation"
+            htmlFor="handoff-policy"
+            helpId="handoff-policy-help"
+            help={
+              draft.handoffPolicy === "Strict"
+                ? "Full coverage. Every active person must set a handoff cap at least equal to the exchange rounds. A lower cap blocks the schedule."
+                : "Cap-limited. Each person edits their earliest exchange rounds up to their cap. Empty cells become coverage gaps."
             }
           >
-            <option value="Strict">Full coverage (strict)</option>
-            <option value="Flexible">Cap-limited (flexible)</option>
-          </select>
-        </Field>
+            <select
+              id="handoff-policy"
+              aria-describedby="handoff-policy-help"
+              className="input"
+              value={draft.handoffPolicy}
+              onChange={(event) =>
+                update(
+                  "handoffPolicy",
+                  event.target.value as EventDraft["handoffPolicy"],
+                )
+              }
+            >
+              <option value="Strict">Full coverage (strict)</option>
+              <option value="Flexible">Cap-limited (flexible)</option>
+            </select>
+          </Field>
+        ) : null}
       </div>
       <details className="advanced-settings">
         <summary>
@@ -308,10 +339,14 @@ function BasicsStep({
           </div>
         </Field>
         <Field
-          label="Round window"
+          label={draft.mode === "Async" ? "Edit window" : "Round window"}
           htmlFor="round-window"
         helpId="round-help"
-          help="Hours to edit and submit after the person accepts."
+          help={
+            draft.mode === "Async"
+              ? "Hours to edit and submit after the person claims a track."
+              : "Hours to edit and submit after the person claims. The round deadline is shared by the whole round."
+          }
         >
           <div className="number-control">
             <input
@@ -373,6 +408,81 @@ function BasicsStep({
         </Field>
         </div>
       </details>
+      {draft.mode === "Async" ? (
+        <div className="form-grid">
+          <Field
+            label="Expected songs"
+            htmlFor="async-songs"
+            helpId="async-songs-help"
+            help="The planned number of seeded tracks. One track per seeded participant. The queue starts only when this number is reached. Enter 1 to 1000."
+          >
+            <input
+              id="async-songs"
+              className="input"
+              type="number"
+              min={1}
+              max={1000}
+              aria-describedby="async-songs-help"
+              value={draft.asyncExpectedSongs ?? ""}
+              placeholder="From the seeded roster"
+              onChange={(event) =>
+                update(
+                  "asyncExpectedSongs",
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+            />
+          </Field>
+          <Field
+            label="Claims per participant"
+            htmlFor="async-claims"
+            helpId="async-claims-help"
+            help="The target number of tracks each person edits. The app computes editors per track. A fractional result is a warning. Enter 1 to 40."
+          >
+            <input
+              id="async-claims"
+              className="input"
+              type="number"
+              min={1}
+              max={40}
+              aria-describedby="async-claims-help"
+              value={draft.asyncClaimsPerParticipant ?? ""}
+              placeholder="From the roster"
+              onChange={(event) =>
+                update(
+                  "asyncClaimsPerParticipant",
+                  event.target.value ? Number(event.target.value) : null,
+                )
+              }
+            />
+          </Field>
+          <Field
+            label="Release time"
+            htmlFor="async-release"
+            helpId="async-release-help"
+            help="The first daily wave starts at this time. The second wave follows two hours later. Times use UTC in this version."
+          >
+            <input
+              id="async-release"
+              className="input"
+              type="time"
+              aria-describedby="async-release-help"
+              value={draft.asyncReleaseTime}
+              onChange={(event) =>
+                update("asyncReleaseTime", event.target.value)
+              }
+            />
+          </Field>
+          <div>
+            <Toggle
+              checked={draft.asyncLateSeeds}
+              onChange={(checked) => update("asyncLateSeeds", checked)}
+              label="Accept late seeds"
+              description="Off by default. A late seed changes the track count and the target. The host must confirm it."
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -638,14 +748,16 @@ function ReviewStep({
           <dt>Mode</dt>
           <dd>{draft.mode}</dd>
         </div>
-        <div>
-          <dt>Rounds</dt>
-          <dd>
-            {draft.rounds
-              ? `R1 seed + ${draft.rounds} exchanges = ${draft.rounds + 1} total`
-              : "Automatic: R1 seed + N-1 exchanges = N total"}
-          </dd>
-        </div>
+        {draft.mode !== "Async" ? (
+          <div>
+            <dt>Rounds</dt>
+            <dd>
+              {draft.rounds
+                ? `R1 seed + ${draft.rounds} exchanges = ${draft.rounds + 1} total`
+                : "Automatic: R1 seed + N-1 exchanges = N total"}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>{draft.mode === "Async" ? "Claim window" : "Round deadline"}</dt>
           <dd>
@@ -660,28 +772,56 @@ function ReviewStep({
             <dd>{draft.roundWindowHours} hours</dd>
           </div>
         ) : null}
-        <div>
-          <dt>Round window</dt>
-          <dd>{draft.roundWindowHours} hours</dd>
-        </div>
-        <div>
-          <dt>Groups</dt>
-          <dd>
-            {draft.groupMode === "Lookup"
-              ? "From the locked roster"
-              : draft.groupMode === "Single group"
-                ? "Single group"
-                : `${draft.groupCount} × ${draft.groupSize}`}
-          </dd>
-        </div>
-        <div>
-          <dt>Participation</dt>
-          <dd>
-            {draft.handoffPolicy === "Strict"
-              ? "Full coverage (strict)"
-              : "Cap-limited (flexible)"}
-          </dd>
-        </div>
+        {draft.mode !== "Async" ? (
+          <div>
+            <dt>Groups</dt>
+            <dd>
+              {draft.groupMode === "Lookup"
+                ? "From the locked roster"
+                : draft.groupMode === "Single group"
+                  ? "Single group"
+                  : `${draft.groupCount} × ${draft.groupSize}`}
+            </dd>
+          </div>
+        ) : null}
+        {draft.mode === "Async" ? (
+          <>
+            <div>
+              <dt>Expected songs</dt>
+              <dd>
+                {draft.asyncExpectedSongs ?? "From the seeded roster"}
+              </dd>
+            </div>
+            <div>
+              <dt>Claims target</dt>
+              <dd>
+                {draft.asyncClaimsPerParticipant
+                  ? `${draft.asyncClaimsPerParticipant} per person · ${draft.asyncClaimsPerParticipant} editors per track`
+                  : "From the seeded roster"}
+              </dd>
+            </div>
+            <div>
+              <dt>Release</dt>
+              <dd>
+                {draft.asyncReleaseTime} UTC, two waves
+              </dd>
+            </div>
+            <div>
+              <dt>Late seeds</dt>
+              <dd>{draft.asyncLateSeeds ? "Accepted with review" : "Off"}</dd>
+            </div>
+          </>
+        ) : null}
+        {draft.mode !== "Async" ? (
+          <div>
+            <dt>Participation</dt>
+            <dd>
+              {draft.handoffPolicy === "Strict"
+                ? "Full coverage (strict)"
+                : "Cap-limited (flexible)"}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>Schedule</dt>
           <dd>
@@ -728,16 +868,20 @@ function ReviewStep({
         ))}
       </div>
 
-      <JoinInstructions
-        formats={draft.allowlist}
-        maxMib={20}
-        exampleTimezone={timezone}
-        preview
-        headingLevel={3}
-        openSchedule={draft.scheduleVisibility === "Open"}
-        exchangeRounds={draft.rounds ?? 0}
-        handoffPolicy={draft.handoffPolicy}
-      />
+      <details className="advanced-settings review-preview">
+        <summary>Join copy preview</summary>
+        <JoinInstructions
+          formats={draft.allowlist}
+          maxMib={20}
+          exampleTimezone={timezone}
+          preview
+          headingLevel={3}
+          openSchedule={draft.scheduleVisibility === "Open"}
+          exchangeRounds={draft.rounds ?? 0}
+          handoffPolicy={draft.handoffPolicy}
+          mode={draft.mode}
+        />
+      </details>
     </div>
   );
 }

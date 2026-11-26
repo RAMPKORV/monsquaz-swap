@@ -22,7 +22,7 @@ use crate::clock::Clock;
 use crate::delivery::{DeliveryReport, DeliveryWorker};
 use crate::engine::{
     EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed,
-    participant_schedule, signup, skip, submit_attachment,
+    participant_schedule, set_participant_ready, signup, skip, submit_attachment,
 };
 use crate::prepare::DeliveryPreparer;
 use crate::settings::EventSettings;
@@ -1002,9 +1002,22 @@ impl InboundService {
                 .db
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            participant_schedule(&db, &event.id, user_id).map_err(|error| error.to_string())?
+            participant_schedule(&db, &event.id, user_id, self.clock.now())
+                .map_err(|error| error.to_string())?
         };
-        let mut content = String::from("Your assignments:\n");
+        let mut content = format!(
+            "Your season: {} tracks seen, {} edited, {} days remaining.\n",
+            view.seen, view.edited, view.days_remaining
+        );
+        if let Some(offer) = &view.current_offer {
+            content.push_str(&format!(
+                "Open offer: {} (round {}).\n",
+                offer.track_code, offer.round_no
+            ));
+        } else {
+            content.push_str("No open offer.\n");
+        }
+        content.push_str("\nYour assignments:\n");
         if view.own.is_empty() {
             content.push_str("No assignment yet. Wait for the next offer.\n");
         } else {
@@ -1174,6 +1187,52 @@ impl InboundService {
                     Ok(())
                 }
                 swap_discord::SlashCommand::Schedule => self.handle_schedule(&user_id.0).await,
+                swap_discord::SlashCommand::Pause => {
+                    let Some(event_id) = self.active_event(&user_id.0).await? else {
+                        self.notify(&user_id.0, "There is no active swap event for you.")
+                            .await;
+                        return Ok(());
+                    };
+                    let now = self.clock.now();
+                    let result = {
+                        let db = self.lock();
+                        set_participant_ready(&db, &event_id, &user_id.0, false, now)
+                    };
+                    match result {
+                        Ok(()) => {
+                            self.notify(
+                                &user_id.0,
+                                "You are paused. The queue stops new offers. Use /swap resume when you are ready.",
+                            )
+                            .await;
+                            Ok(())
+                        }
+                        Err(error) => Err(error.to_string()),
+                    }
+                }
+                swap_discord::SlashCommand::Resume => {
+                    let Some(event_id) = self.active_event(&user_id.0).await? else {
+                        self.notify(&user_id.0, "There is no active swap event for you.")
+                            .await;
+                        return Ok(());
+                    };
+                    let now = self.clock.now();
+                    let result = {
+                        let db = self.lock();
+                        set_participant_ready(&db, &event_id, &user_id.0, true, now)
+                    };
+                    match result {
+                        Ok(()) => {
+                            self.notify(
+                                &user_id.0,
+                                "You are ready. The next release wave can send you an offer.",
+                            )
+                            .await;
+                            Ok(())
+                        }
+                        Err(error) => Err(error.to_string()),
+                    }
+                }
                 swap_discord::SlashCommand::Help => {
                     self.notify(
                         &user_id.0,

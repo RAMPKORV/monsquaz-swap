@@ -2875,8 +2875,7 @@ select.input {
   margin-top: 20px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
-  position: sticky;
-  bottom: 0;
+  position: static;
   background: var(--surface);
   z-index: 1;
 }
@@ -4811,4 +4810,21 @@ select.input {
   border-radius: var(--radius-sm);
   background: var(--warn-soft, transparent);
   color: var(--warn);
+}
+
+.async-gap-summary {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.async-gap-summary > strong {
+  font-size: 18px;
+}
+
+.async-gap-summary details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
 }

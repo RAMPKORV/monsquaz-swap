@@ -35,6 +35,7 @@ import {
   decideDeadline,
   decideExtension,
   decideLateSeed,
+  dispatchAsyncWave,
   extendSeedDeadline,
   uploadPack,
   openSeedRound,
@@ -46,6 +47,7 @@ import {
   openRound,
   revealEvent,
   repairGroups,
+  startAsyncEvent,
   startEvent,
   loadAuditLog,
   loadMissionControl,
@@ -366,6 +368,26 @@ export default function App() {
       heading?.scrollIntoView({ block: "start" });
       heading?.focus();
       setToast("Review the decisions below. Nothing moves until you choose.");
+      return;
+    }
+    if (label === "Start async queue") {
+      try {
+        await startAsyncEvent();
+        setToast("The async queue is open. Dispatch the first wave when ready.");
+        reloadView();
+      } catch (error) {
+        setToast(`Could not start the queue. ${errorDetail(error)}`);
+      }
+      return;
+    }
+    if (label === "Dispatch async wave") {
+      try {
+        const result = await dispatchAsyncWave();
+        setToast(`Wave dispatched. ${result.offers} offers queued.`);
+        reloadView();
+      } catch (error) {
+        setToast(`Could not dispatch the wave. ${errorDetail(error)}`);
+      }
       return;
     }
     if (label === "Lock roster") {

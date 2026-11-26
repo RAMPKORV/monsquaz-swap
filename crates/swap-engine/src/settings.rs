@@ -34,6 +34,11 @@ pub struct EventSettings {
     pub swap_cadence: Option<String>,
     pub schedule_visibility: Option<String>,
     pub handoff_policy: Option<String>,
+    pub async_expected_songs: Option<u32>,
+    pub async_claims_per_participant: Option<u32>,
+    pub async_release_time: Option<String>,
+    pub async_wave_offset_secs: i64,
+    pub async_late_seeds: Option<bool>,
     pub quiet_hours_start: u8,
     pub quiet_hours_end: u8,
 }
@@ -63,6 +68,11 @@ impl Default for EventSettings {
             swap_cadence: None,
             schedule_visibility: None,
             handoff_policy: None,
+            async_expected_songs: None,
+            async_claims_per_participant: None,
+            async_release_time: None,
+            async_wave_offset_secs: 2 * 60 * 60,
+            async_late_seeds: None,
             quiet_hours_start: 22,
             quiet_hours_end: 8,
         }
@@ -95,6 +105,14 @@ pub enum SettingsError {
     Scheduler,
     #[error("the handoff policy must be Strict or Flexible")]
     HandoffPolicy,
+    #[error("the expected song count must be between 1 and 1000")]
+    AsyncSongs,
+    #[error("the claims per participant must be between 1 and 40")]
+    AsyncClaims,
+    #[error("the release time must use HH:MM")]
+    AsyncReleaseTime,
+    #[error("the second wave offset must be positive")]
+    AsyncWaveOffset,
     #[error("the quiet hours must be between 0 and 23")]
     QuietHours,
 }
@@ -141,6 +159,34 @@ impl EventSettings {
             && !matches!(policy.as_str(), "Strict" | "Flexible")
         {
             return Err(SettingsError::HandoffPolicy);
+        }
+        if let Some(songs) = self.async_expected_songs
+            && !(1..=1000).contains(&songs)
+        {
+            return Err(SettingsError::AsyncSongs);
+        }
+        if let Some(claims) = self.async_claims_per_participant
+            && !(1..=40).contains(&claims)
+        {
+            return Err(SettingsError::AsyncClaims);
+        }
+        if let Some(time) = &self.async_release_time {
+            let valid = time.len() == 5
+                && time.as_bytes()[2] == b':'
+                && time
+                    .get(..2)
+                    .and_then(|hour| hour.parse::<u8>().ok())
+                    .is_some_and(|hour| hour < 24)
+                && time
+                    .get(3..)
+                    .and_then(|minute| minute.parse::<u8>().ok())
+                    .is_some_and(|minute| minute < 60);
+            if !valid {
+                return Err(SettingsError::AsyncReleaseTime);
+            }
+        }
+        if self.async_wave_offset_secs <= 0 {
+            return Err(SettingsError::AsyncWaveOffset);
         }
         if self.quiet_hours_start > 23 || self.quiet_hours_end > 23 {
             return Err(SettingsError::QuietHours);

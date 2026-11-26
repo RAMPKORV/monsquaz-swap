@@ -641,6 +641,25 @@ export default function App() {
             throw error;
           }
         }}
+        onPublish={async () => {
+          try {
+            const revealed = await revealEvent();
+            if (!revealed.published) {
+              setToast(
+                `Reveal blocked by ${revealed.blocked.length} active assignment(s). Resolve them first.`,
+              );
+              return;
+            }
+            setRevealPackage({
+              ...(await loadRevealPackage(scenario)),
+              published: true,
+            });
+            setView("reveal");
+          } catch (error) {
+            setToast(`Could not reveal the event. ${errorDetail(error)}`);
+            throw error;
+          }
+        }}
       />
     ) : view === "settings" && settings ? (
       <SettingsView

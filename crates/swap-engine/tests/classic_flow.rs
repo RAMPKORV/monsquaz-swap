@@ -342,8 +342,22 @@ async fn the_classic_loop_reaches_a_reveal() {
         expire_offer(&fixture.db, EVENT, assignment_id, T4 + 86_401).unwrap();
     }
 
+    let original_codes = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+        .unwrap()
+        .into_iter()
+        .map(|track| track.code)
+        .collect::<Vec<_>>();
+    let expected_order = album_order(&original_codes, 42);
     let revealed = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap();
     assert_eq!(revealed.tracks.len(), 4);
+    assert_eq!(
+        revealed
+            .tracks
+            .iter()
+            .map(|track| track.track_code.clone())
+            .collect::<Vec<_>>(),
+        expected_order
+    );
     assert!(!revealed.effects.is_empty());
     for track in &revealed.tracks {
         assert_eq!(track.entries.len(), 1);

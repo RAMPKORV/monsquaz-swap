@@ -177,6 +177,26 @@ describe("App", () => {
     expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
+  it("publishes the reveal from the presenter", async () => {
+    setUrl("?demo=1&view=reveal");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Reveal show" });
+    fireEvent.click(screen.getByRole("button", { name: "Publish reveal" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Publish the reveal?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Publish reveal" }),
+    );
+    expect(
+      await screen.findByText("Reveal published to the reveal channel."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Publish reveal" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the first-run state", async () => {
     setUrl("?demo=1&state=empty");
     render(<App />);

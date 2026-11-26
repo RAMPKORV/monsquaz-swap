@@ -4136,3 +4136,17 @@ select.input {
     overflow-y: auto;
   }
 }
+
+.reveal-audio__note,
+.reveal-audio__error {
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.reveal-audio__note {
+  color: var(--faint);
+}
+
+.reveal-audio__error {
+  color: var(--danger);
+}

@@ -26,6 +26,7 @@ export function RevealView({
   onSetTitle,
   onAddComment,
   onRedact,
+  onPublish,
   onAction,
 }: {
   data: RevealPackage;
@@ -37,6 +38,7 @@ export function RevealView({
     body: string,
   ) => Promise<void>;
   onRedact: (commentId: string) => Promise<void>;
+  onPublish: () => Promise<void>;
   onAction: (message: string) => void;
 }) {
   const [selectedCode, setSelectedCode] = useState(
@@ -49,6 +51,9 @@ export function RevealView({
   const [commentBody, setCommentBody] = useState("");
   const [commentKind, setCommentKind] = useState("comment");
   const [commentAuthor, setCommentAuthor] = useState("");
+  const [confirmPublish, setConfirmPublish] = useState(
+    () => new URLSearchParams(window.location.search).get("dialog") === "publish",
+  );
   const [redactTarget, setRedactTarget] = useState<RevealComment | null>(() =>
     new URLSearchParams(window.location.search).get("dialog") === "redact"
       ? (data.album[0]?.comments[0] ?? null)
@@ -145,6 +150,22 @@ export function RevealView({
     }
   }
 
+  async function publish() {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onPublish();
+      setConfirmPublish(false);
+      onAction("Reveal published to the reveal channel.");
+    } catch {
+      // The app reports the error.
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirmRedact() {
     if (!redactTarget || busy) {
       return;
@@ -197,6 +218,15 @@ export function RevealView({
           >
             {streamSafe ? "Stream-safe is on" : "Stream-safe off"}
           </Button>
+          {!data.published ? (
+            <Button
+              variant="primary"
+              icon="sparkles"
+              onClick={() => setConfirmPublish(true)}
+            >
+              Publish reveal
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -512,6 +542,41 @@ export function RevealView({
         ) : null}
       </div>
 
+      {confirmPublish ? (
+        <Dialog
+          title="Publish the reveal?"
+          initialFocusId="publish-cancel"
+          onClose={() => setConfirmPublish(false)}
+          footer={
+            <>
+              <Button
+                id="publish-cancel"
+                variant="secondary"
+                onClick={() => setConfirmPublish(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                className="dialog__danger-action"
+                onClick={() => void publish()}
+              >
+                Publish reveal
+              </Button>
+            </>
+          }
+        >
+          <p>
+            The bot publishes the titles, credits, and comments to the reveal
+            channel. This ends anonymity and cannot be undone.
+          </p>
+          <p className="dialog__meta">
+            {data.album.length} tracks · check the stream-safe setting and every
+            comment before you publish.
+          </p>
+        </Dialog>
+      ) : null}
+
       {redactTarget ? (
         <Dialog
           title="Redact this comment?"
@@ -557,6 +622,7 @@ function AudioPlayer({
   name: string;
 }) {
   const url = previewUrl(version.fileId);
+  const [failed, setFailed] = useState(false);
   return (
     <div className="reveal-audio">
       <div className="reveal-audio__head">
@@ -566,12 +632,23 @@ function AudioPlayer({
         </span>
       </div>
       {url ? (
-        <audio
-          controls
-          preload="none"
-          src={url}
-          aria-label={`${label} audio preview`}
-        />
+        <>
+          <audio
+            controls
+            preload="none"
+            src={url}
+            aria-label={`${label} audio preview`}
+            onError={() => setFailed(true)}
+          />
+          <span className="reveal-audio__note">
+            Preview clip, up to 2 minutes.
+          </span>
+          {failed ? (
+            <span className="reveal-audio__error">
+              The preview did not load. Check that the renderer is available.
+            </span>
+          ) : null}
+        </>
       ) : (
         <p className="muted">Audio preview opens in the desktop app.</p>
       )}

@@ -1310,6 +1310,19 @@ pub fn reveal_with_channel(
             entries,
         });
     }
+    let order = album_order(
+        &tracks
+            .iter()
+            .map(|track| track.track_code.clone())
+            .collect::<Vec<_>>(),
+        event.seed,
+    );
+    tracks.sort_by_key(|track| {
+        order
+            .iter()
+            .position(|code| code == &track.track_code)
+            .unwrap_or(usize::MAX)
+    });
     let effects = reveal_channel_id
         .filter(|channel_id| !channel_id.trim().is_empty())
         .map(|channel_id| {

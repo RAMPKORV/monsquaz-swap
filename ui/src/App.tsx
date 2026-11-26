@@ -798,7 +798,7 @@ export default function App() {
             <div className="event-switcher event-switcher--static">
               <span className="event-switcher__copy">
                 <span className="event-switcher__label">{topbarLabel}</span>
-                <strong>{topbarTitle}</strong>
+                <strong title={topbarTitle}>{topbarTitle}</strong>
               </span>
             </div>
             <div className="topbar__actions">
@@ -806,13 +806,22 @@ export default function App() {
                 type="button"
                 className="command-trigger"
                 aria-label="Jump to"
+                aria-keyshortcuts="Control+K"
+                title="Jump to (Ctrl K)"
                 onClick={() => setPaletteOpen(true)}
               >
                 <Icon name="search" size={16} />
                 <span>Jump to</span>
                 <kbd>Ctrl K</kbd>
               </button>
-              {demo ? <span className="preview-pill">Preview data</span> : null}
+              {demo ? (
+                <span
+                  className="preview-pill"
+                  title="This window uses sample data."
+                >
+                  Demo data
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="icon-button"

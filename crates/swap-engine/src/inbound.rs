@@ -151,6 +151,28 @@ impl InboundService {
                 .await;
             return Ok(());
         };
+        let active = {
+            let db = self.lock();
+            AssignmentRepo::latest_for_participant(db.conn(), &event.id, user_id)
+                .map_err(|error| error.to_string())?
+                .is_some_and(|assignment| {
+                    matches!(
+                        assignment.status,
+                        swap_core::AssignmentStatus::Claimed
+                            | swap_core::AssignmentStatus::Overdue
+                            | swap_core::AssignmentStatus::Submitted
+                    )
+                })
+        };
+        if !active {
+            self.notify(
+                user_id,
+                "You have no active track. Claim an offer before you send a file.",
+            )
+            .await;
+            self.mark_processed(user_id, message_id, &attachment.id)?;
+            return Ok(());
+        }
         let settings: EventSettings =
             serde_json::from_str(&event.settings_json).map_err(|error| error.to_string())?;
         if attachment.size > settings.max_file_bytes {

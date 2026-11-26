@@ -8,9 +8,10 @@
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use swap_db::{Connection, Db, DbError, DeliveryRepo};
+use swap_db::{Connection, Db, DbError, DeliveryRepo, DmCursorRepo};
 use swap_discord::{
-    DiscordChannelId, DiscordError, DiscordPort, DiscordUserId, OutboundFile, OutboundMessage,
+    DiscordChannelId, DiscordError, DiscordPort, DiscordUserId, MessageId, OutboundFile,
+    OutboundMessage,
 };
 use swap_files::{BlobStore, StoreError, sha256_hex};
 use thiserror::Error;
@@ -316,11 +317,16 @@ impl DeliveryWorker {
                 }
             };
             match deliver(&self.store, discord, &delivery).await {
-                Ok(()) => {
+                Ok(message_id) => {
                     let db = self
                         .db
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if let Some(user_id) = user_of(&delivery)
+                        && let Some(message_id) = message_id
+                    {
+                        DmCursorRepo::upsert(db.conn(), user_id, "dm", Some(&message_id.0), now)?;
+                    }
                     DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
                     report.sent += 1;
                 }
@@ -391,7 +397,7 @@ pub async fn dispatch_pending(
             }
         };
         match deliver(store, discord, &delivery).await {
-            Ok(()) => {
+            Ok(_) => {
                 DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
                 report.sent += 1;
             }
@@ -412,7 +418,7 @@ async fn deliver(
     store: &BlobStore,
     discord: &dyn DiscordPort,
     delivery: &PendingDelivery,
-) -> Result<(), DiscordError> {
+) -> Result<Option<MessageId>, DiscordError> {
     match delivery {
         PendingDelivery::Dm { user_id, content } => discord
             .send_dm(
@@ -422,7 +428,7 @@ async fn deliver(
                 },
             )
             .await
-            .map(|_| ()),
+            .map(Some),
         PendingDelivery::Offer {
             user_id,
             track_code,
@@ -440,7 +446,7 @@ async fn deliver(
                     OutboundMessage { content },
                 )
                 .await
-                .map(|_| ())
+                .map(Some)
         }
         PendingDelivery::File {
             user_id,
@@ -462,7 +468,7 @@ async fn deliver(
                     },
                 )
                 .await
-                .map(|_| ())
+                .map(Some)
         }
         PendingDelivery::Channel {
             channel_id,
@@ -475,7 +481,7 @@ async fn deliver(
                 },
             )
             .await
-            .map(|_| ()),
+            .map(Some),
     }
 }
 

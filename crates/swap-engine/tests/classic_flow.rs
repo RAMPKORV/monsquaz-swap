@@ -979,3 +979,60 @@ async fn backfill_recovers_a_dm_attachment_after_an_outage() {
     };
     assert_eq!(cursor.last_seen_message_id.as_deref(), Some("m-backfill"));
 }
+
+#[tokio::test]
+async fn an_offer_holder_cannot_submit_before_a_claim() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
+        InboundHandler, MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(directory.path().join("blobs"));
+    let db = Db::open_in_memory().unwrap();
+    create_event(&db, EVENT, "Test Swap", 42, &EventSettings::default(), T0).unwrap();
+    for index in 0..3 {
+        join(&db, &store, index);
+    }
+    lock_roster(&db, EVENT, T1).unwrap();
+    generate_schedule(&db, EVENT, T2).unwrap();
+    start_event(&db, EVENT, T3).unwrap();
+    let offers = open_round(&db, EVENT, 0, T4).unwrap();
+    let user_id = match &offers.effects[0] {
+        Effect::Offer { user_id, .. } => user_id.clone(),
+        other => panic!("expected an offer, got {other:?}"),
+    };
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let service = InboundService::new(
+        Arc::new(Mutex::new(db)),
+        store,
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        Arc::new(FakeAttachmentFetcher::new()),
+        Arc::new(FixedClock(T5)),
+    );
+    service
+        .handle(InboundEvent::DmAttachment {
+            user_id: DiscordUserId::new(user_id),
+            channel_id: DiscordChannelId::new("dm-1"),
+            message_id: MessageId::new("m-1"),
+            attachment: DmAttachment {
+                id: "a-1".to_string(),
+                filename: "edit.it".to_string(),
+                size: 10,
+                url: "https://cdn.discordapp.com/attachments/1/2/edit.it".to_string(),
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(discord.sent_files().len(), 0);
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|sent| sent.message.content.contains("no active track"))
+    );
+}

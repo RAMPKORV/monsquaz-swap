@@ -1139,7 +1139,14 @@ fn reveal_track_dto(track: TrackCredits) -> RevealTrackDto {
 }
 
 fn reveal_package_dto(db: &Db) -> Result<RevealPackageDto, String> {
-    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    let Some(event) = current_event(db)? else {
+        return Ok(RevealPackageDto {
+            event_name: String::new(),
+            event_state: "Draft".to_string(),
+            published: false,
+            album: Vec::new(),
+        });
+    };
     let package = reveal_package(db, &event.id).map_err(|error| error.to_string())?;
     Ok(RevealPackageDto {
         event_name: package.event_name,

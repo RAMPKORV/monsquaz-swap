@@ -5,7 +5,7 @@
 **PRD:** draft v1  
 **Blocked issues:** 15 · **Ready leaves:** 2  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 24
+**Stale scores:** 23
 
 ## Issues by status
 
@@ -18,8 +18,8 @@
 | Implementation | 0 |
 | Reviewing | 0 |
 | Testing | 0 |
-| Merging | 1 |
-| Done | 18 |
+| Merging | 0 |
+| Done | 19 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 

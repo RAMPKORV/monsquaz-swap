@@ -418,7 +418,9 @@ export default function App() {
         setToast(
           status === "approved"
             ? "Extension approved."
-            : "Extension refused.",
+            : status === "pending"
+              ? "The extension request is still open."
+              : "Extension refused.",
         );
       } else if (decision.assignmentId) {
         const hours = action === "extend" ? 6 : 0;

@@ -106,7 +106,9 @@ impl LiveRuntime {
         let wake = service.wake_notifier();
         let dispatcher_wake = wake.clone();
         let dispatcher = tauri::async_runtime::spawn(async move {
-            let _ = task_service.tick_deadlines();
+            if let Err(error) = task_service.tick_deadlines() {
+                eprintln!("deadline tick failed: {error}");
+            }
             let _ = task_service.drain_pending().await;
             let _ = tokio::time::timeout(Duration::from_secs(60), task_service.backfill()).await;
             let drain_service = task_service;
@@ -117,7 +119,9 @@ impl LiveRuntime {
                 move || {
                     let service = drain_service.clone();
                     async move {
-                        let _ = service.tick_deadlines();
+                        if let Err(error) = service.tick_deadlines() {
+                            eprintln!("deadline tick failed: {error}");
+                        }
                         let _ =
                             tokio::time::timeout(Duration::from_secs(60), service.retry_backfill())
                                 .await;

@@ -2,7 +2,10 @@ use std::io::{Cursor, Write};
 
 use serde::Serialize;
 use swap_core::AssignmentStatus;
-use swap_db::{AssignmentRepo, Db, FileRepo, ParticipantRepo, SeenRepo, TrackRepo};
+use swap_db::{
+    AssignmentRepo, Db, FileRepo, ParticipantRepo, SeenRepo, TrackCommentRepo, TrackRepo,
+    TrackTitleRepo,
+};
 use swap_files::{BlobStore, sha256_hex};
 
 use crate::PrivacyError;
@@ -23,6 +26,26 @@ pub struct ExportManifest {
     pub assignments: Vec<ExportAssignment>,
     pub files: Vec<ExportFileInfo>,
     pub seen_pairs: Vec<ExportSeenPair>,
+    pub comments: Vec<ExportComment>,
+    pub titles: Vec<ExportTitle>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportComment {
+    pub track_code: String,
+    pub kind: String,
+    pub body: String,
+    pub redacted: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportTitle {
+    pub track_code: String,
+    pub title: String,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +132,28 @@ pub fn export_participant(
             })
             .collect();
 
+    let comments = TrackCommentRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .filter(|comment| comment.participant_id == user_id)
+        .map(|comment| ExportComment {
+            track_code: comment.track_code,
+            kind: comment.kind,
+            body: comment.body,
+            redacted: comment.redacted_at.is_some(),
+            created_at: comment.created_at,
+        })
+        .collect();
+
+    let titles = TrackTitleRepo::list_for_event(db.conn(), event_id)?
+        .into_iter()
+        .filter(|title| title.set_by == user_id)
+        .map(|title| ExportTitle {
+            track_code: title.track_code,
+            title: title.title,
+            created_at: title.created_at,
+        })
+        .collect();
+
     let mut files = Vec::new();
     for file in FileRepo::list_for_holder(db.conn(), event_id, user_id)? {
         let original_sha = file
@@ -153,6 +198,8 @@ pub fn export_participant(
         assignments,
         files: files.iter().map(|(info, _)| info.clone()).collect(),
         seen_pairs,
+        comments,
+        titles,
     };
 
     let json = serde_json::to_vec_pretty(&manifest)?;

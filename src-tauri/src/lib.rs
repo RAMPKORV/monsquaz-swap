@@ -87,7 +87,7 @@ fn health() -> Health {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = preview::register(tauri::Builder::default());
+    let builder = preview::register_protocol(tauri::Builder::default());
     let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {

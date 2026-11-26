@@ -1113,7 +1113,22 @@ pub fn host_reveal(app: AppHandle) -> Result<RevealDto, String> {
         }
         Err(EngineError::PendingAssignments { ids, .. }) => Ok(RevealDto {
             published: false,
-            blocked: ids,
+            blocked: ids
+                .into_iter()
+                .map(|id| {
+                    AssignmentRepo::get(db.conn(), &id)
+                        .ok()
+                        .flatten()
+                        .map(|assignment| {
+                            format!(
+                                "Track {} · round {}",
+                                assignment.track_code,
+                                assignment.round + 1
+                            )
+                        })
+                        .unwrap_or(id)
+                })
+                .collect(),
             tracks: Vec::new(),
         }),
         Err(error) => Err(error.to_string()),
@@ -1196,7 +1211,7 @@ fn reveal_package_dto(db: &Db) -> Result<RevealPackageDto, String> {
                             swap_engine::RevealVersionRole::Edit => "edit".to_string(),
                         },
                         round: version.round,
-                        file_id: version.file_id,
+                        file_id: crate::preview::register(&version.file_id),
                         extension: version.extension,
                         created_at: version.created_at,
                         playable: version.playable,

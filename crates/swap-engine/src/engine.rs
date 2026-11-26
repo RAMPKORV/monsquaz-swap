@@ -1349,6 +1349,7 @@ pub fn reveal_with_channel(
 
 fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
     const LIMIT: usize = 1_800;
+    let event_name = safe_reveal_text(event_name);
     let mut messages = Vec::new();
     let mut current = format!("{event_name} — reveal");
     for track in tracks {
@@ -1358,10 +1359,11 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
                 .iter()
                 .filter(|entry| entry.status == AssignmentStatus::Submitted)
                 .map(|entry| {
+                    let name = safe_reveal_text(&entry.display_name);
                     if entry.fill_in {
-                        format!("{} (fill-in)", entry.display_name)
+                        format!("{name} (fill-in)")
                     } else {
-                        entry.display_name.clone()
+                        name
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1371,7 +1373,11 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
                 names.join(", ")
             }
         };
-        let title = track.title.as_deref().unwrap_or(&track.track_code);
+        let title = track
+            .title
+            .as_deref()
+            .map(safe_reveal_text)
+            .unwrap_or_else(|| track.track_code.clone());
         let gaps = track
             .entries
             .iter()
@@ -1381,7 +1387,7 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
             "\n{} ({}) — seed: {}; edits: {}{}",
             title,
             track.track_code,
-            track.seed_owner_name,
+            safe_reveal_text(&track.seed_owner_name),
             editors,
             if gaps > 0 {
                 format!("; gaps: {gaps}")
@@ -1392,8 +1398,8 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
         for comment in &track.comments {
             line.push_str(&format!(
                 "\n  {}: {}",
-                comment.author_name,
-                comment.body.replace('\n', " ")
+                safe_reveal_text(&comment.author_name),
+                safe_reveal_text(&comment.body)
             ));
         }
         if current.chars().count() + line.chars().count() > LIMIT {
@@ -1415,6 +1421,23 @@ fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
         }
     }
     bounded
+}
+
+fn safe_reveal_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .replace("@everyone", "@ everyone")
+        .replace("@here", "@ here")
+        .replace("<@", "< @")
+        .replace("<#", "< #")
 }
 
 /// Build the host-only reveal package. The package contains names and comments.
@@ -1592,6 +1615,7 @@ pub fn set_track_title(
         return Err(EngineError::TitleTooLong);
     }
     let transaction = begin(db)?;
+    open_event_in(&transaction, event_id, "title")?;
     let track = TrackRepo::get(&transaction, event_id, track_code)?
         .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
     if actor_id != "host" {
@@ -1682,6 +1706,7 @@ pub fn add_track_comment(
         return Err(EngineError::CommentTooLong);
     }
     let transaction = begin(db)?;
+    open_event_in(&transaction, event_id, "comment")?;
     let track = TrackRepo::get(&transaction, event_id, track_code)?
         .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
     ParticipantRepo::get(&transaction, event_id, participant_id)?
@@ -1723,15 +1748,7 @@ pub fn redact_track_comment(db: &Db, comment_id: &str, now: i64) -> Result<(), E
     let transaction = begin(db)?;
     let comment = TrackCommentRepo::get(&transaction, comment_id)?
         .ok_or_else(|| EngineError::CommentNotFound(comment_id.to_string()))?;
-    let event = EventRepo::get(&transaction, &comment.event_id)?
-        .ok_or_else(|| EngineError::EventNotFound(comment.event_id.clone()))?;
-    if !matches!(event.state, EventState::Active | EventState::Paused) {
-        return Err(EngineError::WrongEventState {
-            action: "redaction",
-            state: event.state,
-            expected: "active or paused",
-        });
-    }
+    open_event_in(&transaction, &comment.event_id, "redaction")?;
     if comment.redacted_at.is_some() {
         return Err(EngineError::CommentAlreadyRedacted);
     }
@@ -1745,7 +1762,11 @@ pub fn redact_track_comment(db: &Db, comment_id: &str, now: i64) -> Result<(), E
         "Host",
         "Track comment redacted",
         None,
-        &serde_json::json!({ "trackCode": comment.track_code }).to_string(),
+        &serde_json::json!({
+            "trackCode": comment.track_code,
+            "commentId": comment.id
+        })
+        .to_string(),
     )?;
     commit(transaction)?;
     Ok(())
@@ -2616,5 +2637,37 @@ mod reveal_tests {
         assert!(text.contains("gaps: 1"));
         assert!(text.contains("Editor: A great bassline."));
         assert!(!text.contains("No edit;"));
+    }
+
+    #[test]
+    fn reveal_messages_do_not_allow_mentions_or_control_characters() {
+        let track = TrackCredits {
+            track_code: "SAAAA".to_string(),
+            title: Some("@everyone\nReal".to_string()),
+            seed_owner: "u1".to_string(),
+            seed_owner_name: "<@123>".to_string(),
+            entries: vec![CreditEntry {
+                round: 0,
+                participant_id: "u2".to_string(),
+                display_name: "Editor".to_string(),
+                status: AssignmentStatus::Submitted,
+                fill_in: false,
+            }],
+            comments: vec![RevealComment {
+                id: "comment-1".to_string(),
+                participant_id: "u2".to_string(),
+                author_name: "Editor".to_string(),
+                kind: "comment".to_string(),
+                body: "@here look".to_string(),
+                created_at: 10,
+            }],
+        };
+        let text = reveal_messages("Event @everyone", &[track]).join("\n");
+        assert!(!text.contains("@everyone"));
+        assert!(!text.contains("@here"));
+        assert!(!text.contains("<@123>"));
+        assert!(text.contains("@ everyone"));
+        assert!(text.contains("@ here"));
+        assert!(text.contains("< @123>"));
     }
 }

@@ -26,8 +26,8 @@ pub fn assignment_id(event_id: &str, round: u32, track_code: &str) -> String {
     format!("a{}", &hash[..16])
 }
 
-/// A stable comment identifier. The body and time make two equal comments
-/// distinct while a retry keeps the same id.
+/// A unique comment identifier. A process-local sequence keeps two equal
+/// comments distinct. Comment creation is not retried after a commit.
 pub fn comment_id(
     event_id: &str,
     track_code: &str,

@@ -63,7 +63,9 @@ file bytes or absolute paths. Module files are not playable in a browser.
 - The presenter is useful before the reveal and read-only after it.
 - The host can check the exact audio and credits before the public reveal.
 - A missing final title does not block the reveal. The presenter labels the
-  track "Untitled" and the host can set a title before publish.
+  track "Untitled" and the host can set a title before publish. An automatic
+  fallback to the previous submitter is deferred. The host is the fallback for
+  this version.
 - The first audio request for a long module can take seconds. The UI shows a
   native audio control and the render is cached for later requests.
 - The preview protocol reads the database per request. This is acceptable for
@@ -71,7 +73,8 @@ file bytes or absolute paths. Module files are not playable in a browser.
 
 ## Rollback
 
-Migration 008 is additive. An older build ignores the two new tables. The
+Migration 008 is additive. An older build refuses a newer schema with
+`SchemaTooNew`. To roll back, restore a pre-migration database backup. The
 preview protocol and the presenter route can be removed without a data
 migration. The reveal package reads existing rows only. No custody, deadline,
 or seen state changes.

@@ -2981,6 +2981,7 @@ dependencies = [
  "keyring",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "swap-core",
  "swap-db",
  "swap-discord",

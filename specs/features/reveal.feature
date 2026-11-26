@@ -111,5 +111,5 @@ Feature: Reveal and album
     Then the bot asks for the final title
     And the app stores the title for the reveal
     When the final holder does not provide a title
-    Then the app asks the previous submitter
-    And the host can set the title if both are unavailable
+    Then the host can set the title before the reveal
+    And the app keeps the track code until a title is set

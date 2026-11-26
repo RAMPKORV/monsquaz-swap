@@ -4,19 +4,96 @@
 //! storage paths, or a Discord CDN URL. Module files render to WAV through
 //! openmpt123 and the result is cached by content hash.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
+use sha2::{Digest, Sha256};
 use tauri::http::{Request, Response, StatusCode, header};
 use tauri::{AppHandle, Manager, Runtime};
 
-use swap_db::{Db, FileRepo};
+use swap_db::{Db, FileRepo, MetaRepo};
 use swap_files::{BlobStore, OpenMptRenderer, render_preview};
 
 const PROTOCOL: &str = "swap-preview";
 const PREVIEW_SECONDS: u32 = 120;
 
-pub fn register<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+#[derive(Default)]
+struct PreviewRegistry {
+    by_token: HashMap<String, String>,
+    by_file: HashMap<String, String>,
+}
+
+fn registry() -> &'static Mutex<PreviewRegistry> {
+    static REGISTRY: OnceLock<Mutex<PreviewRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(PreviewRegistry::default()))
+}
+
+/// Register a file for the current app process and return an opaque token.
+/// The token is stable for one file in one process. It never contains the
+/// event, track, or storage path.
+pub fn register(file_id: &str) -> String {
+    let mut registry = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(token) = registry.by_file.get(file_id) {
+        return token.clone();
+    }
+    let token = token_for(file_id);
+    registry.by_token.insert(token.clone(), file_id.to_string());
+    registry.by_file.insert(file_id.to_string(), token.clone());
+    token
+}
+
+/// Drop every token. Tests use this to isolate the registry.
+#[cfg(test)]
+fn reset() {
+    let mut registry = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.by_token.clear();
+    registry.by_file.clear();
+}
+
+fn resolve(token: &str) -> Option<String> {
+    registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .by_token
+        .get(token)
+        .cloned()
+}
+
+fn token_for(file_id: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(secret());
+    hasher.update(file_id.as_bytes());
+    let digest = hasher.finalize();
+    digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn secret() -> &'static [u8; 32] {
+    static SECRET: OnceLock<[u8; 32]> = OnceLock::new();
+    SECRET.get_or_init(|| {
+        let mut hasher = Sha256::new();
+        hasher.update(std::process::id().to_le_bytes());
+        hasher.update(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        hasher.update((std::ptr::addr_of!(SECRET) as usize).to_le_bytes());
+        hasher.finalize().into()
+    })
+}
+
+pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.register_asynchronous_uri_scheme_protocol(PROTOCOL, |context, request, responder| {
         let app = context.app_handle().clone();
         std::thread::spawn(move || {
@@ -29,14 +106,13 @@ fn respond<R: Runtime>(app: &AppHandle<R>, request: &Request<Vec<u8>>) -> Respon
     if request.method() != "GET" && request.method() != "HEAD" {
         return error(StatusCode::METHOD_NOT_ALLOWED, "method not allowed");
     }
-    let Some(file_id) = decode_segment(request.uri().path().trim_start_matches('/')) else {
+    let Some(token) = decode_segment(request.uri().path().trim_start_matches('/')) else {
         return error(StatusCode::BAD_REQUEST, "invalid preview path");
     };
-    if file_id.is_empty() || file_id.len() > 128 || file_id.contains('/') || file_id.contains('\\')
-    {
+    if token.len() != 32 || !token.chars().all(|character| character.is_ascii_hexdigit()) {
         return error(StatusCode::BAD_REQUEST, "invalid preview path");
     }
-    let file = match preview_file(app, &file_id) {
+    let file = match preview_file(app, &token) {
         Ok(file) => file,
         Err((status, message)) => return error(status, message),
     };
@@ -54,15 +130,21 @@ struct PreviewFile {
 
 fn preview_file<R: Runtime>(
     app: &AppHandle<R>,
-    file_id: &str,
+    token: &str,
 ) -> Result<PreviewFile, (StatusCode, &'static str)> {
+    let file_id = resolve(token).ok_or((StatusCode::NOT_FOUND, "file not found"))?;
     let directory =
         data_dir(app).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "no data dir"))?;
     let db = Db::open(directory.join("monsquaz.db"))
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database unavailable"))?;
-    let file = FileRepo::get(db.conn(), file_id)
+    let file = FileRepo::get(db.conn(), &file_id)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database unavailable"))?
         .ok_or((StatusCode::NOT_FOUND, "file not found"))?;
+    let current = MetaRepo::get(db.conn(), "host.current_event")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database unavailable"))?;
+    if current.as_deref() != Some(file.event_id.as_str()) {
+        return Err((StatusCode::NOT_FOUND, "file not found"));
+    }
     Ok(PreviewFile {
         sha256: file.sha256,
         extension: file.extension,
@@ -229,6 +311,23 @@ fn error(status: StatusCode, message: &str) -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_tokens_are_opaque_and_stable() {
+        let first = register("evt-1:SAAAA:1");
+        let second = register("evt-2:SBBBB:1");
+        assert_eq!(first, register("evt-1:SAAAA:1"));
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|character| character.is_ascii_hexdigit()));
+        assert_ne!(first, "evt-1:SAAAA:1");
+        assert_eq!(resolve(&first).as_deref(), Some("evt-1:SAAAA:1"));
+        assert_eq!(resolve("not-a-token"), None);
+        reset();
+        assert_eq!(resolve(&first), None);
+        let next = register("evt-1:SAAAA:1");
+        assert_eq!(resolve(&next).as_deref(), Some("evt-1:SAAAA:1"));
+    }
 
     #[test]
     fn preview_ids_are_decoded_and_bounded() {

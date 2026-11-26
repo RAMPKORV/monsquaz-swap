@@ -9,6 +9,7 @@ use twilight_http::api_error::ApiError;
 use twilight_http::client::Client;
 use twilight_http::error::ErrorType;
 use twilight_model::channel::ChannelType;
+use twilight_model::channel::message::AllowedMentions;
 use twilight_model::channel::message::Message;
 use twilight_model::channel::message::MessageType;
 use twilight_model::http::attachment::Attachment as DiscordAttachment;
@@ -68,10 +69,12 @@ impl HttpDiscordPort {
         channel: Id<ChannelMarker>,
         message: &OutboundMessage,
     ) -> Result<MessageId, DiscordError> {
+        let allowed = AllowedMentions::default();
         let sent = self
             .http
             .create_message(channel)
             .content(&message.content)
+            .allowed_mentions(Some(&allowed))
             .await
             .map_err(map_http_error)?
             .model()

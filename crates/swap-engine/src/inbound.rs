@@ -182,25 +182,29 @@ impl InboundService {
                 .await;
             return Ok(());
         };
-        let active = {
+        let assignment = {
             let db = self.lock();
             AssignmentRepo::latest_for_participant(db.conn(), &event.id, user_id)
                 .map_err(|error| error.to_string())?
-                .is_some_and(|assignment| {
-                    matches!(
-                        assignment.status,
-                        swap_core::AssignmentStatus::Claimed
-                            | swap_core::AssignmentStatus::Overdue
-                            | swap_core::AssignmentStatus::Submitted
-                    )
-                })
         };
-        if !active {
+        let Some(assignment) = assignment.filter(|assignment| {
+            matches!(
+                assignment.status,
+                swap_core::AssignmentStatus::Claimed
+                    | swap_core::AssignmentStatus::Overdue
+                    | swap_core::AssignmentStatus::Submitted
+            )
+        }) else {
             self.notify(
                 user_id,
                 "You have no active track. Claim an offer before you send a file.",
             )
             .await;
+            self.mark_processed(user_id, message_id, &attachment.id)?;
+            return Ok(());
+        };
+        let cutoff = assignment.claimed_at.unwrap_or(assignment.offered_at);
+        if !message_is_current(message_id, cutoff) {
             self.mark_processed(user_id, message_id, &attachment.id)?;
             return Ok(());
         }
@@ -473,6 +477,19 @@ impl InboundHandler for InboundService {
     }
 }
 
+const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
+
+/// Discord message ids carry a millisecond timestamp. A backfill can return an
+/// attachment from before the current claim. Accept it only when the id is
+/// numeric and not older than the claim.
+fn message_is_current(message_id: &str, cutoff_secs: i64) -> bool {
+    let Ok(id) = message_id.parse::<u64>() else {
+        return true;
+    };
+    let millis = (id >> 22) as i64 + DISCORD_EPOCH_MS;
+    millis / 1000 >= cutoff_secs
+}
+
 fn terminal_submit(error: &EngineError) -> bool {
     matches!(
         error,
@@ -520,5 +537,30 @@ fn claim_message(error: &EngineError) -> String {
         }
         EngineError::WrongAssignmentState(_) => "That offer is no longer open.".to_string(),
         _ => "The claim failed. Try again or ask the host.".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snowflake(seconds: i64) -> String {
+        ((((seconds * 1000) - DISCORD_EPOCH_MS) as u64) << 22).to_string()
+    }
+
+    #[test]
+    fn a_message_from_before_the_claim_is_not_current() {
+        let claimed_at = 1_700_000_000;
+        assert!(!message_is_current(
+            &snowflake(claimed_at - 100),
+            claimed_at
+        ));
+        assert!(message_is_current(&snowflake(claimed_at), claimed_at));
+        assert!(message_is_current(&snowflake(claimed_at + 100), claimed_at));
+    }
+
+    #[test]
+    fn a_non_snowflake_test_id_is_current() {
+        assert!(message_is_current("m-backfill", 2_000));
     }
 }

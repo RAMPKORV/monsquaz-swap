@@ -1,7 +1,7 @@
 use swap_core::{AssignmentStatus, EventState, Membership, Role, TrackState};
 use swap_db::{
-    AssignmentRepo, Db, DeliveryRepo, EventRepo, FileRepo, ParticipantRepo, PlanRepo, SeenRepo,
-    TrackRepo,
+    AssignmentRepo, Db, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo, ParticipantRepo, PlanRepo,
+    SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
@@ -979,6 +979,83 @@ async fn backfill_recovers_a_dm_attachment_after_an_outage() {
         DmCursorRepo::get(db.conn(), &user_id).unwrap().unwrap()
     };
     assert_eq!(cursor.last_seen_message_id.as_deref(), Some("m-backfill"));
+}
+
+#[tokio::test]
+async fn backfill_ignores_an_attachment_from_before_the_claim() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_db::ProcessedAttachmentRepo;
+    use swap_discord::{DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundDm, MessageId};
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(3, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    let (user_id, assignment_id, track_code) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        T4,
+    )
+    .unwrap();
+    let claimed_at = 1_700_000_000_i64;
+    fixture
+        .db
+        .conn()
+        .execute(
+            "UPDATE assignments SET claimed_at = ?1 WHERE id = ?2",
+            (claimed_at, &assignment_id),
+        )
+        .unwrap();
+    DmCursorRepo::upsert(fixture.db.conn(), &user_id, "dm-1", None, T4).unwrap();
+    let old_message = ((((claimed_at - 100) * 1000) - 1_420_070_400_000) as u64) << 22;
+
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let url = "https://cdn.discordapp.com/attachments/1/2/old.it";
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    fetcher.add(url, &seed_bytes(88));
+    discord.push_inbound(
+        DiscordUserId::new(user_id.clone()),
+        InboundDm {
+            message_id: MessageId::new(old_message.to_string()),
+            content: String::new(),
+            attachments: vec![DmAttachment {
+                id: "a-old".to_string(),
+                filename: "old.it".to_string(),
+                size: seed_bytes(88).len() as u64,
+                url: url.to_string(),
+            }],
+        },
+    );
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord,
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    service.backfill().await.unwrap();
+    let versions = {
+        let db = db.lock().unwrap();
+        FileRepo::list_for_track(db.conn(), EVENT, &track_code).unwrap()
+    };
+    assert_eq!(versions.len(), 1);
+    assert!(
+        ProcessedAttachmentRepo::is_processed(
+            db.lock().unwrap().conn(),
+            &user_id,
+            &old_message.to_string(),
+            "a-old"
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]

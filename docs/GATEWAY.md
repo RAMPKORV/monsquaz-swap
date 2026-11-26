@@ -80,11 +80,13 @@ The operator observes four things:
 
 ## Rollback
 
-The runtime has no database migration. To roll back:
+The gateway runtime has no migration of its own. The delivery outbox migrations
+live in `swap-db`. To roll back to a build without them:
 
 1. Stop the supervisor. It closes the shard with code 1000.
-2. Remove the `live` feature. The contract and supervisor core still build.
-3. No event data, ledger row, or file changes occur in the gateway.
+2. Restore the database backup from before the first delivery migration.
+3. Remove the `live` feature. The contract and supervisor core still build.
+4. No event data, ledger row, or file changes occur in the gateway.
 
 Verification for the rollback path:
 
@@ -98,13 +100,15 @@ cargo check -p monsquaz-swap --no-default-features
 The app opens the SQLite database when it starts. It dispatches pending outbox
 rows, then repeats the dispatch every 30 seconds, and runs one DM backfill for
 each recorded inbound cursor. A command that produces an effect commits the
-event state and its outbox rows in one transaction. A restart or reboot keeps the event, seen ledger,
-files, and pending deliveries.
+event state and its outbox rows in one transaction. A restart or reboot keeps
+the event, seen ledger, files, and pending deliveries.
 
 The outbound DM cursor and the inbound DM cursor are separate columns. A sent DM
-can never move the inbound cursor past an unprocessed attachment. Backfill can
-only visit a participant who has an inbound cursor. A first-time submitter who
-writes during downtime is processed when the gateway delivers that message.
+can never move the inbound cursor past an unprocessed attachment. Backfill
+ignores an attachment whose Discord message id is older than the current claim.
+Backfill can only visit a participant who has an inbound cursor. Discord does
+not replay a direct message that arrives while the gateway is offline. A
+first-time submitter must send the file again after the gateway reconnects.
 
 A crash after Discord accepts a send and before the sent mark can duplicate a
 message. The delivery id is stable. A future transport nonce or reconciliation
@@ -121,6 +125,9 @@ and one acknowledgement.
   free of participants, or add a host-alert channel before beta.
 - The UI does not show gateway health or a dead supervisor task. MSW-045 tracks
   the status surface.
+- The inbound service handles claim, skip, status, and help. It does not yet
+  route `/swap seed`, `/swap join`, or member joins to the engine. MSW-021
+  tracks the classic end-to-end loop.
 - Transport nonce or reconciliation must close the duplicate-send window
   (MSW-044).
 - The real test guild smoke test needs `DISCORD_TOKEN` and `DISCORD_GUILD`.

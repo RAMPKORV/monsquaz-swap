@@ -1723,6 +1723,91 @@ fn a_complete_schedule_has_no_valid_single_cell_swap() {
 }
 
 #[test]
+fn every_single_cell_edit_is_valid_or_rejected_without_writing() {
+    use swap_engine::edit_plan_assignment;
+
+    let fixture = Fixture::with_settings(
+        5,
+        0,
+        EventSettings {
+            rounds: Some(2),
+            ..EventSettings::default()
+        },
+    );
+    let schedule = fixture.lock_and_schedule();
+    let cells = schedule
+        .iter()
+        .map(|assignment| (assignment.round, assignment.track_code.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let people = schedule
+        .iter()
+        .map(|assignment| assignment.participant_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut version = PlanRepo::latest(fixture.db.conn(), EVENT)
+        .unwrap()
+        .unwrap()
+        .version;
+    for (round, track) in cells {
+        for participant in &people {
+            let result = edit_plan_assignment(&fixture.db, EVENT, round, &track, participant, T4);
+            match result {
+                Ok(outcome) => {
+                    assert_eq!(outcome.version, version + 1);
+                    version = outcome.version;
+                    let assignments =
+                        PlanRepo::list_assignments(fixture.db.conn(), EVENT, version).unwrap();
+                    let mut pairs = std::collections::BTreeSet::new();
+                    let mut round_people = std::collections::BTreeSet::new();
+                    let mut round_tracks = std::collections::BTreeSet::new();
+                    for assignment in assignments {
+                        assert!(pairs.insert((
+                            assignment.participant_id.clone(),
+                            assignment.track_code.clone()
+                        )));
+                        assert!(
+                            round_people
+                                .insert((assignment.round, assignment.participant_id.clone()))
+                        );
+                        assert!(
+                            round_tracks.insert((assignment.round, assignment.track_code.clone()))
+                        );
+                        assert_ne!(
+                            TrackRepo::get(fixture.db.conn(), EVENT, &assignment.track_code)
+                                .unwrap()
+                                .unwrap()
+                                .owner_id,
+                            assignment.participant_id
+                        );
+                    }
+                }
+                Err(error) => {
+                    assert!(
+                        matches!(
+                            error,
+                            EngineError::PlanOwnTrack { .. }
+                                | EngineError::PlanRepeat { .. }
+                                | EngineError::PlanNoChange
+                                | EngineError::PlanParticipantNotInRound
+                                | EngineError::PlanCellNotFound { .. }
+                                | EngineError::PlanChanged
+                                | EngineError::PlanInvalid(_)
+                        ),
+                        "unexpected error: {error:?}"
+                    );
+                    assert_eq!(
+                        PlanRepo::latest(fixture.db.conn(), EVENT)
+                            .unwrap()
+                            .unwrap()
+                            .version,
+                        version
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
     use swap_engine::{ExtensionStatus, decide_extension, open_decisions, request_extension};
 

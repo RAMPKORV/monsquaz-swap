@@ -7,7 +7,7 @@ worked on what until the reveal. The result is a collaborative album made by
 surprise.
 
 > Status: **spec-first scaffold.** The Tauri shell, Rust core invariant, tracker,
-> and release wiring exist. The event engine is the next milestone.
+> and release wiring exist. The classic event loop is the next milestone.
 
 ## Why
 

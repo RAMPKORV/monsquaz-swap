@@ -38,9 +38,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
   in the OS keychain, maps channels, and sends a test DM. The live Twilight
   gateway runs behind a supervisor. `swap-sim` runs deterministic classic
   events and checks the hard invariants. `swap-privacy` exports participant
-  data and anonymizes deletion with a hash-only audit. The delivery loop, async
-  queue, deadline automation, event tools, reveal exports, and remaining UI
-  screens are next.
+  data and anonymizes deletion with a hash-only audit. The durable delivery
+  loop, startup and periodic dispatch, DM backfill, restart recovery, and
+  private-thread fallback are in place. The async queue, deadline automation,
+  event tools, reveal exports, and remaining UI screens are next.
 
 ## Non-negotiable invariants
 

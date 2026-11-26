@@ -573,6 +573,9 @@ export function previewUrl(fileId: string): string {
 export async function revealEvent(): Promise<RevealData> {
   if (isDemoMode()) {
     await pause(420);
+    if (demoRevealState) {
+      demoRevealState.published = true;
+    }
     return {
       published: true,
       blocked: [],

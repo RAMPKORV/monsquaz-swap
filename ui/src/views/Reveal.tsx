@@ -198,7 +198,11 @@ export function RevealView({
     <div className={`view reveal-view${streamSafe ? " reveal-view--safe" : ""}`}>
       <header className="reveal-header">
         <div>
-          <p className="eyebrow">Host-only reveal package</p>
+          <p className="eyebrow">
+            {data.published
+              ? "Published reveal package"
+              : "Host-only reveal package"}
+          </p>
           <h1 tabIndex={-1}>Reveal show</h1>
           <p className="lede">
             {data.published

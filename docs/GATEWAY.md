@@ -133,8 +133,10 @@ and one acknowledgement.
   fill-ins. The planner refuses to generate a schedule before the lock.
 - `host_open_round` opens one round. The host must call it. No timer opens a
   round.
-- `host_reveal` checks the reveal gate and writes one credits message to the
-  mapped reveal channel in the same transaction as the state change.
+- `host_reveal` checks the reveal gate and writes the reveal messages to the
+  mapped reveal channel in the same transaction as the state change. The
+  messages contain final titles, ordered credits, anonymous gaps, fill-in
+  marks, statistics, and non-redacted comments.
 - `/swap join` records the optional timezone and handoff budget, then sends the
   seed instructions. It refuses a user who is active in another event or seeded in an event that
   has not started. It seeds

@@ -3,7 +3,7 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 11 · **Ready leaves:** 3  
+**Blocked issues:** 11 · **Ready leaves:** 4  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 2 · **Human queue:** 0  
 **Stale scores:** 32
 
@@ -14,9 +14,9 @@
 | Triage | 21 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 10 |
+| Ready for implementation | 11 |
 | Implementation | 0 |
-| Reviewing | 1 |
+| Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
 | Done | 41 |
@@ -30,6 +30,7 @@
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 2 | `MSW-037` | Formal: classic schedule model | ready | 3 |
 | 20 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 22 | `MSW-062` | Async queue selection and diversity score | ready | 1 |
 
 ## Open reviews
 

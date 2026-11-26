@@ -5,7 +5,7 @@
 **PRD:** draft v1  
 **Blocked issues:** 13 · **Ready leaves:** 3  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 26
+**Stale scores:** 25
 
 ## Issues by status
 
@@ -18,8 +18,8 @@
 | Implementation | 0 |
 | Reviewing | 0 |
 | Testing | 0 |
-| Merging | 3 |
-| Done | 22 |
+| Merging | 2 |
+| Done | 23 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 22 | `MSW-044` | Delivery transport dedupe | ready | 1 |
-| 26 | `MSW-048` | Localize host UI copy and add copyable join instructions | ready | 1 |
+| 25 | `MSW-048` | Localize host UI copy and add copyable join instructions | ready | 1 |
 
 ## Last session
 

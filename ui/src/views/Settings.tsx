@@ -136,6 +136,46 @@ export function SettingsView({
               </div>
             </div>
 
+            <div className="connection-row" aria-live="polite">
+              <span className="connection-row__icon">
+                <Icon name="bot" size={24} />
+              </span>
+              <div className="connection-row__copy">
+                <span className="field-label">Gateway</span>
+                <span className="field-help">
+                  {settings.gateway
+                    ? settings.gateway.state === "online"
+                      ? `Connected${settings.gateway.attempt > 0 ? ` after ${settings.gateway.attempt} retries` : ""}.`
+                      : settings.gateway.state === "reconnecting" ||
+                          settings.gateway.state === "starting"
+                        ? `Reconnecting. Attempt ${settings.gateway.attempt}.${settings.gateway.lastError ? ` ${settings.gateway.lastError}` : ""}`
+                        : `Offline.${settings.gateway.lastError ? ` ${settings.gateway.lastError}` : ""}`
+                    : "The gateway is not running."}
+                </span>
+              </div>
+              <StatusPill
+                tone={
+                  !settings.gateway
+                    ? "muted"
+                    : settings.gateway.state === "online"
+                      ? "ok"
+                      : settings.gateway.state === "failed" ||
+                          settings.gateway.state === "stopped"
+                        ? "danger"
+                        : "warn"
+                }
+              >
+                {!settings.gateway
+                  ? "Not started"
+                  : settings.gateway.state === "online"
+                    ? "Online"
+                    : settings.gateway.state === "reconnecting" ||
+                        settings.gateway.state === "starting"
+                      ? "Reconnecting"
+                      : "Offline"}
+              </StatusPill>
+            </div>
+
             <div className="bot-storage">
               <div>
                 <span className="field-label">Token storage</span>

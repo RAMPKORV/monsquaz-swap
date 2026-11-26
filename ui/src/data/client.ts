@@ -17,6 +17,10 @@ import type {
   MissionControl,
   PeopleData,
   PlanData,
+  RevealData,
+  RevealTrack,
+  RosterLock,
+  RoundOpen,
   Scenario,
   SetupData,
   Theme,
@@ -62,6 +66,10 @@ export function initialScenario(): Scenario {
     "long",
     "dense",
     "offline",
+    "reconnecting",
+    "lock-ready",
+    "round-ready",
+    "reveal-ready",
     "infeasible",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";
@@ -152,6 +160,7 @@ export async function loadSettings(scenario: Scenario): Promise<HostSettings> {
       keychainError: false,
       botConfigured: status.configured,
       tokenStorage: status.tokenStorage,
+      gateway: status.gateway,
     };
   } catch {
     return settings;
@@ -375,6 +384,55 @@ export async function generatePlan(): Promise<PlanData> {
     return demoPlan("default");
   }
   return invoke<PlanData>("host_generate_plan");
+}
+
+const demoRevealTracks: RevealTrack[] = [
+  {
+    trackCode: "S7F3A",
+    seedOwnerName: "Ari",
+    seedOwner: "user-ari",
+    entries: [
+      { round: 0, displayName: "Noor", status: "Submitted", fillIn: false },
+      { round: 1, displayName: "Remy", status: "Submitted", fillIn: false },
+    ],
+  },
+  {
+    trackCode: "S4K2M",
+    seedOwnerName: "Noor",
+    seedOwner: "user-noor",
+    entries: [
+      { round: 0, displayName: "Jules", status: "Submitted", fillIn: true },
+      { round: 1, displayName: "Ari", status: "SkippedAfterClaim", fillIn: false },
+    ],
+  },
+];
+
+export async function lockRoster(): Promise<RosterLock> {
+  if (isDemoMode()) {
+    await pause(300);
+    return { active: 12, fillIns: 0 };
+  }
+  return invoke<RosterLock>("host_lock_roster");
+}
+
+export async function openRound(round: number): Promise<RoundOpen> {
+  if (isDemoMode()) {
+    await pause(360);
+    return { round, offers: 12 };
+  }
+  return invoke<RoundOpen>("host_open_round", { round });
+}
+
+export async function revealEvent(): Promise<RevealData> {
+  if (isDemoMode()) {
+    await pause(420);
+    return {
+      published: true,
+      blocked: [],
+      tracks: demoRevealTracks,
+    };
+  }
+  return invoke<RevealData>("host_reveal");
 }
 
 export async function startEvent(): Promise<PlanData> {

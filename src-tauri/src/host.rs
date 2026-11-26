@@ -11,9 +11,13 @@ use tauri::{AppHandle, Manager, State};
 
 use swap_core::{EventState, Membership, Role};
 use swap_db::{
-    AuditRepo, Db, EventRecord, EventRepo, MetaRepo, ParticipantRepo, PlanRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, EventRecord, EventRepo, MetaRepo, ParticipantRepo, PlanRepo,
+    TrackRepo,
 };
-use swap_engine::{EventSettings, Mode, create_event, generate_schedule, lock_roster, start_event};
+use swap_engine::{
+    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, create_event, generate_schedule,
+    lock_roster, open_round, reveal_with_channel, start_event,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +45,46 @@ pub struct EventSummaryDto {
     tracks: usize,
     round: u32,
     rounds: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RosterLockDto {
+    active: usize,
+    fill_ins: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundOpenDto {
+    round: u32,
+    offers: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealDto {
+    published: bool,
+    blocked: Vec<String>,
+    tracks: Vec<RevealTrackDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealTrackDto {
+    track_code: String,
+    seed_owner_name: String,
+    seed_owner: String,
+    entries: Vec<RevealEntryDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealEntryDto {
+    round: u32,
+    display_name: String,
+    status: String,
+    fill_in: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -439,6 +483,13 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
     let tracks =
         TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let plan = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let assignments =
+        AssignmentRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let current_round = assignments
+        .iter()
+        .map(|assignment| assignment.round + 1)
+        .max()
+        .unwrap_or(0);
     let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
     let active = participants
         .iter()
@@ -484,7 +535,7 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
         fill_ins,
         tracks: tracks.len(),
         round: if matches!(event.state, EventState::Active | EventState::Paused) {
-            1
+            current_round
         } else {
             0
         },
@@ -900,7 +951,21 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
                 "the schedule can run at most {max_rounds} rounds for this roster"
             ));
         }
-        lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
+        let locked = lock_roster(db, &event.id, now).map_err(|error| error.to_string())?;
+        AuditRepo::insert(
+            db.conn(),
+            &event.id,
+            now,
+            "Host",
+            "Roster locked",
+            None,
+            &serde_json::json!({
+                "active": locked.active,
+                "fillIns": locked.fill_ins,
+            })
+            .to_string(),
+        )
+        .map_err(|error| error.to_string())?;
     }
     let outcome = generate_schedule(db, &event.id, now).map_err(|error| error.to_string())?;
     AuditRepo::insert(
@@ -915,6 +980,113 @@ fn generate_host_plan(db: &Db) -> Result<PlanDataDto, String> {
     )
     .map_err(|error| error.to_string())?;
     plan_data(db)
+}
+
+#[tauri::command]
+pub fn host_lock_roster(app: AppHandle) -> Result<RosterLockDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    let outcome = lock_roster(&db, &event.id, now).map_err(|error| error.to_string())?;
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now,
+        "Host",
+        "Roster locked",
+        None,
+        &serde_json::json!({
+            "active": outcome.active,
+            "fillIns": outcome.fill_ins,
+        })
+        .to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(RosterLockDto {
+        active: outcome.active,
+        fill_ins: outcome.fill_ins,
+    })
+}
+
+#[tauri::command]
+pub fn host_open_round(app: AppHandle, round: u32) -> Result<RoundOpenDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let now = now_secs();
+    let outcome = open_round(&db, &event.id, round, now).map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    AuditRepo::insert(
+        db.conn(),
+        &event.id,
+        now,
+        "Host",
+        "Round opened",
+        Some(&format!("Round {}", round + 1)),
+        &serde_json::json!({ "offers": outcome.offers }).to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(RoundOpenDto {
+        round,
+        offers: outcome.offers,
+    })
+}
+
+#[tauri::command]
+pub fn host_reveal(app: AppHandle) -> Result<RevealDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let settings = host_settings(app.clone()).unwrap_or_default();
+    let channel = settings.reveal_channel_id.trim();
+    if channel.is_empty() {
+        return Err("Map the reveal channel before you reveal the event.".to_string());
+    }
+    let now = now_secs();
+    match reveal_with_channel(&db, &event.id, Some(channel), now) {
+        Ok(outcome) => {
+            AuditRepo::insert(
+                db.conn(),
+                &event.id,
+                now,
+                "Host",
+                "Event revealed",
+                None,
+                &serde_json::json!({ "tracks": outcome.tracks.len() }).to_string(),
+            )
+            .map_err(|error| error.to_string())?;
+            #[cfg(feature = "live")]
+            app.state::<crate::live_runtime::LiveRuntime>().wake();
+            Ok(RevealDto {
+                published: true,
+                blocked: Vec::new(),
+                tracks: outcome.tracks.into_iter().map(reveal_track_dto).collect(),
+            })
+        }
+        Err(EngineError::PendingAssignments { ids, .. }) => Ok(RevealDto {
+            published: false,
+            blocked: ids,
+            tracks: Vec::new(),
+        }),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+fn reveal_track_dto(track: TrackCredits) -> RevealTrackDto {
+    RevealTrackDto {
+        track_code: track.track_code,
+        seed_owner_name: track.seed_owner_name,
+        seed_owner: track.seed_owner,
+        entries: track
+            .entries
+            .into_iter()
+            .map(|entry: CreditEntry| RevealEntryDto {
+                round: entry.round,
+                display_name: entry.display_name,
+                status: format!("{:?}", entry.status),
+                fill_in: entry.fill_in,
+            })
+            .collect(),
+    }
 }
 
 #[tauri::command]
@@ -946,22 +1118,41 @@ pub async fn host_mission_control(
     runtime: State<'_, crate::setup_host::BotRuntime>,
 ) -> Result<MissionControlDto, String> {
     let db = open_db(&app)?;
-    let mut settings = host_settings(app).unwrap_or_default();
+    let mut settings = host_settings(app.clone()).unwrap_or_default();
     if let Ok(status) = crate::setup_host::status(&runtime, &settings.token_storage).await
         && !status.keychain_error
     {
         settings.bot_configured = status.configured;
         settings.token_storage = status.token_storage;
     }
-    mission_control(&db, &settings)
+    let gateway = {
+        #[cfg(feature = "live")]
+        {
+            app.state::<crate::live_runtime::LiveRuntime>().health()
+        }
+        #[cfg(not(feature = "live"))]
+        {
+            None
+        }
+    };
+    mission_control_with_health(&db, &settings, gateway)
 }
 
+#[cfg(test)]
 fn mission_control(db: &Db, settings: &SettingsDto) -> Result<MissionControlDto, String> {
+    mission_control_with_health(db, settings, None)
+}
+
+fn mission_control_with_health(
+    db: &Db,
+    settings: &SettingsDto,
+    gateway: Option<swap_discord::GatewayHealth>,
+) -> Result<MissionControlDto, String> {
     let Some(event) = current_event(db)? else {
         return Ok(MissionControlDto {
             first_run: true,
             event: None,
-            bot: bot_health(settings, false),
+            bot: bot_health(settings, false, gateway.as_ref()),
             next_action: None,
             decisions: Vec::new(),
             activity: Vec::new(),
@@ -1049,11 +1240,46 @@ fn mission_control(db: &Db, settings: &SettingsDto) -> Result<MissionControlDto,
     {
         first_next.state = "current".to_string();
     }
-    let next_action = if matches!(
-        event.state,
-        EventState::Active | EventState::Paused | EventState::Reveal | EventState::Archived
-    ) {
+    let active_assignments =
+        AssignmentRepo::list_active(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let next_action = if matches!(event.state, EventState::Reveal | EventState::Archived) {
         None
+    } else if matches!(event.state, EventState::Active) {
+        if !active_assignments.is_empty() {
+            None
+        } else if event_summary.round < event_summary.rounds {
+            Some(NextActionDto {
+                eyebrow: "Next action".to_string(),
+                title: format!("Open round {}", event_summary.round + 1),
+                detail: "Every track in the current round is resolved. Open the next round when you are ready.".to_string(),
+                action_label: format!("Open Round {}", event_summary.round + 1),
+                secondary_label: None,
+                tone: "attention".to_string(),
+            })
+        } else if event_summary.rounds > 0 {
+            Some(NextActionDto {
+                eyebrow: "Next action".to_string(),
+                title: "Reveal the event".to_string(),
+                detail: "Every planned round is complete. Reveal publishes the credits to the reveal channel.".to_string(),
+                action_label: "Reveal event".to_string(),
+                secondary_label: None,
+                tone: "attention".to_string(),
+            })
+        } else {
+            None
+        }
+    } else if matches!(event.state, EventState::Paused) {
+        None
+    } else if !roster && event_summary.tracks > 0 {
+        Some(NextActionDto {
+            eyebrow: "Next action".to_string(),
+            title: "Lock the roster".to_string(),
+            detail: "Seeds are in. Lock the roster to close seed intake and build the schedule."
+                .to_string(),
+            action_label: "Lock roster".to_string(),
+            secondary_label: None,
+            tone: "attention".to_string(),
+        })
     } else if !roster {
         Some(NextActionDto {
             eyebrow: "Next action".to_string(),
@@ -1131,7 +1357,7 @@ fn mission_control(db: &Db, settings: &SettingsDto) -> Result<MissionControlDto,
     Ok(MissionControlDto {
         first_run: false,
         event: Some(event_summary),
-        bot: bot_health(settings, true),
+        bot: bot_health(settings, true, gateway.as_ref()),
         next_action,
         decisions,
         activity,
@@ -1150,13 +1376,51 @@ fn step_state(done: bool, prerequisite: bool) -> String {
     }
 }
 
-fn bot_health(settings: &SettingsDto, has_event: bool) -> BotHealthDto {
+fn bot_health(
+    settings: &SettingsDto,
+    has_event: bool,
+    gateway: Option<&swap_discord::GatewayHealth>,
+) -> BotHealthDto {
     if !settings.bot_configured {
         BotHealthDto {
             status: "Not configured".to_string(),
             label: "No bot connected".to_string(),
             detail: "Connect a bot token to send offers and collect files.".to_string(),
             last_seen: None,
+        }
+    } else if let Some(health) = gateway {
+        let (status, detail) = match health.state {
+            swap_discord::GatewayState::Online => (
+                "Online",
+                "Connected to Discord. Offers and receipts can leave the outbox.",
+            ),
+            swap_discord::GatewayState::Starting | swap_discord::GatewayState::Reconnecting => (
+                "Reconnecting",
+                health
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("Trying to reach Discord."),
+            ),
+            swap_discord::GatewayState::Failed => (
+                "Offline",
+                health
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("The gateway failed."),
+            ),
+            swap_discord::GatewayState::Stopped => ("Offline", "The gateway is stopped."),
+        };
+        BotHealthDto {
+            status: status.to_string(),
+            label: if settings.bot_identity.is_empty() {
+                "Monsquaz Bot".to_string()
+            } else {
+                settings.bot_identity.clone()
+            },
+            detail: detail.to_string(),
+            last_seen: health
+                .connected_at
+                .map(|at| format_local_time(at, &settings.timezone)),
         }
     } else if has_event {
         BotHealthDto {
@@ -1166,14 +1430,14 @@ fn bot_health(settings: &SettingsDto, has_event: bool) -> BotHealthDto {
             } else {
                 settings.bot_identity.clone()
             },
-            detail: "Bot token stored. Start the gateway to send offers.".to_string(),
+            detail: "The gateway is not running. Start the bot to send offers.".to_string(),
             last_seen: None,
         }
     } else {
         BotHealthDto {
             status: "Offline".to_string(),
             label: "Monsquaz Bot".to_string(),
-            detail: "Bot token stored. Start the gateway when the event opens.".to_string(),
+            detail: "The gateway is not running. Start the bot when the event opens.".to_string(),
             last_seen: None,
         }
     }
@@ -1364,6 +1628,35 @@ mod tests {
         assert_eq!(proposed.guild_id, "10");
         assert_eq!(proposed.announcement_channel_id, "11");
         assert_eq!(proposed.reveal_channel_id, "12");
+    }
+
+    #[test]
+    fn the_bot_health_uses_the_gateway_state() {
+        let settings = SettingsDto {
+            bot_configured: true,
+            ..SettingsDto::default()
+        };
+        let online = swap_discord::GatewayHealth {
+            state: swap_discord::GatewayState::Online,
+            attempt: 0,
+            last_error: None,
+            connected_at: Some(1_700_000_000),
+            last_event_at: None,
+            handler_errors: 0,
+        };
+        assert_eq!(bot_health(&settings, true, Some(&online)).status, "Online");
+        let reconnecting = swap_discord::GatewayHealth {
+            state: swap_discord::GatewayState::Reconnecting,
+            attempt: 3,
+            last_error: Some("Discord timed out".to_string()),
+            connected_at: None,
+            last_event_at: None,
+            handler_errors: 0,
+        };
+        let dto = bot_health(&settings, true, Some(&reconnecting));
+        assert_eq!(dto.status, "Reconnecting");
+        assert_eq!(dto.detail, "Discord timed out");
+        assert_eq!(bot_health(&settings, true, None).status, "Offline");
     }
 
     #[test]
@@ -1636,9 +1929,10 @@ mod tests {
         }
 
         let entries = audit_log(&db, &SettingsDto::default()).unwrap();
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].action, "Schedule generated");
         assert_eq!(entries[0].subject, "Plan v1");
+        assert_eq!(entries[1].action, "Roster locked");
 
         let again = generate_host_plan(&db).unwrap();
         assert_eq!(again.status, "Draft");
@@ -1652,8 +1946,17 @@ mod tests {
         assert_eq!(entries[0].action, "Event started");
 
         let mission = mission_control(&db, &SettingsDto::default()).unwrap();
-        assert!(mission.next_action.is_none());
+        assert_eq!(
+            mission.next_action.as_ref().unwrap().action_label,
+            "Open Round 1"
+        );
         assert_eq!(mission.event.as_ref().unwrap().stage, "Active");
+        assert_eq!(mission.event.as_ref().unwrap().round, 0);
+
+        let event = current_event(&db).unwrap().unwrap();
+        open_round(&db, &event.id, 0, now_secs()).unwrap();
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        assert!(mission.next_action.is_none());
         assert_eq!(mission.event.as_ref().unwrap().round, 1);
 
         drop(db);

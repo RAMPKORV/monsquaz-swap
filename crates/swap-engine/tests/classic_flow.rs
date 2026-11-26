@@ -6,8 +6,8 @@ use swap_db::{
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, PassthroughPreparer,
     PreparedBytes, SubmitRequest, claim, create_event, dispatch, dispatch_pending, event_status,
-    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal, signup, skip,
-    start_event, submit,
+    expire_offer, generate_schedule, join_with_seed, lock_roster, open_round, reveal,
+    reveal_with_channel, signup, skip, start_event, submit,
 };
 use swap_files::{BlobStore, FileError, FileKind, PrepareError, sha256_hex};
 
@@ -19,6 +19,7 @@ const T3: i64 = 2_200;
 const T4: i64 = 2_300;
 const T5: i64 = 2_400;
 const T6: i64 = 2_500;
+const T7: i64 = 2_600;
 
 struct Fixture {
     db: Db,
@@ -260,8 +261,8 @@ fn a_failed_preparation_does_not_store_a_seed() {
     );
 }
 
-#[test]
-fn the_classic_loop_reaches_a_reveal() {
+#[tokio::test]
+async fn the_classic_loop_reaches_a_reveal() {
     let fixture = Fixture::new(4, 0);
     let lock = lock_roster(&fixture.db, EVENT, T1).unwrap();
     assert_eq!(lock.active, 4);
@@ -333,12 +334,15 @@ fn the_classic_loop_reaches_a_reveal() {
 
     let round_two = fixture.open(2);
     assert_eq!(round_two.len(), 4);
+    let blocked = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap_err();
+    assert!(matches!(blocked, EngineError::PendingAssignments { .. }));
     for (_, assignment_id, _) in &round_two {
         expire_offer(&fixture.db, EVENT, assignment_id, T4 + 86_401).unwrap();
     }
 
-    let revealed = reveal(&fixture.db, EVENT, T6).unwrap();
+    let revealed = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap();
     assert_eq!(revealed.tracks.len(), 4);
+    assert!(!revealed.effects.is_empty());
     for track in &revealed.tracks {
         assert_eq!(track.entries.len(), 1);
         assert_eq!(track.entries[0].status, AssignmentStatus::Submitted);
@@ -348,6 +352,17 @@ fn the_classic_loop_reaches_a_reveal() {
     assert_eq!(status.state, EventState::Reveal);
     assert_eq!(status.rounds, 3);
     assert_eq!(status.submitted_assignments, 4);
+
+    let discord = swap_discord::FakeDiscord::new();
+    dispatch_pending(&fixture.db, &fixture.store, &discord, T7, 100)
+        .await
+        .unwrap();
+    let messages = discord.channel_messages();
+    assert!(messages.iter().any(|message| {
+        message.message.content.contains("User 0")
+            && message.message.content.contains("S")
+            && !message.message.content.to_lowercase().contains("sha")
+    }));
 }
 
 #[test]
@@ -687,15 +702,15 @@ async fn the_outbox_delivers_offers_and_claimed_files() {
     fixture.lock_and_schedule();
     fixture.start();
     let offers = fixture.open(0);
-    assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 4);
+    assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 8);
 
     let discord = FakeDiscord::new();
     let report = dispatch_pending(&fixture.db, &fixture.store, &discord, T5, 100)
         .await
         .unwrap();
-    assert_eq!(report.sent, 4);
+    assert_eq!(report.sent, 8);
     assert_eq!(DeliveryRepo::count_pending(fixture.db.conn()).unwrap(), 0);
-    assert_eq!(discord.sent_dms().len(), 4);
+    assert_eq!(discord.sent_dms().len(), 8);
 
     let (user_id, assignment_id, _) = offers[0].clone();
     let claimed = claim(
@@ -737,7 +752,7 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
         generate_schedule(&db, EVENT, T2).unwrap();
         start_event(&db, EVENT, T3).unwrap();
         open_round(&db, EVENT, 0, T4).unwrap();
-        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 3);
+        assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 6);
         assert_eq!(
             EventRepo::get(db.conn(), EVENT).unwrap().unwrap().state,
             EventState::Active
@@ -754,12 +769,12 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
         EventRepo::get(db.conn(), EVENT).unwrap().unwrap().state,
         EventState::Active
     );
-    assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 3);
+    assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 6);
     let discord = FakeDiscord::new();
     let report = dispatch_pending(&db, &store, &discord, T5, 100)
         .await
         .unwrap();
-    assert_eq!(report.sent, 3);
+    assert_eq!(report.sent, 6);
     assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
     drop(db);
 
@@ -768,7 +783,7 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
         .await
         .unwrap();
     assert_eq!(report.sent, 0);
-    assert_eq!(discord.sent_dms().len(), 3);
+    assert_eq!(discord.sent_dms().len(), 6);
 }
 
 #[tokio::test]
@@ -827,6 +842,7 @@ async fn an_attachment_is_downloaded_stored_and_processed_once() {
         user_id: DiscordUserId::new(user_id.clone()),
         channel_id: DiscordChannelId::new("dm-1"),
         message_id: MessageId::new("m-1"),
+        author_name: None,
         attachment: DmAttachment {
             id: "a-1".to_string(),
             filename: "edit.it".to_string(),
@@ -1139,6 +1155,145 @@ async fn a_failed_backfill_is_retried_for_the_same_participant() {
 }
 
 #[tokio::test]
+async fn a_signup_seed_attachment_creates_a_seeded_participant() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
+        MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(0, 0);
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let url = "https://cdn.discordapp.com/attachments/1/2/seed.it";
+    let fetcher = Arc::new(FakeAttachmentFetcher::new());
+    fetcher.add(url, &seed_bytes(7));
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        fetcher,
+        Arc::new(FixedClock(T5)),
+    );
+    service
+        .process(InboundEvent::DmAttachment {
+            user_id: DiscordUserId::new("user-new"),
+            channel_id: DiscordChannelId::new("dm-1"),
+            message_id: MessageId::new("m-seed"),
+            author_name: Some("Ari".to_string()),
+            attachment: DmAttachment {
+                id: "a-seed".to_string(),
+                filename: "seed.it".to_string(),
+                size: seed_bytes(7).len() as u64,
+                url: url.to_string(),
+            },
+        })
+        .await
+        .unwrap();
+
+    let participant = {
+        let db = db.lock().unwrap();
+        ParticipantRepo::get(db.conn(), EVENT, "user-new")
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(participant.membership, Membership::Seeded);
+    assert_eq!(participant.display_name, "Ari");
+    let tracks = {
+        let db = db.lock().unwrap();
+        TrackRepo::list_for_event(db.conn(), EVENT).unwrap()
+    };
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].owner_id, "user-new");
+    let cursor = {
+        let db = db.lock().unwrap();
+        DmCursorRepo::get(db.conn(), "user-new").unwrap().unwrap()
+    };
+    assert_eq!(cursor.last_seen_message_id.as_deref(), Some("m-seed"));
+
+    service.drain_pending().await.unwrap();
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|dm| dm.message.content.contains("Seed received"))
+    );
+}
+
+#[tokio::test]
+async fn a_join_command_creates_a_signed_up_participant() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordUserId, FakeAttachmentFetcher, InboundEvent, InteractionRef, SlashCommand,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let fixture = Fixture::new(0, 0);
+    let discord = Arc::new(swap_discord::FakeDiscord::new());
+    let db = Arc::new(Mutex::new(fixture.db));
+    let service = InboundService::new(
+        db.clone(),
+        fixture.store.clone(),
+        Arc::new(PassthroughPreparer),
+        discord.clone(),
+        Arc::new(FakeAttachmentFetcher::new()),
+        Arc::new(FixedClock(T5)),
+    );
+    service
+        .process(InboundEvent::SlashCommand {
+            interaction: InteractionRef::new("i-join", "token"),
+            user_id: DiscordUserId::new("user-join"),
+            guild_id: None,
+            command: SlashCommand::Join,
+            options: [
+                ("timezone".to_string(), "Europe/Stockholm".to_string()),
+                ("max_handoffs".to_string(), "6".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        })
+        .await
+        .unwrap();
+    let participant = {
+        let db = db.lock().unwrap();
+        ParticipantRepo::get(db.conn(), EVENT, "user-join")
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(participant.membership, Membership::SignedUp);
+    assert_eq!(participant.timezone, "Europe/Stockholm");
+    assert_eq!(participant.max_handoffs, 6);
+    service
+        .process(InboundEvent::SlashCommand {
+            interaction: InteractionRef::new("i-join-2", "token"),
+            user_id: DiscordUserId::new("user-join"),
+            guild_id: None,
+            command: SlashCommand::Join,
+            options: Default::default(),
+        })
+        .await
+        .unwrap();
+    let participant = {
+        let db = db.lock().unwrap();
+        ParticipantRepo::get(db.conn(), EVENT, "user-join")
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(participant.timezone, "Europe/Stockholm");
+    assert_eq!(participant.max_handoffs, 6);
+    assert!(
+        discord
+            .sent_dms()
+            .iter()
+            .any(|dm| dm.message.content.contains("signed up"))
+    );
+}
+
+#[tokio::test]
 async fn queued_attachments_keep_their_message_order() {
     use std::sync::{Arc, Mutex};
 
@@ -1186,6 +1341,7 @@ async fn queued_attachments_keep_their_message_order() {
                 user_id: DiscordUserId::new(user_id.clone()),
                 channel_id: DiscordChannelId::new("dm-1"),
                 message_id: MessageId::new(message_id),
+                author_name: None,
                 attachment: DmAttachment {
                     id: format!("a-{message_id}"),
                     filename: "edit.it".to_string(),
@@ -1218,6 +1374,45 @@ async fn queued_attachments_keep_their_message_order() {
     };
     assert_eq!(versions.len(), 3);
     assert_eq!(versions[2].sha256, sha256_hex(&second));
+}
+
+#[tokio::test]
+async fn stopped_queues_reject_new_events() {
+    use std::sync::{Arc, Mutex};
+
+    use swap_discord::{
+        DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher, InboundEvent,
+        InboundHandler, MessageId,
+    };
+    use swap_engine::{FixedClock, InboundService};
+
+    let directory = tempfile::tempdir().unwrap();
+    let db = Arc::new(Mutex::new(Db::open_in_memory().unwrap()));
+    let service = InboundService::new(
+        db,
+        BlobStore::new(directory.path().join("blobs")),
+        Arc::new(PassthroughPreparer),
+        Arc::new(swap_discord::FakeDiscord::new()),
+        Arc::new(FakeAttachmentFetcher::new()),
+        Arc::new(FixedClock(T5)),
+    );
+    service.stop_queues().await;
+    let error = service
+        .handle(InboundEvent::DmAttachment {
+            user_id: DiscordUserId::new("u-1"),
+            channel_id: DiscordChannelId::new("dm-1"),
+            message_id: MessageId::new("m-1"),
+            author_name: None,
+            attachment: DmAttachment {
+                id: "a-1".to_string(),
+                filename: "late.it".to_string(),
+                size: 4,
+                url: "https://cdn.discordapp.com/attachments/1/2/late.it".to_string(),
+            },
+        })
+        .await;
+    assert!(error.is_err());
+    service.stop_queues().await;
 }
 
 #[tokio::test]
@@ -1259,6 +1454,7 @@ async fn an_offer_holder_cannot_submit_before_a_claim() {
             user_id: DiscordUserId::new(user_id),
             channel_id: DiscordChannelId::new("dm-1"),
             message_id: MessageId::new("m-1"),
+            author_name: None,
             attachment: DmAttachment {
                 id: "a-1".to_string(),
                 filename: "edit.it".to_string(),

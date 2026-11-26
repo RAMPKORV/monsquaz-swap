@@ -335,6 +335,11 @@ impl TwilightSession {
                             user_id: user_id.clone(),
                             channel_id: channel_id.clone(),
                             message_id: message_id.clone(),
+                            author_name: message
+                                .author
+                                .global_name
+                                .clone()
+                                .or_else(|| Some(message.author.name.clone())),
                             attachment: DmAttachment {
                                 id: attachment.id.get().to_string(),
                                 filename: attachment.filename.clone(),
@@ -607,6 +612,20 @@ fn subcommand_options(name: &str) -> Option<Vec<CommandOption>> {
         required: Some(required),
     };
     let options = match name {
+        "join" => vec![
+            option(
+                "timezone",
+                "Your IANA timezone, such as Europe/Stockholm.",
+                CommandOptionType::String,
+                false,
+            ),
+            option(
+                "max_handoffs",
+                "The maximum number of tracks you will edit.",
+                CommandOptionType::Integer,
+                false,
+            ),
+        ],
         "title" => vec![option(
             "title",
             "The anonymous title for the track you hold.",

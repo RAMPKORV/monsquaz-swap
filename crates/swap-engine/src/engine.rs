@@ -189,6 +189,7 @@ pub struct ExpireOutcome {
 pub struct CreditEntry {
     pub round: u32,
     pub participant_id: String,
+    pub display_name: String,
     pub status: AssignmentStatus,
     pub fill_in: bool,
 }
@@ -197,12 +198,14 @@ pub struct CreditEntry {
 pub struct TrackCredits {
     pub track_code: String,
     pub seed_owner: String,
+    pub seed_owner_name: String,
     pub entries: Vec<CreditEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevealOutcome {
     pub tracks: Vec<TrackCredits>,
+    pub effects: Vec<Effect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,19 +362,30 @@ pub fn join_with_seed(
         now,
     );
 
-    let transaction = begin(db)?;
-    ParticipantRepo::upsert(&transaction, &participant)?;
-    TrackRepo::insert(&transaction, &track)?;
-    FileRepo::insert(&transaction, &file)?;
-    commit(transaction)?;
-
-    let effects = vec![Effect::Dm {
+    let receipt = Effect::Dm {
         user_id: request.user_id.to_string(),
         content: format!(
             "Seed received for track {code}. SHA-256: {}. Size: {} bytes.",
             original_blob.sha256, original_blob.size
         ),
-    }];
+    };
+    let transaction = begin(db)?;
+    let current = EventRepo::get(&transaction, request.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(request.event_id.to_string()))?;
+    if current.state != EventState::Signup {
+        return Err(EngineError::WrongEventState {
+            action: "seed intake",
+            state: current.state,
+            expected: "signup",
+        });
+    }
+    ParticipantRepo::upsert(&transaction, &participant)?;
+    TrackRepo::insert(&transaction, &track)?;
+    FileRepo::insert(&transaction, &file)?;
+    enqueue_effect(&transaction, request.event_id, &receipt, now)?;
+    commit(transaction)?;
+
+    let effects = vec![receipt];
     Ok(JoinOutcome {
         track_code: code,
         sha256: delivery_blob.sha256,
@@ -383,18 +397,18 @@ pub fn join_with_seed(
 pub fn lock_roster(db: &Db, event_id: &str, now: i64) -> Result<LockOutcome, EngineError> {
     let event = load_event(db, event_id)?;
     require_state(&event, EventState::Signup, "roster lock", "signup")?;
-    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+    let transaction = begin(db)?;
+    let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
     if participants.is_empty() {
         return Err(EngineError::NoParticipants);
     }
-    let tracks = TrackRepo::list_for_event(db.conn(), event_id)?;
+    let tracks = TrackRepo::list_for_event(&transaction, event_id)?;
     if tracks.is_empty() {
         return Err(EngineError::NoSeededTracks);
     }
 
     let mut active = 0;
     let mut fill_ins = 0;
-    let transaction = begin(db)?;
     for mut participant in participants {
         if !matches!(
             participant.membership,
@@ -617,6 +631,11 @@ pub fn open_round(
     let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
     let mut effects = Vec::with_capacity(for_round.len());
     let transaction = begin(db)?;
+    if let Some(active) = AssignmentRepo::list_active(&transaction, event_id)?.first() {
+        return Err(EngineError::RoundNotResolved {
+            round: active.round,
+        });
+    }
     for planned_assignment in &for_round {
         let participant = participants
             .iter()
@@ -953,6 +972,15 @@ pub fn expire_offer(
 }
 
 pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, EngineError> {
+    reveal_with_channel(db, event_id, None, now)
+}
+
+pub fn reveal_with_channel(
+    db: &Db,
+    event_id: &str,
+    reveal_channel_id: Option<&str>,
+    now: i64,
+) -> Result<RevealOutcome, EngineError> {
     let event = load_event(db, event_id)?;
     match event.state {
         EventState::Active | EventState::Paused => {}
@@ -964,16 +992,17 @@ pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, Engine
             });
         }
     }
-    let active = AssignmentRepo::list_active(db.conn(), event_id)?;
+    let transaction = begin(db)?;
+    let active = AssignmentRepo::list_active(&transaction, event_id)?;
     if !active.is_empty() {
         return Err(EngineError::PendingAssignments {
             count: active.len(),
             ids: active.into_iter().map(|assignment| assignment.id).collect(),
         });
     }
-    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
-    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
-    if let Some(plan) = PlanRepo::latest(db.conn(), event_id)? {
+    let participants = ParticipantRepo::list_for_event(&transaction, event_id)?;
+    let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
+    if let Some(plan) = PlanRepo::latest(&transaction, event_id)? {
         for round in 0..plan.rounds {
             if !assignments
                 .iter()
@@ -983,8 +1012,15 @@ pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, Engine
             }
         }
     }
+    let participant_name = |user_id: &str| {
+        participants
+            .iter()
+            .find(|participant| participant.user_id == user_id)
+            .map(|participant| participant.display_name.clone())
+            .unwrap_or_else(|| "Removed participant".to_string())
+    };
     let mut tracks = Vec::new();
-    for track in TrackRepo::list_for_event(db.conn(), event_id)? {
+    for track in TrackRepo::list_for_event(&transaction, event_id)? {
         let entries = assignments
             .iter()
             .filter(|assignment| assignment.track_code == track.code)
@@ -999,6 +1035,7 @@ pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, Engine
             .map(|assignment| CreditEntry {
                 round: assignment.round,
                 participant_id: assignment.participant_id.clone(),
+                display_name: participant_name(&assignment.participant_id),
                 status: assignment.status,
                 fill_in: participants
                     .iter()
@@ -1008,13 +1045,62 @@ pub fn reveal(db: &Db, event_id: &str, now: i64) -> Result<RevealOutcome, Engine
             .collect();
         tracks.push(TrackCredits {
             track_code: track.code,
+            seed_owner_name: participant_name(&track.owner_id),
             seed_owner: track.owner_id,
             entries,
         });
     }
+    let effects = reveal_channel_id
+        .filter(|channel_id| !channel_id.trim().is_empty())
+        .map(|channel_id| {
+            reveal_messages(&event.name, &tracks)
+                .into_iter()
+                .map(|content| Effect::Channel {
+                    channel_id: channel_id.to_string(),
+                    content,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let next = event.state.transition_to(EventState::Reveal)?;
-    EventRepo::set_state(db.conn(), event_id, next, now)?;
-    Ok(RevealOutcome { tracks })
+    EventRepo::set_state(&transaction, event_id, next, now)?;
+    for effect in &effects {
+        enqueue_effect(&transaction, event_id, effect, now)?;
+    }
+    commit(transaction)?;
+    Ok(RevealOutcome { tracks, effects })
+}
+
+fn reveal_messages(event_name: &str, tracks: &[TrackCredits]) -> Vec<String> {
+    const LIMIT: usize = 1_800;
+    let mut messages = Vec::new();
+    let mut current = format!("{event_name} — reveal");
+    for track in tracks {
+        let editors = {
+            let names = track
+                .entries
+                .iter()
+                .filter(|entry| entry.status == AssignmentStatus::Submitted)
+                .map(|entry| entry.display_name.clone())
+                .collect::<Vec<_>>();
+            if names.is_empty() {
+                "no edits".to_string()
+            } else {
+                names.join(", ")
+            }
+        };
+        let line = format!(
+            "\n{} — seed: {}; edits: {}",
+            track.track_code, track.seed_owner_name, editors
+        );
+        if current.chars().count() + line.chars().count() > LIMIT {
+            messages.push(current);
+            current = format!("{event_name} — reveal (continued)");
+        }
+        current.push_str(&line);
+    }
+    messages.push(current);
+    messages
 }
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {

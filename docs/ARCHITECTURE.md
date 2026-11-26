@@ -81,6 +81,15 @@ scheduler chooses (track, person)
   → next handoff
 ```
 
+A participant joins with `/swap join` and one seed attachment in a direct
+message. The app stores the seed, creates the track, and enqueues the receipt in
+one transaction.
+
+The host drives the classic loop. The host locks the roster, generates and
+locks the schedule, opens one round at a time, and triggers the reveal. No timer
+opens a round. The reveal checks the active assignments and writes the credits
+message in one transaction.
+
 A deadline:
 
 ```text

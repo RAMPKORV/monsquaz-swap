@@ -95,6 +95,19 @@ impl EventRepo {
         raw.map(TryInto::try_into).transpose()
     }
 
+    pub fn signup_event(conn: &Connection) -> Result<Option<EventRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT id, name, state, seed, settings_json, created_at, updated_at
+                 FROM events WHERE state = 'signup'
+                 ORDER BY created_at DESC LIMIT 1",
+                [],
+                row_to_raw_event,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
     pub fn get(conn: &Connection, id: &str) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(

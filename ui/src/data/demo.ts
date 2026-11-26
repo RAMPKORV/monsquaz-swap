@@ -217,6 +217,109 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     return mission;
   }
 
+  if (scenario === "reconnecting") {
+    mission.bot = {
+      status: "Reconnecting",
+      label: "Monsquaz Bot",
+      detail: "Discord is not answering. Retry in 8 seconds.",
+      lastSeen: "2 minutes ago",
+    };
+    return mission;
+  }
+
+  if (scenario === "lock-ready") {
+    if (mission.event) {
+      mission.event.stage = "Join phase";
+      mission.event.round = 0;
+    }
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Lock the roster",
+      detail:
+        "Seeds are in. Lock the roster to close seed intake and build the schedule.",
+      actionLabel: "Lock roster",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.timeline = [
+      {
+        id: "seeds",
+        label: "Seeds",
+        caption: "12 tracks",
+        state: "current",
+      },
+      {
+        id: "roster",
+        label: "Roster lock",
+        caption: "12 ready",
+        state: "next",
+      },
+      {
+        id: "rounds",
+        label: "Rounds",
+        caption: "11 planned",
+        state: "next",
+      },
+      {
+        id: "reveal",
+        label: "Reveal",
+        caption: "After the final round",
+        state: "next",
+      },
+    ];
+    mission.decisions = [
+      {
+        id: "lock-ready",
+        kind: "Seeds",
+        title: "2 people still need a seed",
+        detail:
+          "A participant without a seed becomes a fill-in when signups close. The host can wait or invite another seed.",
+        due: "Before roster lock",
+        actionLabel: "Review",
+      },
+    ];
+    return mission;
+  }
+
+  if (scenario === "round-ready") {
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Open round 4",
+      detail:
+        "Every track in round 3 is resolved. Open the next round when you are ready.",
+      actionLabel: "Open Round 4",
+      secondaryLabel: "Pause event",
+      tone: "attention",
+    };
+    mission.decisions = [
+      {
+        id: "round-ready",
+        kind: "Schedule",
+        title: "Round 4 is ready to open",
+        detail:
+          "All round 3 claims are resolved. Opening the round sends ten offers in the next batch.",
+        due: "After round 3 closes",
+        actionLabel: "Preview",
+      },
+    ];
+    return mission;
+  }
+
+  if (scenario === "reveal-ready") {
+    if (mission.event) mission.event.round = 11;
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Reveal the event",
+      detail:
+        "Every planned round is complete. Reveal publishes the credits to the reveal channel.",
+      actionLabel: "Reveal event",
+      secondaryLabel: null,
+      tone: "attention",
+    };
+    mission.decisions = [];
+    return mission;
+  }
+
   if (scenario === "long") {
     mission.event = {
       id: "long-event",
@@ -327,6 +430,13 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
 
 const defaultSettings: HostSettings = {
   botConfigured: true,
+  gateway: {
+    state: "online",
+    attempt: 0,
+    lastError: null,
+    connectedAt: 1_764_165_600,
+    handlerErrors: 0,
+  },
   botIdentity: "Monsquaz Bot (1184)",
   tokenStorage: "keychain",
   guildId: "8142276038192",
@@ -360,6 +470,30 @@ export function demoSettings(scenario: Scenario): HostSettings {
       revealChannelId: "",
       revealChannelName: "",
       theme: "system",
+    };
+  }
+  if (scenario === "offline") {
+    return {
+      ...defaultSettings,
+      gateway: {
+        state: "failed",
+        attempt: 3,
+        lastError: "Discord rejected the bot token",
+        connectedAt: null,
+        handlerErrors: 0,
+      },
+    };
+  }
+  if (scenario === "reconnecting") {
+    return {
+      ...defaultSettings,
+      gateway: {
+        state: "reconnecting",
+        attempt: 3,
+        lastError: "Discord is not answering",
+        connectedAt: null,
+        handlerErrors: 0,
+      },
     };
   }
   if (scenario === "long") {

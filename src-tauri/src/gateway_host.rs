@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use swap_discord::{
-    DiscordGuildId, GatewayError, InboundHandler, SharedHealth, Supervisor, TwilightConfig,
-    connector,
+    DiscordGuildId, GatewayError, GatewayHealth, InboundHandler, SharedHealth, Supervisor,
+    TwilightConfig, connector,
 };
 use tauri::async_runtime::{JoinHandle, spawn};
 use tokio::sync::watch;
@@ -15,6 +15,7 @@ use tokio::sync::watch;
 pub struct GatewayHost {
     stop: watch::Sender<bool>,
     task: JoinHandle<Result<(), GatewayError>>,
+    health: Arc<SharedHealth>,
 }
 
 impl GatewayHost {
@@ -26,10 +27,14 @@ impl GatewayHost {
         let config = TwilightConfig::new(token, DiscordGuildId::new(guild_id));
         let connector = connector(config).map_err(|error| error.to_string())?;
         let health = Arc::new(SharedHealth::new());
-        let supervisor = Supervisor::new(connector, handler).with_health(health);
+        let supervisor = Supervisor::new(connector, handler).with_health(health.clone());
         let (stop, stop_rx) = watch::channel(false);
         let task = spawn(async move { supervisor.run(stop_rx).await });
-        Ok(Self { stop, task })
+        Ok(Self { stop, task, health })
+    }
+
+    pub fn health(&self) -> GatewayHealth {
+        self.health.snapshot()
     }
 
     pub async fn shutdown(self) -> Result<(), String> {

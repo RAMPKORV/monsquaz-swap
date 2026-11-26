@@ -72,6 +72,7 @@ pub enum InboundEvent {
         user_id: DiscordUserId,
         channel_id: DiscordChannelId,
         message_id: MessageId,
+        author_name: Option<String>,
         attachment: DmAttachment,
     },
     MemberJoin {
@@ -141,12 +142,14 @@ impl fmt::Debug for InboundEvent {
                 user_id,
                 channel_id,
                 message_id,
+                author_name,
                 attachment,
             } => formatter
                 .debug_struct("DmAttachment")
                 .field("user_id", user_id)
                 .field("channel_id", channel_id)
                 .field("message_id", message_id)
+                .field("author_name", author_name)
                 .field("attachment", attachment)
                 .finish(),
             Self::MemberJoin { user_id, guild_id } => formatter

@@ -74,6 +74,14 @@ export function MissionControlView({
             Claims and submissions wait safely in the local queue.
           </div>
         </div>
+      ) : data.bot.status === "Reconnecting" ? (
+        <div className="banner banner--warn" role="status">
+          <Icon name="clock" size={20} />
+          <div>
+            <strong>Bot reconnecting.</strong> {data.bot.detail} The queue keeps
+            every unsent effect.
+          </div>
+        </div>
       ) : null}
 
       <p className="privacy-line">

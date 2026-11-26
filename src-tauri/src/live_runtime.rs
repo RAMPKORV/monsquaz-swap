@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use swap_db::Db;
-use swap_discord::{HttpAttachmentFetcher, HttpDiscordPort};
+use swap_discord::{GatewayHealth, HttpAttachmentFetcher, HttpDiscordPort};
 use swap_engine::{InboundService, OpenMptPreparer, SystemClock};
 use swap_files::BlobStore;
 use tauri::{AppHandle, Manager};
@@ -17,6 +17,8 @@ use crate::gateway_host::GatewayHost;
 
 struct Running {
     gateway: GatewayHost,
+    service: Arc<InboundService>,
+    wake: Arc<tokio::sync::Notify>,
     stop: watch::Sender<bool>,
     dispatcher: tauri::async_runtime::JoinHandle<()>,
 }
@@ -36,6 +38,25 @@ impl LiveRuntime {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .is_some()
+    }
+
+    pub fn wake(&self) {
+        if let Some(running) = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            running.wake.notify_one();
+        }
+    }
+
+    pub fn health(&self) -> Option<GatewayHealth> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(|running| running.gateway.health())
     }
 
     pub fn start(
@@ -83,22 +104,31 @@ impl LiveRuntime {
         let (stop, stop_rx) = watch::channel(false);
         let task_service = service.clone();
         let wake = service.wake_notifier();
+        let dispatcher_wake = wake.clone();
         let dispatcher = tauri::async_runtime::spawn(async move {
             let _ = task_service.drain_pending().await;
             let _ = tokio::time::timeout(Duration::from_secs(60), task_service.backfill()).await;
             let drain_service = task_service;
-            run_dispatch_loop(Duration::from_secs(30), wake, stop_rx, move || {
-                let service = drain_service.clone();
-                async move {
-                    let _ = tokio::time::timeout(Duration::from_secs(60), service.retry_backfill())
-                        .await;
-                    let _ = service.drain_pending().await;
-                }
-            })
+            run_dispatch_loop(
+                Duration::from_secs(30),
+                dispatcher_wake,
+                stop_rx,
+                move || {
+                    let service = drain_service.clone();
+                    async move {
+                        let _ =
+                            tokio::time::timeout(Duration::from_secs(60), service.retry_backfill())
+                                .await;
+                        let _ = service.drain_pending().await;
+                    }
+                },
+            )
             .await;
         });
         *slot = Some(Running {
             gateway,
+            service,
+            wake,
             stop,
             dispatcher,
         });
@@ -114,7 +144,10 @@ impl LiveRuntime {
         if let Some(running) = running {
             let _ = running.stop.send(true);
             running.dispatcher.abort();
-            running.gateway.shutdown().await?;
+            let gateway = running.gateway.shutdown().await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(60), running.service.stop_queues()).await;
+            gateway?;
         }
         Ok(())
     }

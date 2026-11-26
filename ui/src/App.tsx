@@ -31,6 +31,9 @@ import {
   isDemoMode,
   createEvent,
   generatePlan,
+  lockRoster,
+  openRound,
+  revealEvent,
   startEvent,
   loadAuditLog,
   loadMissionControl,
@@ -255,7 +258,7 @@ export default function App() {
     setReloadToken((value) => value + 1);
   }
 
-  function notify(label: string) {
+  async function notify(label: string) {
     if (label === "Open event setup" || label === "Start setup") {
       setView("setup");
       return;
@@ -272,11 +275,62 @@ export default function App() {
       setView("settings");
       return;
     }
+    if (label === "Lock roster") {
+      try {
+        const result = await lockRoster();
+        setToast(
+          `Roster locked. ${result.active} active, ${result.fillIns} fill-in.`,
+        );
+        reloadView();
+      } catch (error) {
+        setToast(`Could not lock the roster. ${errorDetail(error)}`);
+      }
+      return;
+    }
+    const round = /^Open Round (\d+)$/.exec(label);
+    if (round) {
+      try {
+        const opened = await openRound(Number(round[1]) - 1);
+        setToast(
+          `Round ${opened.round + 1} opened. ${opened.offers} offers queued.`,
+        );
+        reloadView();
+      } catch (error) {
+        setToast(`Could not open the round. ${errorDetail(error)}`);
+      }
+      return;
+    }
+    if (label === "Reveal event") {
+      try {
+        const revealed = await revealEvent();
+        if (!revealed.published) {
+          setToast(
+            `Reveal blocked by ${revealed.blocked.length} active assignment(s). Resolve them first.`,
+          );
+        } else {
+          setToast(
+            `Reveal recorded. ${revealed.tracks.length} track credits are queued for the reveal channel.`,
+          );
+        }
+        reloadView();
+      } catch (error) {
+        setToast(`Could not reveal the event. ${errorDetail(error)}`);
+      }
+      return;
+    }
     setToast(
       demo
         ? `Preview: “${label}” does not change Discord yet.`
         : `“${label}” is not wired in this build.`,
     );
+  }
+
+  function errorDetail(error: unknown) {
+    return typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : "The command failed.";
   }
 
   async function handleGeneratePlan() {

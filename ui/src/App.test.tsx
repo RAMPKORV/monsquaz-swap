@@ -53,6 +53,41 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens the next round from mission control", async () => {
+    setUrl("?demo=1&state=round-ready");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Round 4" }));
+    expect(await screen.findByText(/Round 4 opened/i)).toBeInTheDocument();
+  });
+
+  it("locks the roster from mission control", async () => {
+    setUrl("?demo=1&state=lock-ready");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Lock roster" }));
+    expect(await screen.findByText(/Roster locked\. 12 active/i)).toBeInTheDocument();
+  });
+
+  it("reveals the event from mission control", async () => {
+    setUrl("?demo=1&state=reveal-ready");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Reveal event" }));
+    expect(
+      await screen.findByText(/2 track credits are queued/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the gateway failure in settings", async () => {
+    setUrl("?demo=1&state=offline&view=settings");
+    render(<App />);
+    expect(
+      await screen.findByText(/Discord rejected the bot token/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Offline")).toBeInTheDocument();
+  });
+
   it("shows the first-run state", async () => {
     setUrl("?demo=1&state=empty");
     render(<App />);

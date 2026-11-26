@@ -1229,6 +1229,15 @@ fn mission_control_with_health(
                 secondary_label: None,
                 tone: "attention".to_string(),
             })
+        } else if event_summary.rounds > 0 && settings.reveal_channel_id.trim().is_empty() {
+            Some(NextActionDto {
+                eyebrow: "Next action".to_string(),
+                title: "Map the reveal channel".to_string(),
+                detail: "Every planned round is complete. Map the reveal channel before you reveal the event.".to_string(),
+                action_label: "Open settings".to_string(),
+                secondary_label: None,
+                tone: "attention".to_string(),
+            })
         } else if event_summary.rounds > 0 {
             Some(NextActionDto {
                 eyebrow: "Next action".to_string(),

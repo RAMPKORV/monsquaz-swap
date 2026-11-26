@@ -442,8 +442,9 @@ export default function App() {
     setSaving(true);
     try {
       const saved = await saveSettings(settings);
-      setSettings(saved);
-      setOriginalSettings(saved);
+      const withHealth = { ...saved, gateway: settings.gateway };
+      setSettings(withHealth);
+      setOriginalSettings(withHealth);
       setDirty(false);
       setToast("Settings saved on this computer.");
       focusMainHeading();

@@ -98,9 +98,12 @@ impl EventRepo {
     pub fn signup_event(conn: &Connection) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(
-                "SELECT id, name, state, seed, settings_json, created_at, updated_at
-                 FROM events WHERE state = 'signup'
-                 ORDER BY created_at DESC LIMIT 1",
+                "SELECT e.id, e.name, e.state, e.seed, e.settings_json, e.created_at,
+                        e.updated_at
+                 FROM events e
+                 JOIN meta m ON m.value = e.id
+                 WHERE m.key = 'host.current_event' AND e.state = 'signup'
+                 LIMIT 1",
                 [],
                 row_to_raw_event,
             )

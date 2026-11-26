@@ -31,8 +31,9 @@ The host UI has no lock, open-round, or reveal action.
    calls `signup` when needed and then `join_with_seed`. The display name is the
    Discord author name when available; otherwise the user id. The optional
    `/swap join` timezone and handoff options set the stored values. The
-   defaults are UTC and four. The host can edit the participant later. A seed after the roster lock is refused and the user is offered the
-   fill-in path in a later issue.
+   defaults are UTC and four. Participant editing remains a later slice. A seed
+   after the roster lock is refused and the user is offered the fill-in path in
+   a later issue.
 
 5. **The seed receipt is durable.** `join_with_seed` enqueues its receipt in the
    same transaction as the participant, track, and file rows. A crash cannot

@@ -122,15 +122,19 @@ impl InboundService {
         }
     }
 
-    async fn wait_for_backfill(&self, user_id: &str) {
+    async fn wait_for_backfill(&self, user_id: &str) -> bool {
+        let mut stop = self.queue_stop.subscribe();
         loop {
+            if *stop.borrow() {
+                return false;
+            }
             let pending = self
                 .backfill_pending
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .contains(user_id);
             if !pending {
-                return;
+                return true;
             }
             let notified = self.backfill_notify.notified();
             let still_pending = self
@@ -139,9 +143,16 @@ impl InboundService {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .contains(user_id);
             if !still_pending {
-                return;
+                return true;
             }
-            notified.await;
+            tokio::select! {
+                changed = stop.changed() => {
+                    if changed.is_err() || *stop.borrow() {
+                        return false;
+                    }
+                }
+                _ = notified => {}
+            }
         }
     }
 
@@ -517,63 +528,76 @@ impl InboundService {
             }
         }
 
-        let signup = {
-            let db = self.lock();
-            EventRepo::signup_event(db.conn()).map_err(|error| error.to_string())?
-        };
-        if let Some(event) = signup {
-            let participant = {
+        let event = {
+            let active = {
                 let db = self.lock();
-                swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
-                    .map_err(|error| error.to_string())?
+                EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
             };
-            match participant
-                .as_ref()
-                .map(|participant| participant.membership)
-            {
-                None | Some(swap_core::Membership::SignedUp) => {
-                    return self
-                        .join_seed(
-                            &event,
+            if let Some(event) = active {
+                event
+            } else {
+                let signup = {
+                    let db = self.lock();
+                    EventRepo::signup_event(db.conn()).map_err(|error| error.to_string())?
+                };
+                if let Some(event) = signup {
+                    if !message_is_current(message_id, event.created_at) {
+                        self.notify(
                             user_id,
-                            channel_id,
-                            message_id,
-                            author_name,
-                            attachment,
+                            "That seed is older than the current signup. Send the seed again.",
                         )
                         .await;
+                        self.mark_processed(user_id, message_id, &attachment.id)?;
+                        self.update_cursor(user_id, channel_id, message_id)?;
+                        return Ok(());
+                    }
+                    let participant = {
+                        let db = self.lock();
+                        swap_db::ParticipantRepo::get(db.conn(), &event.id, user_id)
+                            .map_err(|error| error.to_string())?
+                    };
+                    match participant
+                        .as_ref()
+                        .map(|participant| participant.membership)
+                    {
+                        None | Some(swap_core::Membership::SignedUp) => {
+                            return self
+                                .join_seed(
+                                    &event,
+                                    user_id,
+                                    channel_id,
+                                    message_id,
+                                    author_name,
+                                    attachment,
+                                )
+                                .await;
+                        }
+                        Some(swap_core::Membership::Seeded | swap_core::Membership::Active) => {
+                            self.notify(
+                                user_id,
+                                "You already sent a seed. Wait for the host to start the event.",
+                            )
+                            .await;
+                            self.mark_processed(user_id, message_id, &attachment.id)?;
+                            self.update_cursor(user_id, channel_id, message_id)?;
+                            return Ok(());
+                        }
+                        Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
+                            self.notify(
+                                user_id,
+                                "You left this event. Ask the host to return as a fill-in.",
+                            )
+                            .await;
+                            self.mark_processed(user_id, message_id, &attachment.id)?;
+                            self.update_cursor(user_id, channel_id, message_id)?;
+                            return Ok(());
+                        }
+                    }
                 }
-                Some(swap_core::Membership::Seeded | swap_core::Membership::Active) => {
-                    self.notify(
-                        user_id,
-                        "You already sent a seed. Wait for the host to start the event.",
-                    )
+                self.notify(user_id, "There is no active swap event for you.")
                     .await;
-                    self.mark_processed(user_id, message_id, &attachment.id)?;
-                    self.update_cursor(user_id, channel_id, message_id)?;
-                    return Ok(());
-                }
-                Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
-                    self.notify(
-                        user_id,
-                        "You left this event. Ask the host to return as a fill-in.",
-                    )
-                    .await;
-                    self.mark_processed(user_id, message_id, &attachment.id)?;
-                    self.update_cursor(user_id, channel_id, message_id)?;
-                    return Ok(());
-                }
+                return Ok(());
             }
-        }
-
-        let event = {
-            let db = self.lock();
-            EventRepo::active_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
-        };
-        let Some(event) = event else {
-            self.notify(user_id, "There is no active swap event for you.")
-                .await;
-            return Ok(());
         };
         let assignment = {
             let db = self.lock();
@@ -908,7 +932,9 @@ impl InboundService {
 
 impl InboundService {
     pub async fn process(&self, event: InboundEvent) -> Result<(), String> {
-        self.wait_for_backfill(&event.user_id().0).await;
+        if !self.wait_for_backfill(&event.user_id().0).await {
+            return Err("the inbound service is stopped".to_string());
+        }
         let result = self.process_inner(event).await;
         self.wake.notify_one();
         result

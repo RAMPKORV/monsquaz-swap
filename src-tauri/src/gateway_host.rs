@@ -1,9 +1,10 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use swap_discord::{
-    DiscordGuildId, GatewayError, GatewayHealth, InboundHandler, SharedHealth, Supervisor,
-    TwilightConfig, connector,
+    DiscordGuildId, GatewayError, GatewayHealth, GatewayState, InboundHandler, SharedHealth,
+    Supervisor, TwilightConfig, connector,
 };
 use tauri::async_runtime::{JoinHandle, spawn};
 use tokio::sync::watch;
@@ -16,6 +17,7 @@ pub struct GatewayHost {
     stop: watch::Sender<bool>,
     task: JoinHandle<Result<(), GatewayError>>,
     health: Arc<SharedHealth>,
+    finished: Arc<AtomicBool>,
 }
 
 impl GatewayHost {
@@ -29,12 +31,30 @@ impl GatewayHost {
         let health = Arc::new(SharedHealth::new());
         let supervisor = Supervisor::new(connector, handler).with_health(health.clone());
         let (stop, stop_rx) = watch::channel(false);
-        let task = spawn(async move { supervisor.run(stop_rx).await });
-        Ok(Self { stop, task, health })
+        let finished = Arc::new(AtomicBool::new(false));
+        let task_finished = finished.clone();
+        let task = spawn(async move {
+            let result = supervisor.run(stop_rx).await;
+            task_finished.store(true, Ordering::SeqCst);
+            result
+        });
+        Ok(Self {
+            stop,
+            task,
+            health,
+            finished,
+        })
     }
 
     pub fn health(&self) -> GatewayHealth {
-        self.health.snapshot()
+        let mut health = self.health.snapshot();
+        if self.finished.load(Ordering::SeqCst)
+            && !matches!(health.state, GatewayState::Stopped | GatewayState::Failed)
+        {
+            health.state = GatewayState::Failed;
+            health.last_error = Some("the gateway task stopped unexpectedly".to_string());
+        }
+        health
     }
 
     pub async fn shutdown(self) -> Result<(), String> {

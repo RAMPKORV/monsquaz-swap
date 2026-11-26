@@ -39,8 +39,8 @@ The host UI has no lock, open-round, or reveal action.
    lose the receipt.
 
 6. **The reveal is one transaction.** `reveal` sets the event state, computes
-   credits, and enqueues one channel message to the mapped reveal channel when
-   a channel id is supplied. The transaction rolls back if the reveal gate
+   credits, and enqueues the channel messages to the mapped reveal channel when
+   a channel id is supplied. Long credit lists split at the Discord limit. The transaction rolls back if the reveal gate
    fails. The message contains track codes, seed owner names, and editor names
    because the reveal state permits identity. It contains no file hash.
 

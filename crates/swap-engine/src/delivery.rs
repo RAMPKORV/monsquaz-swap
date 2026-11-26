@@ -362,6 +362,31 @@ impl DeliveryWorker {
                 }
                 _ => deliver(&self.store, discord, &delivery).await,
             };
+            if matches!(&delivery, PendingDelivery::HostAlert { .. }) {
+                match result {
+                    Ok(_) => {
+                        let db = db_guard(self);
+                        if self.alert_channel.is_none() {
+                            AuditRepo::insert(
+                                db.conn(),
+                                &row.event_id,
+                                now,
+                                "worker",
+                                "host_alert.skipped",
+                                None,
+                                "{\"reason\":\"no host alert channel\"}",
+                            )?;
+                        }
+                        DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
+                        report.sent += 1;
+                    }
+                    Err(error) => {
+                        self.fail(db_guard(self).conn(), &row, now, &error.to_string())?;
+                        report.failed += 1;
+                    }
+                }
+                continue;
+            }
             match result {
                 Ok(message_id) => {
                     let db = db_guard(self);

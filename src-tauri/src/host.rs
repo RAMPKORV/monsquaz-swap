@@ -1067,13 +1067,18 @@ pub fn host_decide_extension(
     decision_id: String,
     approve: bool,
     reason: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let db = open_db(&app)?;
-    swap_engine::decide_extension(&db, &decision_id, approve, &reason, now_secs())
+    let outcome = swap_engine::decide_extension(&db, &decision_id, approve, &reason, now_secs())
         .map_err(|error| error.to_string())?;
     #[cfg(feature = "live")]
     app.state::<crate::live_runtime::LiveRuntime>().wake();
-    Ok(())
+    Ok(match outcome.status {
+        swap_engine::ExtensionStatus::Approved => "approved",
+        swap_engine::ExtensionStatus::Refused => "refused",
+        swap_engine::ExtensionStatus::PendingHost => "pending",
+    }
+    .to_string())
 }
 
 #[tauri::command]
@@ -1399,8 +1404,9 @@ fn mission_control_with_health(
             let due_at = assignment.and_then(|assignment| assignment.due_at);
             let hours = decision.requested_hours.unwrap_or(6);
             let deadline = due_at.map(|at| format_local_time(at, &settings.timezone));
-            let new_deadline =
-                due_at.map(|at| format_local_time(at + hours * 3_600, &settings.timezone));
+            let new_deadline = due_at.map(|at| {
+                format_local_time(at.max(now_secs()) + hours * 3_600, &settings.timezone)
+            });
             let extensions_used = assignment
                 .and_then(|assignment| DeadlineRepo::get(db.conn(), &assignment.id).ok().flatten())
                 .map(|deadline| deadline.extension_count);

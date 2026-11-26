@@ -1286,6 +1286,26 @@ pub fn request_extension(
     let deadline =
         DeadlineRepo::get(&transaction, &assignment.id)?.ok_or_else(|| EngineError::NoDeadline)?;
     if deadline.extension_count >= 2 {
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "worker",
+            "Extension refused",
+            None,
+            &serde_json::json!({ "reason": "extension limit", "assignmentId": assignment.id })
+                .to_string(),
+        )?;
+        enqueue_effect(
+            &transaction,
+            event_id,
+            &Effect::Dm {
+                user_id: user_id.to_string(),
+                content: "This assignment has used its extensions. Submit, skip, or ask the host."
+                    .to_string(),
+            },
+            now,
+        )?;
         commit(transaction)?;
         return Ok(ExtensionOutcome {
             status: ExtensionStatus::Refused,
@@ -1303,7 +1323,8 @@ pub fn request_extension(
             decision_id: Some(open.id),
         });
     }
-    if deadline.extension_count == 0 && hours <= 6 {
+    if assignment.status == AssignmentStatus::Claimed && deadline.extension_count == 0 && hours <= 6
+    {
         let base = due_at.max(now);
         let new_due = base + hours * 3_600;
         if !AssignmentRepo::extend(&transaction, &assignment.id, new_due, now)? {
@@ -1447,6 +1468,27 @@ pub fn decide_extension(
             .ok_or_else(|| EngineError::NoDeadline)?;
         if deadline.extension_count >= 2 {
             HostDecisionRepo::close(&transaction, decision_id, "refused", now, "extension limit")?;
+            AuditRepo::insert(
+                &transaction,
+                &decision.event_id,
+                now,
+                "Host",
+                "Extension refused",
+                None,
+                &serde_json::json!({ "reason": "extension limit", "assignmentId": assignment_id })
+                    .to_string(),
+            )?;
+            enqueue_effect(
+                &transaction,
+                &decision.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content:
+                        "The assignment has used its extensions. Submit, skip, or ask the host."
+                            .to_string(),
+                },
+                now,
+            )?;
             commit(transaction)?;
             return Ok(ExtensionOutcome {
                 status: ExtensionStatus::Refused,

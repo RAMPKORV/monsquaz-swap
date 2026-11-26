@@ -921,16 +921,7 @@ impl InboundService {
             crate::engine::request_extension(&db, event_id, user_id, hours, self.now())
         };
         match outcome {
-            Ok(outcome) => {
-                if outcome.status == crate::engine::ExtensionStatus::Refused {
-                    self.notify(
-                        user_id,
-                        "This assignment has used its extensions. Submit, skip, or ask the host.",
-                    )
-                    .await;
-                }
-                Ok(())
-            }
+            Ok(_) => Ok(()),
             Err(error) => {
                 self.notify(user_id, &extension_message(&error)).await;
                 Ok(())

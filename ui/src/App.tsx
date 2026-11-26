@@ -239,6 +239,16 @@ export default function App() {
   }, [dialogOpen, botDialogOpen, paletteOpen]);
 
   useEffect(() => {
+    if (view !== "mission") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setReloadToken((value) => value + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [view]);
+
+  useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const modal = document.querySelector(
         '[role="dialog"][aria-modal="true"]',

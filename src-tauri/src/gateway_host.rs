@@ -73,7 +73,10 @@ impl GatewayHost {
                 eprintln!("the Discord gateway stopped with an error: {error}");
                 Ok(())
             }
-            Ok(Err(error)) => Err(error.to_string()),
+            Ok(Err(error)) => {
+                eprintln!("the Discord gateway task ended: {error}");
+                Ok(())
+            }
             Err(_) => {
                 task.abort();
                 Err("the Discord gateway did not stop within 5 seconds".to_string())

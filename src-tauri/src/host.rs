@@ -11,17 +11,17 @@ use tauri::{AppHandle, Manager, State};
 
 use swap_core::{EventState, Membership, Role, RoundStatus};
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeadlineRepo, EventRecord, EventRepo, LateSeedRepo, MetaRepo,
-    PackRepo, ParticipantRepo, PlanRepo, RoundRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, AvailabilityRepo, Db, DeadlineRepo, EventRecord, EventRepo,
+    LateSeedRepo, MetaRepo, PackRepo, ParticipantRepo, PlanRepo, RoundRepo, TrackRepo,
 };
 use swap_engine::{
     CreditEntry, EngineError, EventSettings, Mode, TrackCredits, accept_late_seed,
-    add_track_comment, create_event, dispatch_async_wave, edit_plan_assignment,
+    add_availability, add_track_comment, create_event, dispatch_async_wave, edit_plan_assignment,
     extend_seed_deadline, generate_schedule, lock_roster, move_round_deadline, open_round,
     open_seed_round, pending_late_seeds, plan_edit_candidates, redact_track_comment,
-    reject_late_seed, reopen_seed_round, repair_group_schedule, reveal_package,
-    reveal_with_channel, set_track_title, start_async_event, start_event_with_channel, upload_pack,
-    verify_commitment,
+    reject_late_seed, remove_availability, reopen_seed_round, repair_group_schedule,
+    reveal_package, reveal_with_channel, set_track_title, start_async_event,
+    start_event_with_channel, upload_pack, verify_commitment,
 };
 
 #[derive(Debug, Serialize)]
@@ -64,6 +64,8 @@ pub struct EventSummaryDto {
     seed_deadline_at: Option<i64>,
     late_seed_count: usize,
     pack_id: Option<String>,
+    open_schedule: bool,
+    handoff_policy: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -390,6 +392,7 @@ pub struct EventDraftDto {
     rotation: String,
     swap_cadence: String,
     schedule_visibility: String,
+    handoff_policy: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -429,6 +432,16 @@ struct PersonRowDto {
     max_handoffs: u32,
     joined: String,
     delivery_risk: bool,
+    away: Vec<AwayDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AwayDto {
+    id: String,
+    starts_at: i64,
+    ends_at: i64,
+    note: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,6 +454,9 @@ pub struct PlanDataDto {
     rounds: u32,
     exchange_rounds: u32,
     total_rounds: u32,
+    gaps: u32,
+    handoff_policy: String,
+    open_schedule: bool,
     tracks: usize,
     participants: usize,
     committed: bool,
@@ -558,6 +574,7 @@ fn default_draft() -> EventDraftDto {
         rotation: "Participants".to_string(),
         swap_cadence: "K rounds".to_string(),
         schedule_visibility: "Hidden".to_string(),
+        handoff_policy: "Strict".to_string(),
     }
 }
 
@@ -597,6 +614,10 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
             .schedule_visibility
             .clone()
             .unwrap_or_else(|| "Hidden".to_string()),
+        handoff_policy: settings
+            .handoff_policy
+            .clone()
+            .unwrap_or_else(|| "Strict".to_string()),
     }
 }
 
@@ -734,6 +755,11 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
         seed_deadline_at,
         late_seed_count,
         pack_id,
+        open_schedule: settings.schedule_visibility.as_deref() == Some("Open"),
+        handoff_policy: settings
+            .handoff_policy
+            .clone()
+            .unwrap_or_else(|| "Strict".to_string()),
     })
 }
 
@@ -807,6 +833,37 @@ fn set_participant_paused(db: &Db, user_id: &str, paused: bool) -> Result<People
 }
 
 #[tauri::command]
+pub fn host_add_availability(
+    app: AppHandle,
+    participant_id: String,
+    starts_at: i64,
+    ends_at: i64,
+    note: Option<String>,
+) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    add_availability(
+        &db,
+        &event.id,
+        &participant_id,
+        starts_at,
+        ends_at,
+        note.as_deref(),
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    people_data(&db)
+}
+
+#[tauri::command]
+pub fn host_remove_availability(app: AppHandle, id: String) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    remove_availability(&db, &event.id, &id, now_secs()).map_err(|error| error.to_string())?;
+    people_data(&db)
+}
+
+#[tauri::command]
 pub fn host_people(app: AppHandle) -> Result<PeopleDataDto, String> {
     let db = open_db(&app)?;
     people_data(&db)
@@ -823,9 +880,21 @@ fn people_data(db: &Db) -> Result<PeopleDataDto, String> {
         TrackRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let participants =
         ParticipantRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
+    let availability = AvailabilityRepo::list_for_event(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?;
     let rows = participants
         .into_iter()
         .map(|participant| PersonRowDto {
+            away: availability
+                .iter()
+                .filter(|range| range.participant_id == participant.user_id)
+                .map(|range| AwayDto {
+                    id: range.id.clone(),
+                    starts_at: range.starts_at,
+                    ends_at: range.ends_at,
+                    note: range.note.clone(),
+                })
+                .collect(),
             id: participant.user_id.clone(),
             display_name: participant.display_name,
             role: match participant.role {
@@ -873,6 +942,9 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
             rounds: 0,
             exchange_rounds: 0,
             total_rounds: 0,
+            gaps: 0,
+            handoff_policy: "Strict".to_string(),
+            open_schedule: false,
             tracks: 0,
             participants: 0,
             committed: false,
@@ -900,6 +972,9 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
             rounds: event_rounds(db, &event)?,
             exchange_rounds: event_rounds(db, &event)?,
             total_rounds: event_rounds(db, &event)? + 1,
+            gaps: 0,
+            handoff_policy: "Strict".to_string(),
+            open_schedule: false,
             tracks: TrackRepo::list_for_event(db.conn(), &event.id)
                 .map_err(|error| error.to_string())?
                 .len(),
@@ -995,6 +1070,7 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         event.state,
         EventState::Active | EventState::Paused | EventState::Reveal | EventState::Archived
     );
+    let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
     let seed_owners = tracks
         .iter()
         .map(|track| SeedOwnerDto {
@@ -1015,6 +1091,12 @@ fn plan_data(db: &Db) -> Result<PlanDataDto, String> {
         rounds: plan.rounds,
         exchange_rounds: plan.rounds,
         total_rounds: plan.rounds + 1,
+        gaps: (plan.rounds as usize * participants.len()).saturating_sub(assignments.len()) as u32,
+        handoff_policy: settings
+            .handoff_policy
+            .clone()
+            .unwrap_or_else(|| "Strict".to_string()),
+        open_schedule: settings.schedule_visibility.as_deref() == Some("Open"),
         tracks: tracks.len(),
         participants: participants.len(),
         committed,
@@ -1302,6 +1384,7 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         scheduler: None,
         swap_cadence: Some(draft.swap_cadence),
         schedule_visibility: Some(draft.schedule_visibility),
+        handoff_policy: Some(draft.handoff_policy),
         quiet_hours_start: draft.quiet_hours_start,
         quiet_hours_end: draft.quiet_hours_end,
     };
@@ -2705,7 +2788,7 @@ mod tests {
                 membership: Membership::Seeded,
                 readiness: swap_core::Readiness::Ready,
                 timezone: "Europe/Stockholm".to_string(),
-                max_handoffs: 8,
+                max_handoffs: 20,
                 created_at: 100,
                 updated_at: 100,
             },
@@ -3076,7 +3159,7 @@ mod tests {
                     membership: Membership::SignedUp,
                     readiness: swap_core::Readiness::Ready,
                     timezone: "UTC".to_string(),
-                    max_handoffs: 3,
+                    max_handoffs: 20,
                     created_at: 100,
                     updated_at: 100,
                 },

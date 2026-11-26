@@ -57,6 +57,8 @@ import {
   saveSettings,
   setParticipantPaused,
   setTrackTitle,
+  addAvailability,
+  removeAvailability,
   addTrackComment,
   redactTrackComment,
   sendTestNotification,
@@ -504,6 +506,33 @@ export default function App() {
     }
   }
 
+  async function handleAddAvailability(
+    participantId: string,
+    startsAt: number,
+    endsAt: number,
+    note: string,
+  ) {
+    try {
+      await addAvailability(participantId, startsAt, endsAt, note);
+      setToast(
+        "Away range saved. Regenerate the draft schedule to apply it.",
+      );
+      reloadView();
+    } catch (error) {
+      setToast(`Could not save the away range. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleRemoveAvailability(id: string) {
+    try {
+      await removeAvailability(id);
+      setToast("Away range removed.");
+      reloadView();
+    } catch (error) {
+      setToast(`Could not remove the away range. ${errorDetail(error)}`);
+    }
+  }
+
   async function handleDecision(decision: Decision, action: string) {
     if (demo) {
       setToast(`Preview: the host action “${action}” is applied to this decision.`);
@@ -752,6 +781,9 @@ export default function App() {
         data={people}
         onAction={notify}
         onSetPaused={handleSetPaused}
+        onAddAvailability={handleAddAvailability}
+        onRemoveAvailability={handleRemoveAvailability}
+        timezone={settings?.timezone}
       />
     ) : view === "plan" && plan ? (
       <PlannerView

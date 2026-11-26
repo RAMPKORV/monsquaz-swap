@@ -165,6 +165,8 @@ function baseMission(): MissionControl {
       seedDeadlineAt: null,
       lateSeedCount: 0,
       packId: "pack-demo",
+      openSchedule: false,
+      handoffPolicy: "Strict",
     },
     bot: {
       status: "Online",
@@ -245,6 +247,32 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
     mission.timeline = [];
     mission.decisions = [];
     mission.activity = [];
+    return mission;
+  }
+
+  if (scenario === "join-open") {
+    mission.event = {
+      ...mission.event!,
+      stage: "Join phase",
+      participants: 12,
+      seeded: 6,
+      fillIns: 0,
+      round: 1,
+      rounds: 12,
+      exchangeRounds: 11,
+      seedRoundOpen: true,
+      seedDeadlineAt: Math.floor(Date.now() / 1000) + 4 * 24 * 60 * 60,
+      openSchedule: true,
+    };
+    mission.nextAction = {
+      eyebrow: "Next action",
+      title: "Open schedule is on",
+      detail:
+        "Everyone can see the matrix, owners, names, titles, and comments. Confirm the group accepts this rule.",
+      actionLabel: "Set up Round 1",
+      secondaryLabel: null,
+      tone: "attention",
+    };
     return mission;
   }
 
@@ -518,6 +546,8 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       seedDeadlineAt: null,
       lateSeedCount: 0,
       packId: "pack-demo",
+      openSchedule: false,
+      handoffPolicy: "Strict",
     };
     mission.bot = {
       status: "Online",
@@ -895,6 +925,8 @@ function eventSummary(
     seedDeadlineAt: null,
     lateSeedCount: 0,
     packId: "pack-demo",
+    openSchedule: false,
+    handoffPolicy: "Strict",
   };
 }
 
@@ -916,6 +948,7 @@ function defaultDraft(): EventDraft {
     rotation: "Participants",
     swapCadence: "K rounds",
     scheduleVisibility: "Hidden",
+    handoffPolicy: "Strict",
   };
 }
 
@@ -956,7 +989,8 @@ export function demoSetup(scenario: Scenario): SetupData {
         groupCount: 4,
         groupSize: 10,
         swapCadence: "Calendar",
-        scheduleVisibility: "Visible assignments",
+        scheduleVisibility: "Open",
+        handoffPolicy: "Flexible",
       },
       warnings: [
         warning(
@@ -1049,9 +1083,20 @@ function personRow(index: number, long = false): PersonRow {
         : index % 2 === 0
           ? "Europe/Stockholm"
           : "Europe/London",
-    maxHandoffs: 1 + (index % 3),
+    maxHandoffs: 12,
     joined: `25 Nov, ${String(9 + (index % 8)).padStart(2, "0")}:${String((index * 7) % 60).padStart(2, "0")}`,
     deliveryRisk: index === 6,
+    away:
+      index === 0
+        ? [
+            {
+              id: "away-demo",
+              startsAt: Math.floor(Date.now() / 1000) + 2 * 86400,
+              endsAt: Math.floor(Date.now() / 1000) + 4 * 86400,
+              note: "Travel",
+            },
+          ]
+        : [],
   };
 }
 
@@ -1325,6 +1370,9 @@ export function demoPlan(scenario: Scenario): PlanData {
       rounds: 0,
       exchangeRounds: 0,
       totalRounds: 0,
+      gaps: 0,
+      handoffPolicy: "Strict",
+      openSchedule: false,
       tracks: 0,
       participants: 0,
       committed: false,
@@ -1339,6 +1387,7 @@ export function demoPlan(scenario: Scenario): PlanData {
     };
   }
   const dense = scenario === "dense" || scenario === "long";
+  const flexible = scenario === "flexible";
   const count = dense ? 40 : 12;
   const rounds = dense ? 8 : 11;
   const event = {
@@ -1355,6 +1404,9 @@ export function demoPlan(scenario: Scenario): PlanData {
       rounds,
       exchangeRounds: rounds,
       totalRounds: rounds + 1,
+      gaps: 0,
+      handoffPolicy: "Strict",
+      openSchedule: false,
       tracks: count,
       participants: count,
       committed: false,
@@ -1428,6 +1480,16 @@ export function demoPlan(scenario: Scenario): PlanData {
       ),
     );
   }
+  const matrix = flexible
+    ? groupPlan.matrix.map((track, trackIndex) => ({
+        ...track,
+        cells: track.cells.map((cell, roundIndex) =>
+          trackIndex === 0 && roundIndex >= rounds - 2
+            ? { ...cell, participantId: "", participantName: "" }
+            : cell,
+        ),
+      }))
+    : groupPlan.matrix;
   return {
     status: "Draft",
     event,
@@ -1436,17 +1498,20 @@ export function demoPlan(scenario: Scenario): PlanData {
     rounds,
     exchangeRounds: rounds,
     totalRounds: rounds + 1,
+    gaps: flexible ? 2 : 0,
+    handoffPolicy: flexible ? "Flexible" : "Strict",
+    openSchedule: false,
     tracks: count,
     participants: count,
     committed: false,
-    matrix: groupPlan.matrix,
-    seedOwners: groupPlan.matrix.map((track) => ({
+    matrix,
+    seedOwners: matrix.map((track) => ({
       trackCode: track.trackCode,
       ownerId: track.ownerId,
       ownerName:
           names[Number(track.ownerId.replace("user-", "")) % names.length],
     })),
-    graph: buildGraph(groupPlan.matrix, 2),
+    graph: buildGraph(matrix, 2),
     groups: plannerGroups(count),
     phases: groupPlan.phases,
     warnings,

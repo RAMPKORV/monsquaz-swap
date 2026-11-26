@@ -330,6 +330,25 @@ CREATE INDEX late_seeds_pending ON late_seeds(event_id, status, created_at);
 -- forward deadline move.
 ALTER TABLE events ADD COLUMN reveal_at INTEGER;
 "#,
+    r#"
+-- Migration 010: participant away ranges. Times are UTC seconds.
+CREATE TABLE participant_availability (
+    id TEXT NOT NULL,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    participant_id TEXT NOT NULL,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('away', 'paused')),
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (event_id, id),
+    FOREIGN KEY (event_id, participant_id)
+        REFERENCES participants(event_id, user_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX availability_by_window
+    ON participant_availability(event_id, starts_at, ends_at);
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

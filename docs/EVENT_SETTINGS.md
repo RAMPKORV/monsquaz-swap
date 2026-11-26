@@ -26,12 +26,22 @@ All timestamps are UTC in the database and local in the UI.
 | Async length | `N-1` for 12 or fewer; 6–8 rounds above 12 | Host can choose full exposure; the planner shows the projected duration | Yes |
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
 | Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
+| Participation | Strict full exposure | Strict; Flexible earliest rounds with gaps | Yes |
+| Schedule visibility | Own assignments only | Own assignments only; Open schedule (full transparency) | Yes |
+| Away ranges | None | Host-recorded UTC ranges; planner skips overlapping rounds | No |
 | Round/phase dates | Host-set | Calendar windows; host can shift | No |
 
 Rules:
 
 - Classic `N` total rounds means every participant can touch every other track:
   R1 seed and N-1 exchanges.
+- Strict participation requires every active handoff cap to cover every
+  exchange round. Flexible participation gives each person the earliest rounds
+  up to the cap and leaves coverage gaps. The host fills the gaps.
+- An away range removes the overlapping projected rounds. Strict participation
+  refuses the plan and asks for flexible participation.
+- Open schedule is the explicit zero-anonymity mode. It shows the full matrix,
+  seed owners, names, titles, and comments. The join card discloses this rule.
 - Above 12 participants, each track can have many contributors. The planner
   must show the contributor count and the event duration.
 - The host can cap the length. A capped event does not touch every track with

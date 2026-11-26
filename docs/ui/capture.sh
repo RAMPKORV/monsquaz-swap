@@ -136,6 +136,8 @@ shot mission-join-long-zone-dark-1280 "view=mission&state=join-phase&joinTimezon
 shot mission-join-late-dark-1280 "view=mission&state=join-late" 1280 800
 shot mission-join-late-dark-1024 "view=mission&state=join-late" 1024 700
 shot mission-join-late-light-1280 "view=mission&state=join-late&theme=light" 1280 800
+shot mission-join-open-dark-1280 "view=mission&state=join-open" 1280 800
+shot mission-join-open-dark-1024 "view=mission&state=join-open" 1024 700
 shot mission-seed-setup-dark-1280 "view=mission&state=seed-setup" 1280 800
 shot mission-seed-setup-dark-1024 "view=mission&state=seed-setup" 1024 700
 shot mission-seed-setup-light-1280 "view=mission&state=seed-setup&theme=light" 1280 800
@@ -148,6 +150,8 @@ shot people-error-dark-1280 "view=people&state=error" 1280 800
 shot people-long-dark-1280 "view=people&state=long" 1280 800
 shot people-dense-dark-1280 "view=people&state=dense" 1280 800
 shot people-populated-light-1280 "view=people&theme=light" 1280 800
+shot people-away-dialog-dark-1280 "view=people&dialog=away" 1280 800
+shot people-away-dialog-dark-1024 "view=people&dialog=away" 1024 700
 shot people-populated-dark-1024 "view=people" 1024 700
 shot people-populated-dark-zoom200 "view=people" 640 800
 
@@ -156,6 +160,8 @@ shot plan-loading-dark-1280 "view=plan&state=loading" 1280 800
 shot plan-populated-dark-1280 "view=plan" 1280 800
 shot plan-error-dark-1280 "view=plan&state=error" 1280 800
 shot plan-infeasible-dark-1280 "view=plan&state=infeasible" 1280 800
+shot plan-flexible-dark-1280 "view=plan&state=flexible" 1280 800
+shot plan-flexible-dark-1024 "view=plan&state=flexible" 1024 700
 shot plan-long-dark-1280 "view=plan&state=long" 1280 800
 shot plan-dense-dark-1280 "view=plan&state=dense" 1280 800
 shot plan-edit-dark-1280 "view=plan&state=dense&dialog=edit" 1280 800

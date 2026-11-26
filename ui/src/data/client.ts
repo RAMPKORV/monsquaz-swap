@@ -80,8 +80,10 @@ export function initialScenario(): Scenario {
     "reveal-ready",
     "join-phase",
     "join-late",
+    "join-open",
     "seed-setup",
     "infeasible",
+    "flexible",
   ];
   return allowed.includes(value as Scenario) ? (value as Scenario) : "default";
 }
@@ -374,6 +376,32 @@ export async function setParticipantPaused(
     return demoPeople("default");
   }
   return invoke<PeopleData>("host_set_participant_paused", { userId, paused });
+}
+
+export async function addAvailability(
+  participantId: string,
+  startsAt: number,
+  endsAt: number,
+  note: string,
+): Promise<PeopleData> {
+  if (isDemoMode()) {
+    await pause(200);
+    return demoPeople("default");
+  }
+  return invoke<PeopleData>("host_add_availability", {
+    participantId,
+    startsAt,
+    endsAt,
+    note: note || null,
+  });
+}
+
+export async function removeAvailability(id: string): Promise<PeopleData> {
+  if (isDemoMode()) {
+    await pause(180);
+    return demoPeople("default");
+  }
+  return invoke<PeopleData>("host_remove_availability", { id });
 }
 
 let demoPlanState: PlanData | null = null;
@@ -813,6 +841,8 @@ export async function createEvent(draft: EventDraft): Promise<EventSummary> {
       seedDeadlineAt: null,
       lateSeedCount: 0,
       packId: null,
+      openSchedule: false,
+      handoffPolicy: "Strict",
     };
   }
   return invoke<EventSummary>("host_create_event", { draft });
@@ -929,6 +959,8 @@ function demoEventSummary(
     seedDeadlineAt: null,
     lateSeedCount: 0,
     packId: "pack-demo",
+    openSchedule: false,
+    handoffPolicy: "Strict",
     ...overrides,
   };
 }

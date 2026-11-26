@@ -307,6 +307,18 @@ export function PlannerView({
         ) : null}
       </div>
 
+      {data.gaps > 0 && !viewAsParticipant ? (
+        <div className="banner banner--warn" role="status">
+          <Icon name="alert" size={20} />
+          <div>
+            <strong>{data.gaps} assignments are empty.</strong> A handoff cap is
+            lower than the exchange count. Each person gets the earliest rounds
+            up to the cap. Fill the gaps with a <span className="nowrap">fill-in</span>{" "}
+            or a manual edit.
+          </div>
+        </div>
+      ) : null}
+
       {!noPlan && !infeasible && !viewAsParticipant && !data.committed ? (
         <section className="plan-actionbar" aria-label="Plan actions">
           <div className="plan-actionbar__copy">
@@ -522,7 +534,9 @@ export function PlannerView({
               >
                 <div className="seed-band__header">
                   <h3 id="seed-band-title">R1 · Seed round</h3>
-                  <span className="card__meta">Host only</span>
+                  <span className="card__meta">
+                    {data.event?.openSchedule ? "Visible to everyone" : "Host only"}
+                  </span>
                 </div>
                 <p className="field-help">
                   Each person owns one seed. Exchanges start at R2 and end at R
@@ -619,6 +633,8 @@ export function PlannerView({
                                     <span className="visually-hidden">No assignment</span>
                                   </span>
                                 )
+                              ) : cell.participantId === "" ? (
+                                <span className="matrix-gap">Gap</span>
                               ) : canEdit ? (
                                 <button
                                   type="button"
@@ -1078,8 +1094,10 @@ export function PlannerView({
             not change. A new schedule version has a new checksum.
           </p>
           <p className="field-help">
-            No music file is posted. Locking does not reveal an owner, a track
-            title, or a comment.
+            No music file is posted.{" "}
+            {data.event?.openSchedule
+              ? "Everyone can already see the matrix, seed owners, editor names, titles, and comments. This event has no anonymity."
+              : "Locking does not reveal an owner, a track title, or a comment."}
           </p>
         </Dialog>
       ) : null}

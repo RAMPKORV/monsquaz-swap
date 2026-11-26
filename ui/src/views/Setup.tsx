@@ -231,13 +231,13 @@ function BasicsStep({
           helpId="visibility-help"
           help={
             draft.scheduleVisibility === "Hidden"
-              ? "Only the current track and deadline are visible."
-              : "The current track plus every assignment they have had and will have."
+              ? "Participants see only their own assignments. Group names and the seed band stay hidden."
+              : "Warning: the open schedule shows the full matrix, seed owners, editor names, titles, and comments. The event has no anonymity."
           }
         >
           <select
             id="visibility"
-          aria-describedby="visibility-help"
+            aria-describedby="visibility-help"
             className="input"
             value={draft.scheduleVisibility}
             onChange={(event) =>
@@ -248,7 +248,33 @@ function BasicsStep({
             }
           >
             <option value="Hidden">Own assignments only (recommended)</option>
-            <option value="Visible assignments">Own past and future assignments</option>
+            <option value="Open">Open schedule (no anonymity)</option>
+          </select>
+        </Field>
+        <Field
+          label="Participation"
+          htmlFor="handoff-policy"
+          helpId="handoff-policy-help"
+          help={
+            draft.handoffPolicy === "Strict"
+              ? "Full coverage. Every active person must set a handoff cap at least equal to the exchange rounds. A lower cap blocks the schedule."
+              : "Cap-limited. Each person edits their earliest exchange rounds up to their cap. Empty cells become coverage gaps."
+          }
+        >
+          <select
+            id="handoff-policy"
+            aria-describedby="handoff-policy-help"
+            className="input"
+            value={draft.handoffPolicy}
+            onChange={(event) =>
+              update(
+                "handoffPolicy",
+                event.target.value as EventDraft["handoffPolicy"],
+              )
+            }
+          >
+            <option value="Strict">Full coverage (strict)</option>
+            <option value="Flexible">Cap-limited (flexible)</option>
           </select>
         </Field>
       </div>
@@ -621,9 +647,19 @@ function ReviewStep({
           </dd>
         </div>
         <div>
-          <dt>Claim window</dt>
-          <dd>{draft.claimWindowHours} hours</dd>
+          <dt>{draft.mode === "Async" ? "Claim window" : "Round deadline"}</dt>
+          <dd>
+            {draft.mode === "Async"
+              ? `${draft.claimWindowHours} hours`
+              : `${draft.roundWindowHours} hours (final 48 hours)`}
+          </dd>
         </div>
+        {draft.mode === "Async" ? (
+          <div>
+            <dt>Edit window</dt>
+            <dd>{draft.roundWindowHours} hours</dd>
+          </div>
+        ) : null}
         <div>
           <dt>Round window</dt>
           <dd>{draft.roundWindowHours} hours</dd>
@@ -639,6 +675,22 @@ function ReviewStep({
           </dd>
         </div>
         <div>
+          <dt>Participation</dt>
+          <dd>
+            {draft.handoffPolicy === "Strict"
+              ? "Full coverage (strict)"
+              : "Cap-limited (flexible)"}
+          </dd>
+        </div>
+        <div>
+          <dt>Schedule</dt>
+          <dd>
+            {draft.scheduleVisibility === "Open"
+              ? "Open (no anonymity)"
+              : "Private (own assignments)"}
+          </dd>
+        </div>
+        <div>
           <dt>Pack</dt>
           <dd>{draft.packType}</dd>
         </div>
@@ -651,8 +703,24 @@ function ReviewStep({
       <div className="warnings">
         {data.warnings.map((warning) => (
           <div className={`warning warning--${warning.tone}`} key={warning.id}>
-            <Icon name={warning.tone === "danger" ? "alert" : "check"} size={18} />
+            <Icon
+              name={
+                warning.tone === "danger"
+                  ? "alert"
+                  : warning.tone === "warn"
+                    ? "clock"
+                    : "check"
+              }
+              size={18}
+            />
             <div>
+              <span className="visually-hidden">
+                {warning.tone === "danger"
+                  ? "Danger: "
+                  : warning.tone === "warn"
+                    ? "Warning: "
+                    : "Note: "}
+              </span>
               <strong>{warning.title}</strong>
               <p>{warning.detail}</p>
             </div>
@@ -666,6 +734,9 @@ function ReviewStep({
         exampleTimezone={timezone}
         preview
         headingLevel={3}
+        openSchedule={draft.scheduleVisibility === "Open"}
+        exchangeRounds={draft.rounds ?? 0}
+        handoffPolicy={draft.handoffPolicy}
       />
     </div>
   );

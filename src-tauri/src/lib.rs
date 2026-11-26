@@ -146,6 +146,8 @@ pub fn run() {
             save_host_settings,
             host::host_event_setup,
             host::host_people,
+            host::host_add_availability,
+            host::host_remove_availability,
             host::host_set_participant_paused,
             host::host_plan,
             host::host_generate_plan,

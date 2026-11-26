@@ -8,10 +8,10 @@ use swap_core::{
     choose_async_offers,
 };
 use swap_db::{
-    AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, DbError, DeadlineRepo,
-    EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo, HostDecisionRecord,
-    HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord, PackRepo,
-    ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
+    AssignmentRecord, AssignmentRepo, AuditRepo, AvailabilityRecord, AvailabilityRepo, Connection,
+    Db, DbError, DeadlineRepo, EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo,
+    HostDecisionRecord, HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord,
+    PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
     ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
     TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction,
     TransactionBehavior,
@@ -72,6 +72,14 @@ pub enum EngineError {
     NotSeeded,
     #[error("the participant is not ready for a new offer: {0}")]
     ParticipantNotReady(String),
+    #[error(
+        "participant {participant} allows {allowed} handoffs but the strict event needs {required}"
+    )]
+    InsufficientHandoffs {
+        participant: String,
+        allowed: u32,
+        required: u32,
+    },
     #[error("the event has no active participants")]
     NoParticipants,
     #[error("the event has no seeded tracks")]
@@ -94,6 +102,10 @@ pub enum EngineError {
     LateSeedNotFound(String),
     #[error("the late seed is not pending")]
     LateSeedNotPending,
+    #[error("the availability range is invalid")]
+    InvalidAvailability,
+    #[error("strict participation cannot honor {count} away ranges; use flexible participation")]
+    AvailabilityBlocksStrict { count: usize },
     #[error("the event needs at least two active participants to schedule a round")]
     NoRounds,
     #[error("the event has no committed plan")]
@@ -238,6 +250,7 @@ pub struct ScheduleOutcome {
     pub rounds: u32,
     pub commitment: String,
     pub fallback: bool,
+    pub gaps: u32,
     pub assignments: Vec<PlanAssignmentRecord>,
 }
 
@@ -1291,6 +1304,102 @@ pub fn reject_late_seed(
     Ok(())
 }
 
+pub fn list_availability(db: &Db, event_id: &str) -> Result<Vec<AvailabilityRecord>, EngineError> {
+    Ok(AvailabilityRepo::list_for_event(db.conn(), event_id)?)
+}
+
+pub fn add_availability(
+    db: &Db,
+    event_id: &str,
+    participant_id: &str,
+    starts_at: i64,
+    ends_at: i64,
+    note: Option<&str>,
+    now: i64,
+) -> Result<AvailabilityRecord, EngineError> {
+    let event = load_event(db, event_id)?;
+    if !matches!(
+        event.state,
+        EventState::Draft | EventState::Signup | EventState::ScheduleReview
+    ) {
+        return Err(EngineError::WrongEventState {
+            action: "availability",
+            state: event.state,
+            expected: "draft, signup, or schedule review",
+        });
+    }
+    if starts_at >= ends_at {
+        return Err(EngineError::InvalidAvailability);
+    }
+    if ParticipantRepo::get(db.conn(), event_id, participant_id)?.is_none() {
+        return Err(EngineError::ParticipantNotFound(participant_id.to_string()));
+    }
+    let id = format!(
+        "av{}",
+        &swap_files::sha256_hex(
+            format!("msw-availability:{event_id}:{participant_id}:{starts_at}:{ends_at}:{now}")
+                .as_bytes()
+        )[..16]
+    );
+    let range = AvailabilityRecord {
+        id,
+        event_id: event_id.to_string(),
+        participant_id: participant_id.to_string(),
+        starts_at,
+        ends_at,
+        kind: "away".to_string(),
+        note: note.map(str::to_string),
+        created_at: now,
+    };
+    let transaction = begin(db)?;
+    AvailabilityRepo::insert(&transaction, &range)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Availability added",
+        Some(participant_id),
+        &serde_json::json!({
+            "startsAt": starts_at,
+            "endsAt": ends_at,
+            "note": note,
+        })
+        .to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(range)
+}
+
+pub fn remove_availability(db: &Db, event_id: &str, id: &str, now: i64) -> Result<(), EngineError> {
+    let event = load_event(db, event_id)?;
+    if !matches!(
+        event.state,
+        EventState::Draft | EventState::Signup | EventState::ScheduleReview
+    ) {
+        return Err(EngineError::WrongEventState {
+            action: "availability",
+            state: event.state,
+            expected: "draft, signup, or schedule review",
+        });
+    }
+    let transaction = begin(db)?;
+    if !AvailabilityRepo::delete(&transaction, event_id, id)? {
+        return Err(EngineError::InvalidAvailability);
+    }
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "Host",
+        "Availability removed",
+        Some(id),
+        "{}",
+    )?;
+    commit(transaction)?;
+    Ok(())
+}
+
 pub fn generate_schedule(
     db: &Db,
     event_id: &str,
@@ -1422,6 +1531,46 @@ fn generate_schedule_internal(
             },
         ));
     }
+    let flexible = settings.handoff_policy.as_deref() == Some("Flexible");
+    if !flexible {
+        for participant in &active {
+            if participant.max_handoffs > 0 && participant.max_handoffs < rounds {
+                return Err(EngineError::InsufficientHandoffs {
+                    participant: participant.display_name.clone(),
+                    allowed: participant.max_handoffs,
+                    required: rounds,
+                });
+            }
+        }
+    }
+    let availability = AvailabilityRepo::list_for_event(db.conn(), event_id)?;
+    let mut blocked = HashSet::new();
+    let mut cursor = now;
+    for index in 0..rounds {
+        let duration = if index + 1 == rounds {
+            settings.final_round_window_secs
+        } else {
+            settings.round_window_secs
+        };
+        let window_start = cursor;
+        let window_end = cursor.saturating_add(duration);
+        cursor = window_end;
+        for participant in &active {
+            let away = availability.iter().any(|range| {
+                range.participant_id == participant.user_id
+                    && range.starts_at < window_end
+                    && range.ends_at > window_start
+            });
+            if away {
+                blocked.insert((participant.user_id.clone(), index));
+            }
+        }
+    }
+    if !flexible && !blocked.is_empty() {
+        return Err(EngineError::AvailabilityBlocksStrict {
+            count: blocked.len(),
+        });
+    }
     let mut settings = settings;
     if let Some((count, size)) = group_override {
         let sizes = swap_core::group_sizes(active.len(), count, size);
@@ -1476,7 +1625,7 @@ fn generate_schedule_internal(
     } else {
         event.seed.wrapping_add(u64::from(version - 1))
     };
-    let (assignments, fallback) =
+    let (mut assignments, fallback) =
         if settings.mode == Mode::Classic && settings.group_count.unwrap_or(1) > 1 {
             let mut grouped: Vec<&ParticipantRecord> = active.clone();
             grouped.sort_by(|left, right| {
@@ -1520,6 +1669,47 @@ fn generate_schedule_internal(
             let schedule = Schedule::generate_with(&people, &specs, rounds, plan_seed, strategy)?;
             (schedule.assignments, schedule.fallback)
         };
+
+    let mut gaps = 0u32;
+    if flexible {
+        let caps: HashMap<String, u32> = active
+            .iter()
+            .map(|participant| {
+                (
+                    participant.user_id.clone(),
+                    if participant.max_handoffs == 0 {
+                        rounds
+                    } else {
+                        participant.max_handoffs.min(rounds)
+                    },
+                )
+            })
+            .collect();
+        let mut used: HashMap<String, u32> = HashMap::new();
+        assignments.retain(|assignment| {
+            let used_count = used.entry(assignment.participant.0.clone()).or_insert(0);
+            let cap = caps
+                .get(&assignment.participant.0)
+                .copied()
+                .unwrap_or(rounds);
+            if *used_count >= cap {
+                false
+            } else {
+                *used_count += 1;
+                true
+            }
+        });
+        gaps = (active.len() as u32)
+            .saturating_mul(rounds)
+            .saturating_sub(assignments.len() as u32);
+    }
+    if !blocked.is_empty() {
+        let before = assignments.len();
+        assignments.retain(|assignment| {
+            !blocked.contains(&(assignment.participant.0.clone(), assignment.round))
+        });
+        gaps = gaps.saturating_add((before - assignments.len()) as u32);
+    }
 
     let settings_json = serde_json::to_string(&settings)?;
     let planned: Vec<PlanAssignmentRecord> = assignments
@@ -1613,6 +1803,7 @@ fn generate_schedule_internal(
         rounds,
         commitment,
         fallback,
+        gaps,
         assignments: planned,
     })
 }
@@ -1690,6 +1881,7 @@ fn validate_plan_assignments(
     rounds: u32,
     active: &std::collections::BTreeSet<String>,
     owners: &std::collections::BTreeMap<String, String>,
+    allow_gaps: bool,
 ) -> Result<(), EngineError> {
     let active_tracks = owners
         .iter()
@@ -1732,34 +1924,36 @@ fn validate_plan_assignments(
             });
         }
     }
-    for round in 0..rounds {
-        let people = assignments
-            .iter()
-            .filter(|assignment| assignment.round == round)
-            .map(|assignment| assignment.participant_id.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        let tracks = assignments
-            .iter()
-            .filter(|assignment| assignment.round == round)
-            .map(|assignment| assignment.track_code.as_str())
-            .collect::<std::collections::BTreeSet<_>>();
-        if people.len() != active.len() || tracks.len() != active_tracks.len() {
-            return Err(EngineError::PlanInvalid(format!(
-                "round {round} does not cover every active person and track"
-            )));
-        }
-        if !active.iter().all(|person| people.contains(person.as_str())) {
-            return Err(EngineError::PlanInvalid(format!(
-                "round {round} is missing an active person"
-            )));
-        }
-        if !active_tracks
-            .iter()
-            .all(|track| tracks.contains(track.as_str()))
-        {
-            return Err(EngineError::PlanInvalid(format!(
-                "round {round} is missing an active track"
-            )));
+    if !allow_gaps {
+        for round in 0..rounds {
+            let people = assignments
+                .iter()
+                .filter(|assignment| assignment.round == round)
+                .map(|assignment| assignment.participant_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            let tracks = assignments
+                .iter()
+                .filter(|assignment| assignment.round == round)
+                .map(|assignment| assignment.track_code.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            if people.len() != active.len() || tracks.len() != active_tracks.len() {
+                return Err(EngineError::PlanInvalid(format!(
+                    "round {round} does not cover every active person and track"
+                )));
+            }
+            if !active.iter().all(|person| people.contains(person.as_str())) {
+                return Err(EngineError::PlanInvalid(format!(
+                    "round {round} is missing an active person"
+                )));
+            }
+            if !active_tracks
+                .iter()
+                .all(|track| tracks.contains(track.as_str()))
+            {
+                return Err(EngineError::PlanInvalid(format!(
+                    "round {round} is missing an active track"
+                )));
+            }
         }
     }
     Ok(())
@@ -1789,7 +1983,8 @@ pub fn plan_edit_candidates(
     }
     let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
     let (active, owners, names) = plan_roster(db.conn(), event_id)?;
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    let allow_gaps = parse_settings(&event)?.handoff_policy.as_deref() == Some("Flexible");
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
     let target = assignments
         .iter()
         .find(|assignment| assignment.round == round && assignment.track_code == track_code)
@@ -1803,7 +1998,7 @@ pub fn plan_edit_candidates(
     }) {
         let swapped =
             swapped_assignments(&assignments, round, track_code, &assignment.participant_id)?;
-        if validate_plan_assignments(&swapped, plan.rounds, &active, &owners).is_ok() {
+        if validate_plan_assignments(&swapped, plan.rounds, &active, &owners, allow_gaps).is_ok() {
             candidates.push(PlanEditCandidate {
                 participant_id: assignment.participant_id.clone(),
                 participant_name: names
@@ -1851,7 +2046,8 @@ pub fn edit_plan_assignment(
     }
     let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
     let (active, owners, _) = plan_roster(db.conn(), event_id)?;
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    let allow_gaps = parse_settings(&event)?.handoff_policy.as_deref() == Some("Flexible");
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
     let target = assignments
         .iter()
         .find(|assignment| assignment.round == round && assignment.track_code == track_code)
@@ -1862,7 +2058,7 @@ pub fn edit_plan_assignment(
         })?;
     let displaced = target.participant_id.clone();
     let mut assignments = swapped_assignments(&assignments, round, track_code, participant_id)?;
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
+    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
 
     let version = plan.version + 1;
     for assignment in &mut assignments {
@@ -1972,6 +2168,7 @@ pub fn edit_plan_assignment(
         rounds: plan.rounds,
         commitment,
         fallback: false,
+        gaps: 0,
         assignments,
     })
 }
@@ -2069,9 +2266,15 @@ pub fn start_event_with_channel(
     }
     let assignments = PlanRepo::list_assignments(&transaction, event_id, plan.version)?;
     let (active, owners, _) = plan_roster(&transaction, event_id)?;
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners)?;
-    verify_plan_commitment(&transaction, event_id, &plan, &assignments)?;
     let settings = parse_settings(&event)?;
+    validate_plan_assignments(
+        &assignments,
+        plan.rounds,
+        &active,
+        &owners,
+        settings.handoff_policy.as_deref() == Some("Flexible"),
+    )?;
+    verify_plan_commitment(&transaction, event_id, &plan, &assignments)?;
     let mut cursor = now;
     for index in 0..plan.rounds {
         let final_round = index + 1 == plan.rounds;
@@ -4401,6 +4604,101 @@ fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {
                 hour >= start || hour < end
             }
         })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticipantTurn {
+    pub round_no: u32,
+    pub track_code: String,
+    pub status: AssignmentStatus,
+    pub due_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticipantCell {
+    pub round_no: u32,
+    pub track_code: String,
+    pub participant_name: String,
+    pub owner_name: String,
+    pub title: Option<String>,
+    pub comments: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticipantScheduleView {
+    pub open: bool,
+    pub own: Vec<ParticipantTurn>,
+    pub full: Option<Vec<ParticipantCell>>,
+}
+
+/// The participant schedule surface. With the default visibility it returns
+/// only the caller's turns. With the open schedule it returns the full matrix,
+/// seed owners, names, titles, and comments.
+pub fn participant_schedule(
+    db: &Db,
+    event_id: &str,
+    user_id: &str,
+) -> Result<ParticipantScheduleView, EngineError> {
+    let event = load_event(db, event_id)?;
+    if ParticipantRepo::get(db.conn(), event_id, user_id)?.is_none() {
+        return Err(EngineError::ParticipantNotFound(user_id.to_string()));
+    }
+    let settings = parse_settings(&event)?;
+    let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
+    let own = assignments
+        .iter()
+        .filter(|assignment| assignment.participant_id == user_id)
+        .map(|assignment| ParticipantTurn {
+            round_no: assignment.round + 2,
+            track_code: assignment.track_code.clone(),
+            status: assignment.status,
+            due_at: assignment.due_at,
+        })
+        .collect();
+    let open = settings.schedule_visibility.as_deref() == Some("Open");
+    let full = if open {
+        let plan = PlanRepo::latest(db.conn(), event_id)?.ok_or(EngineError::NoPlan)?;
+        let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
+        let tracks = TrackRepo::list_for_event(db.conn(), event_id)?;
+        let titles = TrackTitleRepo::list_for_event(db.conn(), event_id)?;
+        let comments = TrackCommentRepo::list_for_event(db.conn(), event_id)?;
+        let name_for = |id: &str| {
+            participants
+                .iter()
+                .find(|participant| participant.user_id == id)
+                .map(|participant| participant.display_name.clone())
+                .unwrap_or_else(|| id.to_string())
+        };
+        let mut cells = Vec::new();
+        for assignment in PlanRepo::list_assignments(db.conn(), event_id, plan.version)? {
+            let owner = tracks
+                .iter()
+                .find(|track| track.code == assignment.track_code)
+                .map(|track| track.owner_id.as_str())
+                .unwrap_or("");
+            cells.push(ParticipantCell {
+                round_no: assignment.round + 2,
+                track_code: assignment.track_code.clone(),
+                participant_name: name_for(&assignment.participant_id),
+                owner_name: name_for(owner),
+                title: titles
+                    .iter()
+                    .find(|title| title.track_code == assignment.track_code)
+                    .map(|title| title.title.clone()),
+                comments: comments
+                    .iter()
+                    .filter(|comment| {
+                        comment.track_code == assignment.track_code && comment.redacted_at.is_none()
+                    })
+                    .map(|comment| comment.body.clone())
+                    .collect(),
+            });
+        }
+        Some(cells)
+    } else {
+        None
+    };
+    Ok(ParticipantScheduleView { open, own, full })
 }
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {

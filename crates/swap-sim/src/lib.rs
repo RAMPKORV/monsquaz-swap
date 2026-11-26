@@ -185,7 +185,7 @@ pub fn run(config: &SimulationConfig) -> Result<SimulationReport, SimError> {
                 user_id: &user_id,
                 display_name: &display_name,
                 timezone: "Europe/Stockholm",
-                max_handoffs: 3,
+                max_handoffs: 20,
                 filename: "seed.it",
                 bytes: &bytes,
             },

@@ -2712,3 +2712,71 @@ impl SeedOwnerRepo {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailabilityRecord {
+    pub id: String,
+    pub event_id: String,
+    pub participant_id: String,
+    pub starts_at: i64,
+    pub ends_at: i64,
+    pub kind: String,
+    pub note: Option<String>,
+    pub created_at: i64,
+}
+
+pub struct AvailabilityRepo;
+
+impl AvailabilityRepo {
+    pub fn insert(conn: &Connection, range: &AvailabilityRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO participant_availability
+                (id, event_id, participant_id, starts_at, ends_at, kind, note, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &range.id,
+                &range.event_id,
+                &range.participant_id,
+                range.starts_at,
+                range.ends_at,
+                &range.kind,
+                &range.note,
+                range.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<AvailabilityRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT id, event_id, participant_id, starts_at, ends_at, kind, note, created_at
+             FROM participant_availability WHERE event_id = ?1
+             ORDER BY starts_at, id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], |row| {
+                Ok(AvailabilityRecord {
+                    id: row.get(0)?,
+                    event_id: row.get(1)?,
+                    participant_id: row.get(2)?,
+                    starts_at: row.get(3)?,
+                    ends_at: row.get(4)?,
+                    kind: row.get(5)?,
+                    note: row.get(6)?,
+                    created_at: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn delete(conn: &Connection, event_id: &str, id: &str) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM participant_availability WHERE event_id = ?1 AND id = ?2",
+            params![event_id, id],
+        )? > 0)
+    }
+}

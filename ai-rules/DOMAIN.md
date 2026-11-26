@@ -128,6 +128,13 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - Groups are hidden from participants; the host sees stable names (A/B/C).
 - Unequal groups are allowed with warnings (`max/min > 1.5`, `min < 5`) and a
   rebalance suggestion.
+- Strict participation requires every active `max_handoffs` to cover every
+  exchange round. Flexible participation gives the earliest rounds up to the
+  cap and reports coverage gaps. The seed is not an edit.
+- An away range removes the participant from overlapping projected rounds. The
+  gap stays visible. Strict participation refuses the plan.
+- The default participant view is the caller's own assignments. Open schedule
+  is the explicit zero-anonymity mode and must be disclosed at join.
 
 ### Async
 

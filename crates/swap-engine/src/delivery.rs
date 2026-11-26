@@ -402,9 +402,23 @@ impl DeliveryWorker {
                         DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
                         report.sent += 1;
                     }
+                    Err(error) if permanent(&error) => {
+                        if self.fail(db_guard(self).conn(), &row, now, &error.to_string())? {
+                            report.failed += 1;
+                        }
+                    }
                     Err(error) => {
-                        self.fail(db_guard(self).conn(), &row, now, &error.to_string())?;
-                        report.failed += 1;
+                        let message = error.to_string();
+                        let cap = row.attempts + 1 >= MAX_DELIVERY_ATTEMPTS;
+                        let db = db_guard(self);
+                        if cap {
+                            if self.fail(db.conn(), &row, now, &message)? {
+                                report.failed += 1;
+                            }
+                        } else {
+                            DeliveryRepo::mark_retry(db.conn(), &row.id, now, &message)?;
+                            report.retried += 1;
+                        }
                     }
                 }
                 continue;
@@ -555,9 +569,13 @@ impl DeliveryWorker {
             MetaRepo::get(db.conn(), &meta_key)
                 .map_err(|error| DiscordError::Other(error.to_string()))?
         };
+        let mut reused = false;
         let thread = match existing {
-            Some(thread) => DiscordChannelId::new(thread),
-            None => {
+            Some(thread) if !thread.is_empty() => {
+                reused = true;
+                DiscordChannelId::new(thread)
+            }
+            _ => {
                 let thread = discord
                     .create_private_thread(
                         &DiscordChannelId::new(channel.clone()),
@@ -570,14 +588,20 @@ impl DeliveryWorker {
                 thread
             }
         };
-        discord
+        let result = discord
             .send_channel_message(
                 &thread,
                 OutboundMessage {
                     content: content.to_string(),
                 },
             )
-            .await?;
+            .await;
+        if result.is_err() && reused {
+            let db = db_guard(self);
+            MetaRepo::set(db.conn(), &meta_key, "")
+                .map_err(|error| DiscordError::Other(error.to_string()))?;
+        }
+        result?;
         Ok(())
     }
 }
@@ -1010,6 +1034,51 @@ mod worker_alerts {
             DeliveryRepo::count_pending(db.lock().unwrap().conn()).unwrap(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn a_transient_host_alert_error_retries() {
+        let directory = tempdir().unwrap();
+        let store = BlobStore::new(directory.path().join("blobs"));
+        let db = database();
+        HostDecisionRepo::insert(
+            db.conn(),
+            &swap_db::HostDecisionRecord {
+                id: "decision-1".to_string(),
+                event_id: "evt-1".to_string(),
+                assignment_id: None,
+                kind: "deadline".to_string(),
+                status: "open".to_string(),
+                requested_hours: None,
+                created_at: 1,
+                decided_at: None,
+                reason: None,
+            },
+        )
+        .unwrap();
+        enqueue_pending(
+            db.conn(),
+            "evt-1",
+            &PendingDelivery::HostAlert {
+                key: "decision-1".to_string(),
+                content: "A track deadline needs a host decision.".to_string(),
+            },
+            10,
+        )
+        .unwrap();
+        let db = Arc::new(Mutex::new(db));
+        let discord = FakeDiscord::new();
+        discord.fail_next_thread(DiscordError::Transport("timeout".to_string()));
+        let worker = DeliveryWorker::new(db.clone(), store).with_alert_channel("alerts");
+        let first = worker.drain(&discord, 20, 10).await.unwrap();
+        assert_eq!(first.retried, 1);
+        assert_eq!(
+            DeliveryRepo::count_pending(db.lock().unwrap().conn()).unwrap(),
+            1
+        );
+        let second = worker.drain(&discord, 30, 10).await.unwrap();
+        assert_eq!(second.sent, 1);
+        assert_eq!(discord.channel_messages().len(), 1);
     }
 
     #[tokio::test]

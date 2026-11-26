@@ -1172,7 +1172,7 @@ fn extension_message(error: &EngineError) -> String {
         EngineError::NoActiveAssignment => {
             "You have no claimed track to extend. Claim an offer first.".to_string()
         }
-        EngineError::InvalidExtensionHours => "Ask for 1 to 12 hours.".to_string(),
+        EngineError::InvalidExtensionHours => "Ask for 1, 6, or 12 hours.".to_string(),
         EngineError::ExtensionLimit => {
             "This assignment has used its extensions. Submit, skip, or ask the host.".to_string()
         }

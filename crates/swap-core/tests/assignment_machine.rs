@@ -209,6 +209,25 @@ prop_state_machine! {
 }
 
 #[test]
+fn invalid_non_terminal_transitions_are_refused() {
+    let mut offered = Assignment::offered();
+    assert!(offered.submit().is_err());
+    assert!(offered.mark_overdue().is_err());
+
+    let mut claimed = Assignment {
+        status: AssignmentStatus::Claimed,
+    };
+    assert!(claimed.claim().is_err());
+    assert!(claimed.expire().is_err());
+
+    let mut overdue = Assignment {
+        status: AssignmentStatus::Overdue,
+    };
+    assert!(overdue.claim().is_err());
+    assert!(overdue.mark_overdue().is_err());
+}
+
+#[test]
 fn every_terminal_assignment_refuses_further_transitions() {
     let terminal = [
         AssignmentStatus::Submitted,

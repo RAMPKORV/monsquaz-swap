@@ -23,9 +23,10 @@ The models describe the event rules, not the implementation. See
 | `NoExpiredReoffer` | An expired pair is never offered again. | PRD REQ-DELIVERY-002 |
 | `TypeOK` | Variables have the expected shape. | model hygiene |
 
-Every property has a mutation that makes TLC report that same invariant. The
-script rejects parse errors and unrelated failures. Run
-`scripts/formal/check.sh`.
+Every checked property has a mutation that makes TLC report that same
+invariant. `OneTrackPerPerson` is kept as an implied reader property and is
+covered by `AtMostOneActivePerPerson`. The script rejects parse errors and
+unrelated failures. Run `scripts/formal/check.sh`.
 
 ## Mapping
 

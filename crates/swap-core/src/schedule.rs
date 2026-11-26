@@ -65,8 +65,7 @@ pub struct Schedule {
     pub rounds: u32,
     #[serde(default)]
     pub strategy: ScheduleStrategy,
-    /// True when the requested strategy used random matching because its
-    /// primary construction could not complete the roster.
+    /// True when the returned assignments are the random-matching candidate.
     #[serde(default)]
     pub fallback: bool,
     pub assignments: Vec<ScheduledAssignment>,
@@ -898,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn different_seeds_produce_different_schedules() {
+    fn two_seeds_produce_different_schedules() {
         let people = people(8);
         let tracks = tracks(&people);
         let first = Schedule::generate(&people, &tracks, 7, 1).unwrap();

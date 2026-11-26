@@ -94,8 +94,8 @@ detected mutation.
 ## Conformance
 
 The Rust state machine and the TLA+ model use overlapping claim, submit, skip,
-and expiry vocabulary. The claim model is checked against `Assignment`
-and `SeenLedger` by `proptest-state-machine`. It is a separate lifecycle model,
+and expiry vocabulary. The Rust lifecycle reference is checked against
+`Assignment` and `SeenLedger` by `proptest-state-machine`. It is a separate lifecycle model,
 not a trace-conformance check. Tier 3 adds ITF replay after a spike; if the tool
 is not reliable, use NDJSON trace validation.
 

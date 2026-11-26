@@ -42,7 +42,6 @@ Claim(t, p) ==
     /\ phase[t][p] = "offered"
     /\ holder[t] = NoOne
     /\ now <= due[t][p]
-    /\ \A other \in Tracks : holder[other] /= p
     /\ phase' = [phase EXCEPT ![t] = [phase[t] EXCEPT ![p] = "claimed"]]
     /\ seen' = seen \cup {<<t, p>>}
     /\ holder' = [holder EXCEPT ![t] = p]

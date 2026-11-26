@@ -75,8 +75,6 @@ run_mutation "offer allows two tracks for one person" "AtMostOneOfferPerPerson" 
   '/\ \A other \in Tracks : phase[other][p] /= "offered"' '/\ TRUE'
 run_mutation "offer ignores the holder guard" "AtMostOneActivePerPerson" \
   '/\ \A other \in Tracks : holder[other] /= p' '/\ TRUE'
-run_mutation "claim allows two active tracks" "AtMostOneActivePerPerson" \
-  '/\ \A other \in Tracks : holder[other] /= p' '/\ TRUE'
 run_mutation "claim leaves a seen pair offered" "NoRepeat" \
   '[phase[t] EXCEPT ![p] = "claimed"]' '[phase[t] EXCEPT ![p] = "offered"]'
 run_mutation "expiry keeps a banned pair offered" "NoExpiredReoffer" \

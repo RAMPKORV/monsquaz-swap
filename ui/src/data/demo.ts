@@ -899,7 +899,7 @@ export function demoSetup(scenario: Scenario): SetupData {
         "setup-1",
         "info",
         "Groups are suggested from the roster size",
-        "Two groups of six keep every track inside a smaller social circle. The host can override the count and size.",
+        "For the current 12-person roster, two groups of six keep every track inside a smaller social circle. The planner sets the count and size from the locked roster. To override them, go back to Groups and choose Manual.",
       ),
       warning(
         "setup-2",

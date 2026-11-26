@@ -672,6 +672,30 @@ pub fn generate_schedule(
             },
         ));
     }
+    let mut settings = settings;
+    if settings.mode == Mode::Classic {
+        match settings.group_mode.as_deref().unwrap_or("Lookup") {
+            "Manual" => {
+                let count = settings
+                    .group_count
+                    .unwrap_or(1)
+                    .clamp(1, swap_core::MAX_GROUP_COUNT);
+                let size = settings.group_size.unwrap_or(0);
+                let sizes = swap_core::group_sizes(active.len(), count, size);
+                settings.group_count = Some(sizes.len() as u32);
+                settings.group_size = Some(sizes.iter().copied().max().unwrap_or(0));
+            }
+            "Single group" => {
+                settings.group_count = Some(1);
+                settings.group_size = Some(active.len() as u32);
+            }
+            _ => {
+                let shape = swap_core::suggest_groups(active.len());
+                settings.group_count = Some(shape.count);
+                settings.group_size = Some(shape.size);
+            }
+        }
+    }
 
     let people: Vec<ParticipantId> = active
         .iter()

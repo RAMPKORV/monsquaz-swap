@@ -39,6 +39,11 @@
       "contrast": true
     },
     {
+      "id": "setup-groups",
+      "query": "demo=1&static=1&view=setup&step=2",
+      "contrast": true
+    },
+    {
       "id": "people",
       "query": "demo=1&static=1&view=people",
       "contrast": true,

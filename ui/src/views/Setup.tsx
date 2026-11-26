@@ -74,7 +74,7 @@ export function SetupView({
         }
       />
 
-      <ol className="wizard-steps" aria-label="Setup steps">
+      <ol className="wizard-steps" aria-label="Setup steps" role="list">
         {steps.map((entry, index) => (
           <li key={entry.id}>
             <button
@@ -89,6 +89,9 @@ export function SetupView({
                 {index < step ? <Icon name="check" size={14} /> : index + 1}
               </span>
               <span>
+                {index < step ? (
+                  <span className="visually-hidden">Completed </span>
+                ) : null}
                 <strong>{entry.label}</strong>
                 <small>{entry.detail}</small>
               </span>
@@ -428,16 +431,28 @@ function GroupsStep({
   return (
     <div className="wizard-grid">
       <div className="form-grid">
-        <Field label="Group suggestion" htmlFor="group-mode">
+        <Field
+          label="Group suggestion"
+          htmlFor="group-mode"
+          helpId="group-mode-help"
+          help={
+            draft.groupMode === "Manual"
+              ? "Set the group count and size yourself. Soft bounds are 5 to 12 people."
+              : draft.groupMode === "Single group"
+                ? "Single group uses the full roster. Choose Manual to override the shape."
+                : "The planner sets the group count and size from the locked roster. Choose Manual to override."
+          }
+        >
           <select
             id="group-mode"
+            aria-describedby="group-mode-help"
             className="input"
             value={draft.groupMode}
             onChange={(event) =>
               update("groupMode", event.target.value as EventDraft["groupMode"])
             }
           >
-            <option value="Lookup">Suggest from roster</option>
+            <option value="Lookup">From the locked roster</option>
             <option value="Single group">Single group</option>
             <option value="Manual">Manual</option>
           </select>
@@ -462,32 +477,55 @@ function GroupsStep({
             <option>Both</option>
           </select>
         </Field>
-        <Field label="Groups" htmlFor="group-count" help="Between 1 and 4 groups." helpId="group-count-help">
+        <Field
+          label="Groups"
+          htmlFor="group-count"
+          help={
+            draft.groupMode === "Manual"
+              ? "Between 1 and 4 groups."
+              : draft.groupMode === "Single group"
+                ? "Fixed at one group."
+                : "Set from the locked roster."
+          }
+          helpId="group-count-help"
+        >
           <input
             id="group-count"
-          aria-describedby="group-count-help"
+            aria-describedby="group-count-help"
             className="input"
             type="number"
             min={1}
             max={4}
-            value={draft.groupCount}
+            disabled={draft.groupMode !== "Manual"}
+            value={draft.groupMode === "Manual" ? draft.groupCount : ""}
+            placeholder={draft.groupMode === "Single group" ? "1" : "From roster"}
             onChange={(event) => update("groupCount", Number(event.target.value) || 1)}
           />
         </Field>
         <Field
           label="People per group"
           htmlFor="group-size"
-        helpId="group-size-help"
-          help="Between 2 and 20 people."
+          helpId="group-size-help"
+          help={
+            draft.groupMode === "Manual"
+              ? "Between 2 and 20 people. Soft bounds are 5 to 12."
+              : draft.groupMode === "Single group"
+                ? "The full roster."
+                : "Set from the locked roster."
+          }
         >
           <input
             id="group-size"
-          aria-describedby="group-size-help"
+            aria-describedby="group-size-help"
             className="input"
             type="number"
             min={2}
             max={20}
-            value={draft.groupSize}
+            disabled={draft.groupMode !== "Manual"}
+            value={draft.groupMode === "Manual" ? draft.groupSize : ""}
+            placeholder={
+              draft.groupMode === "Single group" ? "All people" : "From roster"
+            }
             onChange={(event) => update("groupSize", Number(event.target.value) || 2)}
           />
         </Field>
@@ -509,6 +547,7 @@ function GroupsStep({
             <option value="K rounds">Every K rounds</option>
             <option value="Calendar">On a calendar date</option>
             <option value="Host-triggered">When the host triggers it</option>
+            <option value="Exhausted">When a group exhausts</option>
           </select>
         </Field>
       </div>
@@ -518,7 +557,7 @@ function GroupsStep({
           <Icon name="users" size={20} />
         </span>
         <div>
-          <h2>Groups are hidden from participants</h2>
+          <h3>Groups are hidden from participants</h3>
           <p>
             Participants see their current assignment and their own season.
             They never see a group name, another group, or the fun score.
@@ -526,10 +565,16 @@ function GroupsStep({
         </div>
       </div>
 
-      {draft.groupSize < 5 ? (
+      {draft.groupMode === "Manual" && draft.groupSize < 5 ? (
         <p className="inline-warning">
           <Icon name="alert" size={16} /> A group of {draft.groupSize} is below
           the soft minimum of 5. The planner warns but does not block the plan.
+        </p>
+      ) : null}
+      {draft.groupMode === "Manual" && draft.groupSize > 12 ? (
+        <p className="inline-warning">
+          <Icon name="alert" size={16} /> A group of {draft.groupSize} is above
+          the soft maximum of 12. The planner warns but does not block the plan.
         </p>
       ) : null}
     </div>
@@ -574,7 +619,13 @@ function ReviewStep({
         </div>
         <div>
           <dt>Groups</dt>
-          <dd>{draft.groupCount} × {draft.groupSize}</dd>
+          <dd>
+            {draft.groupMode === "Lookup"
+              ? "From the locked roster"
+              : draft.groupMode === "Single group"
+                ? "Single group"
+                : `${draft.groupCount} × ${draft.groupSize}`}
+          </dd>
         </div>
         <div>
           <dt>Pack</dt>

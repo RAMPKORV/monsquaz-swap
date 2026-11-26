@@ -515,6 +515,18 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses roster lookup groups and disables the manual fields", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Event setup" }));
+    await screen.findByRole("heading", { level: 1, name: "Event setup" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByLabelText("People per group")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("From the locked roster")).toBeInTheDocument();
+  });
+
   it("filters the participant roster", async () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });

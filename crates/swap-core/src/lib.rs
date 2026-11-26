@@ -9,12 +9,17 @@
 //! The state machines here are intentionally small. The app layer composes
 //! them; the UI and the bot do not invent their own states.
 
+pub mod groups;
 pub mod ids;
 pub mod ledger;
 pub mod reveal;
 pub mod schedule;
 pub mod state;
 
+pub use groups::{
+    GroupShape, GroupWarning, MAX_GROUP_COUNT, MAX_GROUP_SIZE, MAX_PHASES, MIN_GROUP_SIZE,
+    MIN_PHASES, default_cadence, group_sizes, group_warnings, phase_count, suggest_groups,
+};
 pub use ids::{ParticipantId, TrackCode};
 pub use ledger::{LedgerError, SeenLedger, Touch};
 pub use reveal::album_order;

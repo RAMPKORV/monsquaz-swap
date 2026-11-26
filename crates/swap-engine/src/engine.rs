@@ -965,6 +965,19 @@ fn submit_inner(
         "submit",
         now,
     )?;
+    for kind in ["extension", "overdue"] {
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, kind)?
+        {
+            HostDecisionRepo::close(
+                &transaction,
+                &open.id,
+                "addressed",
+                now,
+                "a submission arrived",
+            )?;
+        }
+    }
     move_track(
         &transaction,
         request.event_id,
@@ -1017,6 +1030,19 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
     };
     let transaction = begin(db)?;
     open_event_in(&transaction, event_id, "skip")?;
+    for kind in ["extension", "overdue"] {
+        if let Some(open) =
+            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, kind)?
+        {
+            HostDecisionRepo::close(
+                &transaction,
+                &open.id,
+                "addressed",
+                now,
+                "the participant skipped",
+            )?;
+        }
+    }
     AssignmentRepo::update_status(&transaction, &assignment.id, status, now)?;
     if let Some(reason) = seen_reason {
         SeenRepo::record(

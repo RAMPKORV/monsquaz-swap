@@ -45,6 +45,9 @@ shot() {
   local query="$2"
   local width="$3"
   local height="$4"
+  if [ -n "${ONLY:-}" ] && [[ "$name" != *"$ONLY"* ]]; then
+    return
+  fi
   rm -rf "$PROFILE"
   mkdir -p "$PROFILE"
   if [[ "$name" == *-light-* ]]; then
@@ -52,6 +55,7 @@ shot() {
   else
     THEME=dark
   fi
+  local url="http://localhost:$PORT/?demo=1&static=1&theme=$THEME&$query"
   "$CHROMIUM" \
     --headless=new \
     --no-sandbox \
@@ -62,7 +66,38 @@ shot() {
     --window-size="$width,$height" \
     --virtual-time-budget=4000 \
     --screenshot="$OUT/$name.png" \
-    "http://localhost:$PORT/?demo=1&static=1&theme=$THEME&$query" >/dev/null 2>&1
+    "$url" >/dev/null 2>&1
+  if [[ "$name" == plan-* && "$name" != *-error-* ]]; then
+    local dom
+    dom="$("$CHROMIUM" \
+      --headless=new \
+      --no-sandbox \
+      --disable-gpu \
+      --hide-scrollbars \
+      --run-all-compositor-stages-before-draw \
+      --user-data-dir="$PROFILE" \
+      --virtual-time-budget=4000 \
+      --dump-dom \
+      "$url" 2>/dev/null)"
+    if [[ "$dom" == *"The local service did not answer"* || "$dom" == *"Local service unavailable"* ]]; then
+      echo "capture $name rendered the global error panel" >&2
+      exit 1
+    fi
+    case "$name" in
+      plan-participant-view-*)
+        if [[ "$dom" != *"Redaction preview"* ]]; then
+          echo "capture $name did not render the redaction preview" >&2
+          exit 1
+        fi
+        ;;
+      plan-full-*|plan-graph-*|plan-populated-dark-zoom200)
+        if [[ "$dom" != *"Schedule planner"* ]]; then
+          echo "capture $name did not render the planner" >&2
+          exit 1
+        fi
+        ;;
+    esac
+  fi
   echo "wrote $OUT/$name.png"
 }
 
@@ -108,7 +143,7 @@ shot plan-populated-dark-1024 "view=plan" 1024 700
 shot plan-participant-view-dark-1280 "view=plan&participant=1" 1280 800
 shot plan-full-dark-1280x1600 "view=plan" 1280 1600
 shot plan-graph-dark-1280x1200 "view=plan" 1280 1200
-shot plan-populated-dark-zoom200 "view=plan" 640 800
+shot plan-populated-dark-zoom200 "view=plan" 640 400
 
 shot settings-first-run-dark-1280 "view=settings&state=empty" 1280 800
 shot settings-populated-dark-1280 "view=settings" 1280 800

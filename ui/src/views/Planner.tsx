@@ -235,6 +235,9 @@ export function PlannerView({
                       ? "Only the sample participant's assignments are visible."
                       : "Tracks by round. Each cell is the person who holds the track."}
                   </p>
+                  <p id="matrix-scroll-help" className="visually-hidden">
+                    Scroll both axes. Use the arrow keys when the matrix has focus.
+                  </p>
                 </div>
                 {data.matrix.length > 16 ? (
                   <span className="card__meta">
@@ -248,7 +251,8 @@ export function PlannerView({
                 }`}
                 tabIndex={0}
                 role="region"
-                aria-label="Assignment matrix, scroll both axes"
+                aria-labelledby="matrix-title"
+                aria-describedby="matrix-scroll-help"
               >
                 <table className="matrix">
                   <caption className="visually-hidden">
@@ -281,10 +285,23 @@ export function PlannerView({
                           return (
                             <td key={cell.round}>
                               {viewAsParticipant ? (
-                                mine ? <span className="matrix-you">You</span> : <span className="matrix-blank">—</span>
+                                mine ? (
+                                  <span className="matrix-you">You</span>
+                                ) : (
+                                  <span className="matrix-blank">
+                                    <span aria-hidden="true">—</span>
+                                    <span className="visually-hidden">No assignment</span>
+                                  </span>
+                                )
                               ) : (
                                 <span title={cell.participantName}>
                                   {shortName(cell.participantName)}
+                                  {shortName(cell.participantName) === cell.participantName ? null : (
+                                    <span className="visually-hidden">
+                                      {" "}
+                                      ({cell.participantName})
+                                    </span>
+                                  )}
                                 </span>
                               )}
                             </td>
@@ -327,11 +344,26 @@ export function PlannerView({
                   {visibleWarnings.map((warning) => (
                     <div className={`warning warning--${warning.severity}`} key={warning.id}>
                       <Icon
-                        name={warning.severity === "danger" ? "alert" : "check"}
+                        name={
+                          warning.severity === "danger"
+                            ? "alert"
+                            : warning.severity === "warn"
+                              ? "clock"
+                              : "help"
+                        }
                         size={18}
                       />
                       <div>
-                        <strong>{warning.title}</strong>
+                        <strong>
+                          <span className="visually-hidden">
+                            {warning.severity === "danger"
+                              ? "Danger: "
+                              : warning.severity === "warn"
+                                ? "Warning: "
+                                : "Info: "}
+                          </span>
+                          {warning.title}
+                        </strong>
                         <p>{warning.detail}</p>
                       </div>
                     </div>
@@ -527,8 +559,10 @@ function PlanGraph({
         <title id="graph-figure-title">Round {data.graph.round + 1} assignment graph</title>
         <desc id="graph-figure-desc">
           Tracks on the left connect to the people who hold them in this round.
-          The graph does not show owners or group membership. The assignment
-          matrix above lists every track and person pair.
+          The graph does not show owners or group membership.{" "}
+          {participantView
+            ? "The matrix above shows only the sample participant's assignments."
+            : "The assignment matrix above lists every track and person pair."}
         </desc>
         {edges.map((edge) => (
           <g key={`${edge.trackCode}-${edge.participantName}`}>
@@ -560,6 +594,7 @@ function PlanGraph({
         ))}
         {people.map((person) => (
           <text key={person} x="526" y={(personY.get(person) ?? 0) + 4} className="graph-label">
+            <title>{person}</title>
             {shortName(person)}
           </text>
         ))}

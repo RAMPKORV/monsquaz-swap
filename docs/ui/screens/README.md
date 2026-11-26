@@ -34,8 +34,9 @@ Additional states:
 - `plan-participant-view-dark-1280` — host preview of the participant view.
 - `plan-full-dark-1280x1600` — the complete planner page.
 - `plan-graph-dark-1280x1200` — the round graph below the matrix.
-- `plan-populated-dark-zoom200` and `people-populated-dark-zoom200` — 640 px
-  wide, equivalent to 200% zoom.
+- `plan-populated-dark-zoom200` — 640×400, a true 200% zoom of the
+  planner. `people-populated-dark-zoom200` — 640 px wide, equivalent to 200%
+  zoom.
 - `shell-command-palette-dark-1280` — the command palette with its focus ring.
 - `mission-populated-light-1024` — light theme at the minimum window width.
 - `mission-populated-dark-zoom200` — 640×400 CSS pixels, equivalent to 200%

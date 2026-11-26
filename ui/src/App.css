@@ -539,6 +539,10 @@ textarea {
   color: var(--muted);
 }
 
+.statusbar__bot {
+  display: none;
+}
+
 .statusbar__spacer {
   flex: 1;
 }
@@ -726,9 +730,20 @@ textarea {
   line-height: 1.45;
 }
 
+.banner > div {
+  max-width: 78ch;
+}
+
 .banner strong {
   color: var(--text);
   font-weight: 600;
+}
+
+.banner__meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: 11px;
 }
 
 .banner--danger {
@@ -2239,12 +2254,20 @@ select.input {
   gap: 1px;
 }
 
+.plan-actionbar__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .plan-actionbar__copy strong {
   font-size: 12px;
   font-weight: 600;
 }
 
 .plan-actionbar__copy span {
+  max-width: 72ch;
   color: var(--faint-raised);
   font-size: 11px;
   line-height: 1.4;
@@ -2339,11 +2362,6 @@ select.input {
   border-top: 1px solid var(--line);
 }
 
-.matrix-scroll--bounded {
-  max-height: calc(100vh - 440px);
-  overflow: auto;
-}
-
 .matrix-scroll:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -2353,13 +2371,13 @@ select.input {
   width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .matrix th,
 .matrix td {
   overflow: hidden;
-  padding: 5px 6px;
+  padding: 6px;
   border-bottom: 1px solid var(--line);
   text-align: left;
   text-overflow: ellipsis;
@@ -2377,7 +2395,7 @@ select.input {
   z-index: 3;
   background: var(--surface-2);
   color: var(--faint-raised);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -2393,7 +2411,7 @@ select.input {
 .matrix tbody th small {
   margin-left: 4px;
   color: var(--faint-raised);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 400;
 }
 
@@ -2498,7 +2516,7 @@ select.input {
 
 .fun-score {
   color: var(--accent);
-  font-size: 30px;
+  font-size: 24px;
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -2881,6 +2899,7 @@ select.input {
 }
 
 .warning p {
+  max-width: 72ch;
   margin-top: 1px;
 }
 
@@ -3334,9 +3353,10 @@ select.input {
   .sidebar {
     height: auto;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    overflow-x: auto;
+    overflow-x: visible;
     padding: 8px 12px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
@@ -3352,6 +3372,9 @@ select.input {
   }
 
   .nav {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
     flex-direction: row;
     gap: 2px;
   }
@@ -3362,6 +3385,10 @@ select.input {
     display: none;
   }
 
+  .statusbar__bot {
+    display: inline-flex;
+  }
+
   .nav-item {
     width: auto;
     flex: none;
@@ -3370,6 +3397,10 @@ select.input {
 
   .nav-item--active::before {
     display: none;
+  }
+
+  .nav-item--active {
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
 
   .topbar {
@@ -3539,19 +3570,16 @@ select.input {
     border-top: 1px solid var(--line);
   }
 
-  .people-summary,
-  .plan-summary {
+  .people-summary {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .people-summary .fact,
-  .plan-summary .summary-fact {
+  .people-summary .fact {
     border-left: 0;
     border-top: 1px solid var(--line);
   }
 
-  .people-summary .fact:first-child,
-  .plan-summary .summary-fact:first-child {
+  .people-summary .fact:first-child {
     border-top: 0;
   }
 
@@ -3631,11 +3659,6 @@ select.input {
   .statusbar {
     gap: 8px;
     overflow-x: auto;
-  }
-
-  .statusbar__item:nth-child(2),
-  .statusbar__item:nth-child(4) {
-    display: none;
   }
 }
 

@@ -499,7 +499,10 @@ fn audit_outbound(
     for effect in effects {
         match effect {
             Effect::TrackFile {
-                filename, caption, ..
+                track_code,
+                filename,
+                caption,
+                ..
             } => {
                 let Some((stem, extension)) = filename.split_once('.') else {
                     return (false, format!("file {filename} has no extension"));
@@ -507,8 +510,19 @@ fn audit_outbound(
                 if !track_codes.contains(stem) || extension != "it" {
                     return (false, format!("file {filename} is not opaque"));
                 }
+                if stem != track_code {
+                    return (
+                        false,
+                        format!("file {filename} does not match track {track_code}"),
+                    );
+                }
                 if contains_name(filename, display_names) || contains_name(caption, display_names) {
                     return (false, format!("file {filename} leaks a name"));
+                }
+            }
+            Effect::Offer { track_code, .. } => {
+                if !track_codes.contains(track_code) {
+                    return (false, format!("offer {track_code} is not opaque"));
                 }
             }
             Effect::Dm { content, .. } | Effect::Channel { content, .. } => {
@@ -516,7 +530,6 @@ fn audit_outbound(
                     return (false, "a message leaks a participant name".to_string());
                 }
             }
-            Effect::Offer { .. } => {}
         }
     }
     (true, String::new())
@@ -558,5 +571,121 @@ mod tests {
         assert_eq!(report.revealed_tracks, 8);
         assert!(report.effects.offers >= 56);
         assert!(report.effects.files >= 1);
+    }
+}
+
+#[cfg(test)]
+mod anonymity_tests {
+    use super::*;
+
+    fn codes() -> HashSet<String> {
+        ["S7F3A".to_string(), "S4K2M".to_string()]
+            .into_iter()
+            .collect()
+    }
+
+    fn names() -> Vec<String> {
+        vec!["Person 0".to_string(), "user-00".to_string()]
+    }
+
+    #[test]
+    fn an_opaque_file_and_message_pass() {
+        let effects = vec![
+            Effect::TrackFile {
+                user_id: "user-01".to_string(),
+                track_code: "S7F3A".to_string(),
+                filename: "S7F3A.it".to_string(),
+                bytes: vec![1],
+                caption: "Your next track is ready.".to_string(),
+            },
+            Effect::Dm {
+                user_id: "user-01".to_string(),
+                content: "Claim within 24 hours.".to_string(),
+            },
+        ];
+        assert_eq!(
+            audit_outbound(&effects, &codes(), &names()),
+            (true, String::new())
+        );
+    }
+
+    #[test]
+    fn a_participant_name_in_a_message_is_refused() {
+        let effects = vec![Effect::Dm {
+            user_id: "user-01".to_string(),
+            content: "This is Person 0's track.".to_string(),
+        }];
+        let (passed, detail) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("leaks a participant name"));
+    }
+
+    #[test]
+    fn an_owner_id_in_a_caption_is_refused() {
+        let effects = vec![Effect::TrackFile {
+            user_id: "user-01".to_string(),
+            track_code: "S7F3A".to_string(),
+            filename: "S7F3A.it".to_string(),
+            bytes: vec![1],
+            caption: "Original owner user-00".to_string(),
+        }];
+        let (passed, _) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+    }
+
+    #[test]
+    fn a_non_opaque_filename_is_refused() {
+        let effects = vec![Effect::TrackFile {
+            user_id: "user-01".to_string(),
+            track_code: "S7F3A".to_string(),
+            filename: "original-song.it".to_string(),
+            bytes: vec![1],
+            caption: "Your next track is ready.".to_string(),
+        }];
+        let (passed, detail) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("is not opaque"));
+    }
+
+    #[test]
+    fn a_mismatched_track_filename_is_refused() {
+        let effects = vec![Effect::TrackFile {
+            user_id: "user-01".to_string(),
+            track_code: "S7F3A".to_string(),
+            filename: "S4K2M.it".to_string(),
+            bytes: vec![1],
+            caption: "Your next track is ready.".to_string(),
+        }];
+        let (passed, detail) = audit_outbound(&effects, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("does not match"));
+    }
+
+    #[test]
+    fn an_opaque_offer_passes_and_a_foreign_code_is_refused() {
+        let opaque = vec![Effect::Offer {
+            user_id: "user-01".to_string(),
+            event_id: "evt-1".to_string(),
+            assignment_id: "assign-1".to_string(),
+            track_code: "S7F3A".to_string(),
+            due_at: 2_000,
+            claim_window_secs: 86_400,
+        }];
+        assert_eq!(
+            audit_outbound(&opaque, &codes(), &names()),
+            (true, String::new())
+        );
+
+        let foreign = vec![Effect::Offer {
+            user_id: "user-01".to_string(),
+            event_id: "evt-1".to_string(),
+            assignment_id: "assign-1".to_string(),
+            track_code: "S0NG1".to_string(),
+            due_at: 2_000,
+            claim_window_secs: 86_400,
+        }];
+        let (passed, detail) = audit_outbound(&foreign, &codes(), &names());
+        assert!(!passed);
+        assert!(detail.contains("is not opaque"));
     }
 }

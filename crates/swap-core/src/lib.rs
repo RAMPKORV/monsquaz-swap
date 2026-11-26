@@ -16,7 +16,9 @@ pub mod state;
 
 pub use ids::{ParticipantId, TrackCode};
 pub use ledger::{LedgerError, SeenLedger, Touch};
-pub use schedule::{Schedule, ScheduleError, ScheduledAssignment, TrackSpec};
+pub use schedule::{
+    BalanceReport, Schedule, ScheduleError, ScheduleStrategy, ScheduledAssignment, TrackSpec,
+};
 pub use state::{
     Assignment, AssignmentError, AssignmentStatus, EventState, Membership, Participant, Readiness,
     Role, StateError, Track, TrackState,

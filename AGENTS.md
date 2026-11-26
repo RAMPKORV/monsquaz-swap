@@ -72,7 +72,7 @@ This file is a router. Detailed rules live in `ai-rules/`.
 ./bin/project next
 ./bin/project issue show MSW-###
 ./bin/project issue claim MSW-### --as-agent <name>
-./bin/project worktree new MSW-### --as-agent <name>
+./bin/project worktree new MSW-### --as-agent <name>          # first batch issue
 ./bin/project worktree finish MSW-### --yes --as-agent <name>   # from main checkout
 
 # app
@@ -84,6 +84,10 @@ pnpm --dir ui build   # before cargo test on a clean checkout
 cargo test --workspace
 scripts/check.sh
 ```
+
+Batch 3–6 related issues into one branch, one PR, and one CI run. Claim every
+issue, create the worktree from the first issue, and work the rest in it. The
+PR body lists every issue key. See `ai-rules/WORKFLOW.md`.
 
 `src-tauri` embeds `ui/dist` at compile time. Run `pnpm --dir ui build` before
 `cargo test --workspace` or `pnpm tauri build` on a clean checkout.
@@ -148,6 +152,8 @@ pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
 | `docs/EVENT_SETTINGS.md` | every event knob, its default and lock behaviour |
 | `docs/ARCHITECTURE.md` | public system design |
 | `docs/SETUP.md` | bot token, keychain, channel mapping, test DM |
+| `docs/FORMAL_METHODS.md` | formal verification scope, tools, and maintenance |
+| `specs/tla/` | TLA+ design models |
 | `docs/RESEARCH.md` | evidence and sources behind the design |
 | `docs/ROADMAP.md` | milestones and exit criteria |
 | `specs/features/` | hand-written Gherkin, executable later with cucumber-rs |

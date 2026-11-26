@@ -135,6 +135,7 @@ pub struct ScheduleOutcome {
     pub version: u32,
     pub rounds: u32,
     pub commitment: String,
+    pub fallback: bool,
     pub assignments: Vec<PlanAssignmentRecord>,
 }
 
@@ -481,10 +482,15 @@ pub fn generate_schedule(
             owner: ParticipantId::new(track.owner_id.clone()),
         })
         .collect();
-    let schedule = Schedule::generate(&people, &specs, rounds, event.seed)?;
-
+    let strategy = match settings.scheduler.as_deref() {
+        Some(value) => swap_core::ScheduleStrategy::parse(value).ok_or(SettingsError::Scheduler)?,
+        None => swap_core::ScheduleStrategy::default(),
+    };
     let previous = PlanRepo::latest(db.conn(), event_id)?;
     let version = previous.map(|plan| plan.version + 1).unwrap_or(1);
+    let plan_seed = event.seed.wrapping_add(u64::from(version - 1));
+    let schedule = Schedule::generate_with(&people, &specs, rounds, plan_seed, strategy)?;
+
     let settings_json = serde_json::to_string(&settings)?;
     let planned: Vec<PlanAssignmentRecord> = schedule
         .assignments
@@ -500,7 +506,7 @@ pub fn generate_schedule(
     let plan = PlanRecord {
         event_id: event_id.to_string(),
         version,
-        seed: event.seed,
+        seed: plan_seed,
         rounds,
         settings_json,
         commitment: String::new(),
@@ -524,6 +530,7 @@ pub fn generate_schedule(
         version,
         rounds,
         commitment,
+        fallback: schedule.fallback,
         assignments: planned,
     })
 }

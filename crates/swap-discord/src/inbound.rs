@@ -119,8 +119,8 @@ impl fmt::Debug for InboundEvent {
                 .field("interaction", interaction)
                 .field("user_id", user_id)
                 .field("guild_id", guild_id)
-                .field("event_id", &custom_id.event_id)
-                .field("action", &custom_id.action)
+                .field("event_id", &custom_id.event_id())
+                .field("action", &custom_id.action())
                 .finish(),
             Self::ModalSubmit {
                 interaction,
@@ -133,8 +133,8 @@ impl fmt::Debug for InboundEvent {
                 .field("interaction", interaction)
                 .field("user_id", user_id)
                 .field("guild_id", guild_id)
-                .field("event_id", &custom_id.event_id)
-                .field("action", &custom_id.action)
+                .field("event_id", &custom_id.event_id())
+                .field("action", &custom_id.action())
                 .field("field_count", &fields.len())
                 .finish(),
             Self::DmAttachment {

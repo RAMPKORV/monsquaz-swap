@@ -535,6 +535,7 @@ export default function App() {
               <button
                 type="button"
                 className="command-trigger"
+                aria-label="Jump to"
                 onClick={() => setPaletteOpen(true)}
               >
                 <Icon name="search" size={16} />
@@ -575,11 +576,20 @@ export default function App() {
           </main>
           <footer className="statusbar">
             <span className="statusbar__item">SQLite, local</span>
+            <span className="statusbar__item statusbar__bot">
+              {mission?.bot?.status === "Online"
+                ? "Bot online"
+                : mission?.bot?.status === "Offline"
+                  ? "Bot offline"
+                  : "No bot"}
+            </span>
             <span className="statusbar__spacer" />
             <span className="statusbar__item">
-              {mission?.event?.stage
-                ? `Event: ${mission.event.stage}`
-                : "No event"}
+              {view === "plan" && plan
+                ? `Plan: ${plan.status}`
+                : mission?.event?.stage
+                  ? `Event: ${mission.event.stage}`
+                  : "No event"}
             </span>
             <span className="statusbar__item">v0.1.0</span>
           </footer>

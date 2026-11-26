@@ -25,9 +25,13 @@ live = [
     "dep:twilight-model",
     "dep:serde_json",
 ]
+test-proxy = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+proptest = "1"
+wiremock = "0.6"
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [[example]]
 name = "gateway_smoke"

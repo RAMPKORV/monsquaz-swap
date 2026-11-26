@@ -144,7 +144,7 @@ def repo_config() -> dict:
             "dump": "project/ledger/current.jsonl",
         },
         "workflow": {"review_bar": 8, "ceremony_default": "standard",
-                     "wip_limit": 2, "score_ttl_days": 14},
+                     "wip_limit": 6, "score_ttl_days": 14},
     }
 
 

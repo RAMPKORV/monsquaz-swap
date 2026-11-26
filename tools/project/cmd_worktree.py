@@ -139,7 +139,7 @@ def cmd_worktree_new(a):
         if issue["assignee"] and issue["assignee"] != a.as_agent and not a.force:
             raise core.ProjectError(f"issue is claimed by {issue['assignee']}; use --force --reason to steal")
         limit = int(core.get_config_row(con, "workflow.wip_limit",
-                    core.repo_config().get("workflow", {}).get("wip_limit", 2)) or 0)
+                    core.repo_config().get("workflow", {}).get("wip_limit", 6)) or 0)
         if limit > 0 and not a.force:
             n = core.one(con, """SELECT COUNT(*) n FROM v_issue WHERE assignee=? AND archived_at IS NULL
                 AND status_category='active' AND id<>?""", (a.as_agent, issue["id"]))["n"]

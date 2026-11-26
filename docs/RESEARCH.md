@@ -96,9 +96,19 @@ The schedule is a partial Latin square:
 - no symbol repeats in a row or column;
 - the owner is excluded from the column.
 
-N-1 rounds is the complete classic shape for a fixed group. Build it with a
-randomized row-by-row perfect matching. This is a partial Latin rectangle and a
-bipartite edge coloring. It avoids the predictability of a bare cyclic shift.
+N-1 rounds is the complete classic shape for a fixed group. The planner has
+three seeded strategies:
+
+- `balanced` (default): row-by-row min-cost matching with a penalty for
+  participant pairs that already met, especially in the last two rounds;
+- `random_matching`: randomized row-by-row perfect matching, a partial Latin
+  rectangle and a bipartite edge coloring;
+- `cyclic`: a cyclic Latin square with permuted rows and a permuted offset
+  sequence, which permutes columns and symbols together. It falls back to
+  matching when each participant does not own one track.
+
+All strategies avoid the predictability of a bare cyclic shift and are
+deterministic for the same input and seed.
 
 For skips and fill-ins, use bipartite matching and, when needed, min-cost flow.
 A Hall violator certificate explains infeasibility. Use CP-SAT only for small
@@ -186,6 +196,15 @@ The event format itself is documented by the Monsquaz Collective:
 [Swap Album 8](https://monsquazcollective.bandcamp.com/album/monsquaz-swap-album-8-the-gachimuchi-edition),
 [Swap Album 9 notes](https://blog.jonasbengtson.se/monsquaz-swap-album-9).
 
+## Discord transport testing
+
+No official Discord bot emulator exists. Twilight supports a mock HTTP host
+through its proxy setting. `crates/swap-discord/tests/setup_http.rs` uses it
+with Wiremock for the setup, DM, and file serializers. Run it with
+`cargo test -p swap-discord --features test-proxy --test setup_http`. Fake gateway sessions
+cover the supervisor. Gateway identification, rate limits, and Discord policy
+still need a live test guild and a human.
+
 ## Open evidence gaps
 
 - The fun metric and group weights are a design proxy, not validated human
@@ -198,3 +217,5 @@ The event format itself is documented by the Monsquaz Collective:
 - The Tauri Linux/WebKitGTK behavior on every distro needs a clean-VM test.
 - The openmpt123 static build must be tested with real module fixtures before
   preview ships.
+- Non-module audio and zip files are not metadata-scrubbed. ID3, Vorbis, and WAV
+  LIST tags can carry identity. The allowlist decision needs a product review.

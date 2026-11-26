@@ -753,14 +753,47 @@ function plannerGroups(count: number): PlannerGroup[] {
   }));
 }
 
+function seededOrder(count: number, seed: number): number[] {
+  let state = seed >>> 0;
+  const random = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const order = Array.from({ length: count }, (_, index) => index);
+  for (let index = count - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [order[index], order[other]] = [order[other]!, order[index]!];
+  }
+  return order;
+}
+
+function planTrackOrder(count: number): number[] {
+  return seededOrder(count, 0x5eed1234);
+}
+
+function planRoundOffsets(count: number): number[] {
+  return seededOrder(count - 1, 0x0badf00d).map((index) => index + 1);
+}
+
+export function demoOwnerId(trackCode: string): string | null {
+  const index = trackCodes.indexOf(trackCode);
+  return index === -1 ? null : `user-${index.toString().padStart(2, "0")}`;
+}
+
 function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
   const groupCount = count >= 40 ? 4 : 2;
   const groupSize = Math.ceil(count / groupCount);
-  return Array.from({ length: count }, (_, trackIndex) => ({
+  const trackOrder = planTrackOrder(count);
+  const offsets = planRoundOffsets(count);
+  return trackOrder.map((trackIndex, position) => ({
     trackCode: trackCodes[trackIndex % trackCodes.length]!,
     ownerGroup: String.fromCharCode(65 + Math.floor(trackIndex / groupSize)),
     cells: Array.from({ length: rounds }, (_, round) => {
-      const person = (trackIndex + round + 1) % count;
+      const offset = offsets[round % offsets.length]!;
+      const person = trackOrder[(position + offset) % count]!;
       const name = names[person % names.length]!;
       return {
         round,
@@ -773,10 +806,13 @@ function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
 }
 
 function buildGraph(count: number, round: number): PlanData["graph"] {
+  const trackOrder = planTrackOrder(count);
+  const offsets = planRoundOffsets(count);
   return {
     round,
-    edges: Array.from({ length: count }, (_, trackIndex) => {
-      const person = (trackIndex + round + 1) % count;
+    edges: trackOrder.map((trackIndex, position) => {
+      const offset = offsets[round % offsets.length]!;
+      const person = trackOrder[(position + offset) % count]!;
       return {
         trackCode: trackCodes[trackIndex % trackCodes.length]!,
         participantName: `${names[person % names.length]!} ${person + 1}`,
@@ -814,7 +850,10 @@ export function demoPlan(scenario: Scenario): PlanData {
   const dense = scenario === "dense" || scenario === "long";
   const count = dense ? 40 : 12;
   const rounds = dense ? 8 : 11;
-  const event = eventSummary(count, count, rounds);
+  const event = {
+    ...eventSummary(count, count, rounds),
+    ...(scenario === "long" ? { name: longEventName } : {}),
+  };
   if (scenario === "infeasible") {
     return {
       status: "Infeasible",
@@ -836,8 +875,8 @@ export function demoPlan(scenario: Scenario): PlanData {
         plannerWarning(
           "plan-infeasible-2",
           "warn",
-          "A wider pool is available",
-          "The planner can draw from the global pool for this round. No pair is marked as seen until a claim.",
+          "A rebuild can use the full roster",
+          "The planner can rebuild the draft from all active participants. Earlier rounds can change. No pair is marked as seen until a claim.",
         ),
       ],
       funScore: null,
@@ -866,8 +905,8 @@ export function demoPlan(scenario: Scenario): PlanData {
         plannerWarning(
           "plan-1",
           "info",
-          "Round 8 is the last full-exposure round",
-          "After round 8, the planner switches to the capped schedule. No participant receives a track they have seen before.",
+          "Round 8 is the last full round",
+          "After round 8, the planner limits how many people can contribute to each track. No participant receives a track they have seen before.",
         ),
       ];
   return {

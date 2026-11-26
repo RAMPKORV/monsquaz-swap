@@ -3,6 +3,13 @@ Feature: Classic group swaps
   Groups apply to classic mode only.
   Async mode uses one global queue.
 
+  Scenario: The host chooses a schedule strategy
+    Given a classic event with a seeded track for every participant
+    When the event setting selects the balanced, random matching, or cyclic strategy
+    Then the plan contains no repeat and no own track
+    And the plan is the same for the same input and seed
+    And the balanced strategy does not increase repeated handoffs
+
   Scenario: The planner suggests groups
     Given a classic event with 20 expected participants
     When the host opens the event wizard

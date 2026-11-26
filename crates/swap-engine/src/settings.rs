@@ -27,6 +27,7 @@ pub struct EventSettings {
     pub group_count: Option<u32>,
     pub group_size: Option<u32>,
     pub rotation: Option<String>,
+    pub scheduler: Option<String>,
     pub swap_cadence: Option<String>,
     pub schedule_visibility: Option<String>,
 }
@@ -49,6 +50,7 @@ impl Default for EventSettings {
             group_count: None,
             group_size: None,
             rotation: None,
+            scheduler: None,
             swap_cadence: None,
             schedule_visibility: None,
         }
@@ -71,6 +73,8 @@ pub enum SettingsError {
     GroupCount,
     #[error("the group size must be between 2 and 20")]
     GroupSize,
+    #[error("the scheduler must be balanced, random_matching, or cyclic")]
+    Scheduler,
 }
 
 impl EventSettings {
@@ -96,6 +100,11 @@ impl EventSettings {
             && !(2..=20).contains(&size)
         {
             return Err(SettingsError::GroupSize);
+        }
+        if let Some(scheduler) = &self.scheduler
+            && swap_core::ScheduleStrategy::parse(scheduler).is_none()
+        {
+            return Err(SettingsError::Scheduler);
         }
         let mut seen = BTreeSet::new();
         for extension in &self.allowed_extensions {
@@ -170,6 +179,15 @@ mod tests {
             settings.validate(),
             Err(SettingsError::InvalidExtension(_))
         ));
+    }
+
+    #[test]
+    fn an_unknown_scheduler_is_refused() {
+        let settings = EventSettings {
+            scheduler: Some("predictable".to_string()),
+            ..EventSettings::default()
+        };
+        assert_eq!(settings.validate(), Err(SettingsError::Scheduler));
     }
 
     #[test]

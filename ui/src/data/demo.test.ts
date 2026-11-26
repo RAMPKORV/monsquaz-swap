@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { demoPlan } from "./demo";
+import { demoOwnerId, demoPlan } from "./demo";
 
 describe("demo planner data", () => {
   it("keeps the demo matrix a partial Latin rectangle", () => {
@@ -9,7 +9,13 @@ describe("demo planner data", () => {
       const roundPeople = new Map<number, Set<string>>();
       const roundTracks = new Map<number, Set<string>>();
       for (const track of plan.matrix) {
+        const owner = demoOwnerId(track.trackCode);
+        expect(owner, `${scenario} ${track.trackCode} owner`).not.toBeNull();
         for (const cell of track.cells) {
+          expect(
+            cell.participantId,
+            `${scenario} ${track.trackCode} own track in round ${cell.round}`,
+          ).not.toBe(owner);
           const pair = `${cell.trackCode}\u0000${cell.participantId}`;
           expect(seen.has(pair), `${scenario} repeated ${pair}`).toBe(false);
           seen.add(pair);

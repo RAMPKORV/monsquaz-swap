@@ -77,9 +77,11 @@ pub struct Schedule {
 pub struct BalanceReport {
     /// Extra handoffs beyond the first for each participant pair.
     pub repeated_handoffs: u32,
-    /// Highest number of handoffs for one participant pair.
+    /// Highest number of holder-to-holder handoffs for one participant pair.
+    /// Seed-owner handoffs are excluded.
     pub max_pair_meetings: u32,
-    /// Distinct participant pairs that met at least once.
+    /// Distinct participant pairs that met as consecutive holders. Seed-owner
+    /// handoffs are excluded.
     pub unique_pairs: usize,
 }
 
@@ -203,13 +205,29 @@ impl Schedule {
                 false,
             ),
             ScheduleStrategy::Balanced => {
-                match balanced_schedule(&people, &specs, &owners, rounds, seed) {
-                    Ok(assignments) => (assignments, false),
-                    Err(round) => (
-                        random_schedule(&people, &specs, &owners, rounds, seed)
-                            .map_err(|_| ScheduleError::Infeasible { round })?,
-                        true,
-                    ),
+                let balanced = balanced_schedule(&people, &specs, &owners, rounds, seed);
+                let random = random_schedule(&people, &specs, &owners, rounds, seed);
+                match (balanced, random) {
+                    (Ok(balanced), Ok(random)) => {
+                        let balanced_report = balance_of(&balanced);
+                        let random_report = balance_of(&random);
+                        if (
+                            random_report.repeated_handoffs,
+                            random_report.max_pair_meetings,
+                        ) < (
+                            balanced_report.repeated_handoffs,
+                            balanced_report.max_pair_meetings,
+                        ) {
+                            (random, true)
+                        } else {
+                            (balanced, false)
+                        }
+                    }
+                    (Ok(balanced), Err(_)) => (balanced, false),
+                    (Err(_), Ok(random)) => (random, true),
+                    (Err(round), Err(_)) => {
+                        return Err(ScheduleError::Infeasible { round });
+                    }
                 }
             }
         };
@@ -925,34 +943,44 @@ mod tests {
 
     #[test]
     fn balanced_does_not_trail_random_on_the_public_report() {
-        let people = people(4);
-        let tracks = tracks(&people);
-        for seed in 0..5 {
-            let balanced =
-                Schedule::generate_with(&people, &tracks, 3, seed, ScheduleStrategy::Balanced)
-                    .unwrap();
-            let random = Schedule::generate_with(
-                &people,
-                &tracks,
-                3,
-                seed,
-                ScheduleStrategy::RandomMatching,
-            )
-            .unwrap();
-            let balanced_report = balanced.balance();
-            let random_report = random.balance();
-            assert!(
-                balanced_report.repeated_handoffs <= random_report.repeated_handoffs,
-                "seed {seed}: balanced {:?} vs random {:?}",
-                balanced_report,
-                random_report
-            );
-            assert!(
-                balanced_report.max_pair_meetings <= random_report.max_pair_meetings,
-                "seed {seed}: balanced {:?} vs random {:?}",
-                balanced_report,
-                random_report
-            );
+        for (people_count, rounds, seeds) in [
+            (4usize, 3u32, vec![0u32, 1, 2, 3, 4, 5, 185, 337]),
+            (6usize, 5u32, vec![14, 70]),
+        ] {
+            let people = people(people_count);
+            let tracks = tracks(&people);
+            for seed in seeds {
+                let balanced = Schedule::generate_with(
+                    &people,
+                    &tracks,
+                    rounds,
+                    u64::from(seed),
+                    ScheduleStrategy::Balanced,
+                )
+                .unwrap();
+                let random = Schedule::generate_with(
+                    &people,
+                    &tracks,
+                    rounds,
+                    u64::from(seed),
+                    ScheduleStrategy::RandomMatching,
+                )
+                .unwrap();
+                let balanced_report = balanced.balance();
+                let random_report = random.balance();
+                assert!(
+                    balanced_report.repeated_handoffs <= random_report.repeated_handoffs,
+                    "{people_count} people, seed {seed}: balanced {:?} vs random {:?}",
+                    balanced_report,
+                    random_report
+                );
+                assert!(
+                    balanced_report.max_pair_meetings <= random_report.max_pair_meetings,
+                    "{people_count} people, seed {seed}: balanced {:?} vs random {:?}",
+                    balanced_report,
+                    random_report
+                );
+            }
         }
     }
 
@@ -972,11 +1000,15 @@ mod tests {
                 ScheduleStrategy::RandomMatching,
             )
             .unwrap();
+            let balanced_report = balanced.balance();
+            let random_report = random.balance();
             assert!(
-                balanced.balance().repeated_handoffs <= random.balance().repeated_handoffs + 1,
-                "balanced {} vs random {} for seed {seed}",
-                balanced.balance().repeated_handoffs,
-                random.balance().repeated_handoffs
+                balanced_report.repeated_handoffs <= random_report.repeated_handoffs,
+                "balanced {balanced_report:?} vs random {random_report:?} for seed {seed}"
+            );
+            assert!(
+                balanced_report.max_pair_meetings <= random_report.max_pair_meetings,
+                "balanced {balanced_report:?} vs random {random_report:?} for seed {seed}"
             );
         }
     }

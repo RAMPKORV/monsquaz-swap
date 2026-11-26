@@ -209,14 +209,29 @@ prop_state_machine! {
 }
 
 #[test]
-fn a_terminal_assignment_refuses_further_transitions() {
-    let mut assignment = Assignment::offered();
-    assignment.claim().unwrap();
-    assignment.submit().unwrap();
-    assert!(assignment.claim().is_err());
-    assert!(assignment.submit().is_err());
-    assert!(assignment.skip().is_err());
-    assert!(assignment.expire().is_err());
-    assert!(assignment.revoke().is_err());
-    assert!(assignment.supersede().is_err());
+fn every_terminal_assignment_refuses_further_transitions() {
+    let terminal = [
+        AssignmentStatus::Submitted,
+        AssignmentStatus::SkippedBeforeClaim,
+        AssignmentStatus::SkippedAfterClaim,
+        AssignmentStatus::Expired,
+        AssignmentStatus::Revoked,
+        AssignmentStatus::Superseded,
+    ];
+    for status in terminal {
+        let mut assignment = Assignment { status };
+        assert!(assignment.claim().is_err(), "{status:?} accepted claim");
+        assert!(assignment.submit().is_err(), "{status:?} accepted submit");
+        assert!(assignment.skip().is_err(), "{status:?} accepted skip");
+        assert!(assignment.expire().is_err(), "{status:?} accepted expire");
+        assert!(
+            assignment.mark_overdue().is_err(),
+            "{status:?} accepted overdue"
+        );
+        assert!(assignment.revoke().is_err(), "{status:?} accepted revoke");
+        assert!(
+            assignment.supersede().is_err(),
+            "{status:?} accepted supersede"
+        );
+    }
 }

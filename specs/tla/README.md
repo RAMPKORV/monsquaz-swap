@@ -14,13 +14,13 @@ The models describe the event rules, not the implementation. See
 
 | Property | Meaning | Requirement |
 |---|---|---|
-| `NoRepeat` | A seen pair is never offered again. | PRD REQ-SEEN-001 |
-| `NoOwnTrack` | A participant never holds their own track. | PRD REQ-SEEN-002 |
-| `NoOwnOffer` | A participant is never offered their own track. | PRD REQ-SEEN-002 |
-| `AtMostOneOfferPerTrack` | A track has at most one open offer. | one active assignment per track |
-| `AtMostOneOfferPerPerson` | A participant has at most one open offer. | one active assignment per person |
-| `OneTrackPerPerson` | A participant holds at most one track. | DOMAIN custody |
-| `NoExpiredReoffer` | An expired pair is never offered again. | `delivery.feature` |
+| `NoRepeat` | A seen pair is never offered again. | PRD REQ-SCHED-001 |
+| `NoOwnTrack` | A participant never holds their own track. | PRD REQ-SCHED-001 |
+| `NoOwnOffer` | A participant is never offered their own track. | PRD REQ-SCHED-001 |
+| `AtMostOneOfferPerTrack` | A track has at most one open offer. | PRD REQ-SCHED-003 |
+| `AtMostOneOfferPerPerson` | A participant has at most one open offer. | PRD REQ-SCHED-003 |
+| `AtMostOneActivePerPerson` | A participant has at most one open offer or held track. | PRD REQ-SCHED-003 |
+| `NoExpiredReoffer` | An expired pair is never offered again. | PRD REQ-DELIVERY-002 |
 | `TypeOK` | Variables have the expected shape. | model hygiene |
 
 Every property has a mutation that makes TLC report that same invariant. The

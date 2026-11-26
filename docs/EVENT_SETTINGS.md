@@ -63,7 +63,9 @@ social-diversity objective. Optional genre/mood content tags can come later.
 | Infeasible phase | Global pool fallback | Fallback, shorten phase, stall, retire | No |
 
 The scheduler setting is available through the event settings API. The event
-wizard selector is a follow-up.
+wizard selector is a follow-up. `ScheduleOutcome.fallback` reports when a
+strategy used random matching. The plan record and UI do not persist that flag
+yet.
 
 Rules:
 

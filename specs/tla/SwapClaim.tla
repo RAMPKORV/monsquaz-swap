@@ -31,6 +31,7 @@ Offer(t, p) ==
     /\ p /= Owner[t]
     /\ \A other \in Participants : phase[t][other] /= "offered"
     /\ \A other \in Tracks : phase[other][p] /= "offered"
+    /\ \A other \in Tracks : holder[other] /= p
     /\ <<t, p>> \notin seen
     /\ <<t, p>> \notin banned
     /\ phase' = [phase EXCEPT ![t] = [phase[t] EXCEPT ![p] = "offered"]]
@@ -102,6 +103,7 @@ NoRepeat ==
 NoOwnTrack ==
     \A t \in Tracks : holder[t] /= NoOne => holder[t] /= Owner[t]
 
+\* Implied by AtMostOneActivePerPerson; kept for readers of the custody rule.
 OneTrackPerPerson ==
     \A p \in Participants :
         Cardinality({t \in Tracks : holder[t] = p}) <= 1
@@ -122,13 +124,17 @@ AtMostOneOfferPerPerson ==
     \A p \in Participants :
         Cardinality({t \in Tracks : phase[t][p] = "offered"}) <= 1
 
+AtMostOneActivePerPerson ==
+    \A p \in Participants :
+        Cardinality({t \in Tracks : holder[t] = p \/ phase[t][p] = "offered"}) <= 1
+
 Inv ==
     /\ TypeOK
     /\ NoRepeat
     /\ NoOwnTrack
-    /\ OneTrackPerPerson
     /\ NoExpiredReoffer
     /\ NoOwnOffer
     /\ AtMostOneOfferPerTrack
     /\ AtMostOneOfferPerPerson
+    /\ AtMostOneActivePerPerson
 =============================================================================

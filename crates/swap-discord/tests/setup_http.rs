@@ -213,4 +213,13 @@ async fn the_setup_test_dm_uses_the_same_mock() {
     let token = "aaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc";
     let id = setup.send_test_dm(token, "42").await.unwrap();
     assert_eq!(id, "555");
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_bot_auth(&requests, token);
+    assert_eq!(requests[0].url.path(), "/api/v10/users/@me/channels");
+    assert_eq!(requests[1].url.path(), "/api/v10/channels/100/messages");
+    assert!(
+        String::from_utf8_lossy(&requests[1].body)
+            .contains("Monsquaz Swap test message. Your bot can reach you.")
+    );
 }

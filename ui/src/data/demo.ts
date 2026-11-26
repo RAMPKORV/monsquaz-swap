@@ -778,6 +778,11 @@ function planRoundOffsets(count: number): number[] {
   return seededOrder(count - 1, 0x0badf00d).map((index) => index + 1);
 }
 
+export function demoOwnerId(trackCode: string): string | null {
+  const index = trackCodes.indexOf(trackCode);
+  return index === -1 ? null : `user-${index.toString().padStart(2, "0")}`;
+}
+
 function buildMatrix(count: number, rounds: number): PlanData["matrix"] {
   const groupCount = count >= 40 ? 4 : 2;
   const groupSize = Math.ceil(count / groupCount);

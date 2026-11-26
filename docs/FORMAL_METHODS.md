@@ -60,7 +60,7 @@ The claim model checks:
 - `NoRepeat`: a seen pair is never offered again.
 - `NoOwnTrack`: a participant never holds the track they seeded.
 - `NoOwnOffer`: a participant is never offered the track they seeded.
-- `OneTrackPerPerson`: a participant holds at most one track.
+- `AtMostOneActivePerPerson`: a participant has at most one open offer or held track.
 - `AtMostOneOfferPerTrack`: a track has at most one open offer.
 - `AtMostOneOfferPerPerson`: a participant has at most one open offer.
 - `NoExpiredReoffer`: an expired pair is never offered again.
@@ -86,14 +86,15 @@ ignored.
 A property is not covered until a deliberately broken variant makes it fail.
 `scripts/formal/check.sh` replaces one guard or update at a time and requires
 TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
-`NoOwnTrack`, `NoOwnOffer`, `OneTrackPerPerson`, `AtMostOneOfferPerTrack`,
-`AtMostOneOfferPerPerson`, and `NoExpiredReoffer`. A parse error or an unrelated
-failure is not counted as a detected mutation.
+`NoOwnTrack`, `NoOwnOffer`, `AtMostOneOfferPerTrack`,
+`AtMostOneOfferPerPerson`, `AtMostOneActivePerPerson`, and
+`NoExpiredReoffer`. A parse error or an unrelated failure is not counted as a
+detected mutation.
 
 ## Conformance
 
-The Rust state machine uses the same claim, submit, skip, and expiry
-vocabulary as the TLA+ model. The claim model is checked against `Assignment`
+The Rust state machine and the TLA+ model use overlapping claim, submit, skip,
+and expiry vocabulary. The claim model is checked against `Assignment`
 and `SeenLedger` by `proptest-state-machine`. It is a separate lifecycle model,
 not a trace-conformance check. Tier 3 adds ITF replay after a spike; if the tool
 is not reliable, use NDJSON trace validation.
@@ -117,6 +118,11 @@ limits. A live test guild still needs a human and a token.
 TLA+ cannot prove noninterference end to end. Use participant projections,
 canary strings, outbound-effect audits, log scans, and adversarial review. Use
 TLA+ only for the reveal gate and the modeled outbound schema.
+
+Module metadata is scrubbed. Non-module audio and zip files pass through
+unchanged, so ID3, Vorbis, and WAV LIST tags remain a residual anonymity risk.
+The default allowlist includes audio. Treat this as a product decision, not a
+scrub claim.
 
 ## Release gate
 

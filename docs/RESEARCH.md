@@ -217,3 +217,5 @@ still need a live test guild and a human.
 - The Tauri Linux/WebKitGTK behavior on every distro needs a clean-VM test.
 - The openmpt123 static build must be tested with real module fixtures before
   preview ships.
+- Non-module audio and zip files are not metadata-scrubbed. ID3, Vorbis, and WAV
+  LIST tags can carry identity. The allowlist decision needs a product review.

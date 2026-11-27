@@ -7,6 +7,9 @@ mod live_runtime;
 mod preview;
 mod setup_host;
 
+#[cfg(feature = "e2e")]
+pub use host::e2e_api;
+
 use serde::Serialize;
 use swap_core::CORE_VERSION;
 use tauri::{Manager, WindowEvent};

@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -24,6 +24,9 @@ use swap_engine::{
     reveal_package, reveal_with_channel, reveal_zip, set_track_title, start_async_event,
     start_event_with_channel, upload_pack, verify_commitment,
 };
+
+#[cfg(feature = "e2e")]
+pub mod e2e_api;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -692,7 +695,24 @@ fn open_store(app: &AppHandle) -> Result<swap_files::BlobStore, String> {
     Ok(swap_files::BlobStore::new(directory.join("files")))
 }
 
+/// Read the frozen E2E clock when the harness sets `MSW_E2E=1`.
+///
+/// The value lives in the file named by `MSW_E2E_CLOCK`. The test changes the
+/// file to move time. A production run never reads the file.
+fn e2e_now() -> Option<i64> {
+    if std::env::var("MSW_E2E").ok().as_deref() != Some("1") {
+        return None;
+    }
+    let path = std::env::var("MSW_E2E_CLOCK").ok()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+}
+
 fn now_secs() -> i64 {
+    if let Some(now) = e2e_now() {
+        return now;
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
@@ -700,6 +720,11 @@ fn now_secs() -> i64 {
 }
 
 fn now_nanos() -> u128 {
+    if let Some(now) = e2e_now() {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        return (now as u128) * 1_000_000_000
+            + u128::from(SEQUENCE.fetch_add(1, Ordering::Relaxed));
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
@@ -763,7 +788,7 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
         .as_ref()
         .map(|plan| plan.rounds)
         .or(settings.rounds)
-        .unwrap_or_else(|| active.saturating_sub(1) as u32);
+        .unwrap_or_else(|| (tracks.len() as u32).saturating_sub(1));
     let total_rounds = if exchange_rounds > 0 {
         exchange_rounds + 1
     } else if seed_round_open {
@@ -1385,20 +1410,16 @@ fn planner_phases(
 
 fn event_rounds(db: &Db, event: &EventRecord) -> Result<u32, String> {
     let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap_or_default();
+    if let Some(plan) = PlanRepo::latest(db.conn(), &event.id).map_err(|error| error.to_string())? {
+        return Ok(plan.rounds);
+    }
     if let Some(rounds) = settings.rounds {
         return Ok(rounds);
     }
-    let active = ParticipantRepo::list_for_event(db.conn(), &event.id)
+    let seeds = TrackRepo::list_for_event(db.conn(), &event.id)
         .map_err(|error| error.to_string())?
-        .iter()
-        .filter(|participant| {
-            matches!(
-                participant.membership,
-                Membership::SignedUp | Membership::Seeded | Membership::Active
-            )
-        })
-        .count();
-    Ok(active.saturating_sub(1) as u32)
+        .len() as u32;
+    Ok(seeds.saturating_sub(1))
 }
 
 #[tauri::command]
@@ -3390,6 +3411,50 @@ mod tests {
         let action = mission.next_action.unwrap();
         assert_eq!(action.action_label, "Lock roster");
         assert!(action.detail.contains("2 people still need a seed"));
+        drop(db);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn the_event_length_ignores_unseeded_signups() {
+        let (db, directory) = test_db("event-length");
+        let created = create_host_event(
+            &db,
+            EventDraftDto {
+                name: "Length".to_string(),
+                rounds: None,
+                ..default_draft()
+            },
+        )
+        .unwrap();
+        for index in 0..3 {
+            let id = format!("u-seed-{index}");
+            seed_person(&db, &created.id, &id, &format!("Seed {index}"));
+            seed_track(&db, &created.id, &format!("T{index}"), &id);
+        }
+        for index in 0..2 {
+            ParticipantRepo::upsert(
+                db.conn(),
+                &swap_db::ParticipantRecord {
+                    event_id: created.id.clone(),
+                    user_id: format!("u-signup-{index}"),
+                    display_name: format!("Signup {index}"),
+                    role: Role::Participant,
+                    membership: Membership::SignedUp,
+                    readiness: swap_core::Readiness::Ready,
+                    timezone: "UTC".to_string(),
+                    max_handoffs: 20,
+                    created_at: 100,
+                    updated_at: 100,
+                },
+            )
+            .unwrap();
+        }
+        let mission = mission_control(&db, &SettingsDto::default()).unwrap();
+        let event = mission.event.unwrap();
+        assert_eq!(event.seeded, 3);
+        assert_eq!(event.exchange_rounds, 2);
+        assert_eq!(event.rounds, 3);
         drop(db);
         fs::remove_dir_all(directory).unwrap();
     }

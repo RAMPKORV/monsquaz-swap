@@ -35,6 +35,8 @@ pub use setup::{
     BotIdentity, ChannelSummary, GuildSummary, RECOMMENDED_PERMISSIONS, SetupDirectory, SetupError,
     TokenValidator, invite_url, validate_bot_token_shape,
 };
+#[cfg(all(feature = "live", feature = "test-proxy"))]
+pub use twilight::connector_with_proxy;
 #[cfg(feature = "live")]
 pub use twilight::{
     TwilightConfig, TwilightConnector, TwilightSetup, TwilightTokenValidator, connector,

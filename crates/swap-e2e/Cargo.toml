@@ -1,0 +1,37 @@
+[package]
+name = "swap-e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Deterministic end-to-end harness for Monsquaz Swap"
+
+[features]
+bridge = ["dep:monsquaz-swap", "dep:tower-http"]
+
+[[bin]]
+name = "e2e-bridge"
+path = "src/bin/e2e-bridge.rs"
+required-features = ["bridge"]
+
+[dependencies]
+axum = { version = "0.8", features = ["ws", "multipart"] }
+base64 = "0.22"
+chrono = "0.4"
+futures-util = "0.3"
+monsquaz-swap = { path = "../../src-tauri", features = ["e2e"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+swap-core = { path = "../swap-core" }
+swap-db = { path = "../swap-db" }
+swap-discord = { path = "../swap-discord", features = ["test-proxy"] }
+swap-engine = { path = "../swap-engine" }
+swap-files = { path = "../swap-files" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
+zip = { version = "9.8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+twilight-model = "0.18"

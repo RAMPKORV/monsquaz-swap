@@ -4,7 +4,7 @@
 
 **PRD:** draft v1  
 **Blocked issues:** 5 · **Ready leaves:** 5  
-**Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
+**Open PRD questions:** 0 (0 high) · **Open reviews:** 1 · **Human queue:** 0  
 **Stale scores:** 18
 
 ## Issues by status
@@ -19,7 +19,7 @@
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 55 |
+| Done | 61 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -32,6 +32,12 @@
 | 4 | `MSW-037` | Formal: classic schedule model | ready | 3 |
 | 5 | `MSW-038` | Formal: async queue model | ready | 3 |
 | 17 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+
+## Open reviews
+
+| ID | Scope | Subject | Round | Score |
+|---|---|---|---|---|
+| 55 | test | E2E foundation and simulator | 1 | 8/7 |
 
 ## Last session
 

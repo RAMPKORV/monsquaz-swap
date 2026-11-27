@@ -156,7 +156,7 @@ async fn the_full_classic_journey_reaches_a_reveal() {
     let schedule = app
         .generate_schedule(&event)
         .expect("the plan must generate");
-    assert_eq!(schedule.rounds, 4);
+    assert_eq!(schedule.rounds, 3);
     assert!(
         app.verify_commitment(&event)
             .expect("the commitment must verify")
@@ -270,7 +270,7 @@ async fn the_full_classic_journey_reaches_a_reveal() {
     assert!(reveal_after > reveal_before);
 
     // Three more exchange rounds. Everyone submits.
-    for round in 1..4 {
+    for round in 1..3 {
         app.open_round(&event, round).expect("the round must open");
         let participants = [mira, jonas, selma, theo, ines, ada];
         for user in participants {

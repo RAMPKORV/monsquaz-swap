@@ -4,8 +4,8 @@
 
 **PRD:** draft v1  
 **Blocked issues:** 5 · **Ready leaves:** 5  
-**Open PRD questions:** 0 (0 high) · **Open reviews:** 0 · **Human queue:** 0  
-**Stale scores:** 18
+**Open PRD questions:** 0 (0 high) · **Open reviews:** 1 · **Human queue:** 0  
+**Stale scores:** 24
 
 ## Issues by status
 
@@ -16,9 +16,9 @@
 | Specification | 0 |
 | Ready for implementation | 7 |
 | Implementation | 0 |
-| Reviewing | 0 |
+| Reviewing | 5 |
 | Testing | 0 |
-| Merging | 0 |
+| Merging | 1 |
 | Done | 55 |
 | Cancelled | 0 |
 | Duplicate | 0 |
@@ -29,9 +29,15 @@
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 2 | `MSW-041` | Formal: reveal gate model | ready | 5 |
-| 4 | `MSW-037` | Formal: classic schedule model | ready | 3 |
-| 5 | `MSW-038` | Formal: async queue model | ready | 3 |
-| 17 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 10 | `MSW-037` | Formal: classic schedule model | ready | 3 |
+| 11 | `MSW-038` | Formal: async queue model | ready | 3 |
+| 23 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+
+## Open reviews
+
+| ID | Scope | Subject | Round | Score |
+|---|---|---|---|---|
+| 55 | test | E2E foundation and simulator | 1 | 8/7 |
 
 ## Last session
 

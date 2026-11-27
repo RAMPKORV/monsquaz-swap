@@ -72,13 +72,12 @@ async fn the_full_async_journey_reaches_a_reveal() {
         EventState::Active
     );
 
-    // Wave one of the first day.
+    // Wave one of the first day. The periodic worker and the host action both
+    // dispatch the due wave, so the test waits for the offer DMs.
     let first_wave = next_midnight() + 30 * 60;
     app.advance(first_wave - app.now());
-    let offers = app
-        .dispatch_async_release(&event)
+    app.dispatch_async_release(&event)
         .expect("the release must dispatch");
-    assert_eq!(offers, 4);
     for user in people {
         app.wait_for_dm(user, "is available", timeout())
             .await
@@ -115,10 +114,8 @@ async fn the_full_async_journey_reaches_a_reveal() {
 
     // The next day: the cooldown is over, so the queue offers again.
     app.advance(day());
-    let second_wave = app
-        .dispatch_async_release(&event)
+    app.dispatch_async_release(&event)
         .expect("the second day must dispatch");
-    assert_eq!(second_wave, 4);
     for user in people {
         app.wait_for_dm(user, "is available", timeout())
             .await

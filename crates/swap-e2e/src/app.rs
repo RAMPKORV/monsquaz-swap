@@ -20,6 +20,9 @@ use crate::workspace::TempWorkspace;
 
 pub const BASE_TIME: i64 = 1_760_000_000;
 
+/// A fixed event secret makes track codes and the plan reproducible.
+pub const E2E_SECRET: &str = "000102030405060708090a0b0c0d0e0f";
+
 /// The live stack without the Tauri window.
 pub struct HeadlessApp {
     pub sim: DiscordSim,
@@ -155,7 +158,7 @@ impl HeadlessApp {
     pub fn setting(&self) -> EventSettings {
         EventSettings {
             mode: Mode::Classic,
-            rounds: Some(4),
+            rounds: Some(3),
             pack_type: Some("Zip".to_string()),
             pack_required: Some(true),
             group_mode: Some("Groups".to_string()),
@@ -192,8 +195,16 @@ impl HeadlessApp {
     pub fn create_event_with(&self, name: &str, settings: EventSettings) -> Result<String, String> {
         settings.validate().map_err(|error| error.to_string())?;
         let id = format!("evt-e2e-{}", self.now());
-        swap_engine::create_event(&self.db(), &id, name, 42, &settings, self.now())
-            .map_err(|error| error.to_string())?;
+        swap_engine::create_event_with_secret(
+            &self.db(),
+            &id,
+            name,
+            42,
+            &settings,
+            Some(E2E_SECRET),
+            self.now(),
+        )
+        .map_err(|error| error.to_string())?;
         swap_db::MetaRepo::set(self.db().conn(), "host.current_event", &id)
             .map_err(|error| error.to_string())?;
         Ok(id)

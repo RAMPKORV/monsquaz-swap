@@ -221,6 +221,7 @@ impl fmt::Debug for TwilightConfig {
 pub struct TwilightConnector {
     config: TwilightConfig,
     http: Client,
+    proxy: Option<String>,
 }
 
 impl fmt::Debug for TwilightConnector {
@@ -237,7 +238,33 @@ impl TwilightConnector {
         validate_bot_token_shape(&config.token)
             .map_err(|error| GatewayError::Configuration(error.to_string()))?;
         let http = Client::new(config.token.clone());
-        Ok(Self { config, http })
+        Ok(Self {
+            config,
+            http,
+            proxy: None,
+        })
+    }
+
+    /// Use a local Discord simulator for HTTP and the gateway. This is a test
+    /// hook and is not part of the production API.
+    #[cfg(feature = "test-proxy")]
+    pub fn with_proxy(
+        config: TwilightConfig,
+        host: impl Into<String>,
+    ) -> Result<Self, GatewayError> {
+        validate_bot_token_shape(&config.token)
+            .map_err(|error| GatewayError::Configuration(error.to_string()))?;
+        let host = host.into();
+        let http = Client::builder()
+            .token(config.token.clone())
+            .proxy(host.clone(), true)
+            .ratelimiter(None)
+            .build();
+        Ok(Self {
+            config,
+            http,
+            proxy: Some(host),
+        })
     }
 
     pub fn http(&self) -> &Client {
@@ -250,11 +277,22 @@ impl GatewayConnector for TwilightConnector {
     async fn connect(&self) -> Result<Box<dyn GatewaySession>, GatewayError> {
         validate_bot_token_shape(&self.config.token)
             .map_err(|error| GatewayError::Configuration(error.to_string()))?;
-        let shard = Shard::new(
-            ShardId::ONE,
-            self.config.token.clone(),
-            Intents::GUILDS | Intents::DIRECT_MESSAGES,
-        );
+        let intents = Intents::GUILDS | Intents::DIRECT_MESSAGES;
+        let shard = match &self.proxy {
+            Some(host) => {
+                let url = if host.starts_with("ws://") || host.starts_with("wss://") {
+                    host.clone()
+                } else {
+                    format!("ws://{host}")
+                };
+                let config =
+                    twilight_gateway::ConfigBuilder::new(self.config.token.clone(), intents)
+                        .proxy_url(url)
+                        .build();
+                Shard::with_config(ShardId::ONE, config)
+            }
+            None => Shard::new(ShardId::ONE, self.config.token.clone(), intents),
+        };
         Ok(Box::new(TwilightSession {
             shard,
             pending: VecDeque::new(),
@@ -750,6 +788,15 @@ pub fn subcommand_count() -> usize {
 /// Expose the live connector as a trait object for the supervisor.
 pub fn connector(config: TwilightConfig) -> Result<Arc<dyn GatewayConnector>, GatewayError> {
     Ok(Arc::new(TwilightConnector::new(config)?))
+}
+
+/// Build a connector that talks to a local Discord simulator.
+#[cfg(feature = "test-proxy")]
+pub fn connector_with_proxy(
+    config: TwilightConfig,
+    host: impl Into<String>,
+) -> Result<Arc<dyn GatewayConnector>, GatewayError> {
+    Ok(Arc::new(TwilightConnector::with_proxy(config, host)?))
 }
 
 #[cfg(test)]

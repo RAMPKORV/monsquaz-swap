@@ -176,7 +176,9 @@ export function MissionControlView({
         />
       ) : null}
 
-      {data.nextAction && event.stage !== "Setup" && !data.asyncOverview ? (
+      {data.nextAction &&
+      event.stage !== "Setup" &&
+      (!data.asyncOverview || event.stage === "Join phase") ? (
         <section
           className={`next-action next-action--${data.nextAction.tone}`}
           aria-labelledby="next-action-title"
@@ -1273,11 +1275,11 @@ function SeedRoundCard({
           <p className="card__subtitle">
             {asyncMode
               ? "Each participant makes one track from the host pack. When intake closes, the roster locks and the queue opens."
-              : `Every participant makes one track from the host pack. Round 1 is the seed round and counts in the event length: ${
-                  event.participants || "N"
-                } participants make ${event.rounds || "N"} rounds. Rounds 2 to ${
+              : `Each seeded participant makes one track from the host pack. Round 1 is the seed round and counts in the event length: ${
+                  event.seeded || "N"
+                } seeds make ${event.rounds || "N"} rounds. Rounds 2 to ${
                   event.rounds || "N"
-                } are exchanges.`}
+                } are exchanges. Unseeded signups become fill-ins.`}
           </p>
         </div>
         <StatusPill tone={event.seedRoundOpen ? "ok" : "info"}>

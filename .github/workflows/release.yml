@@ -94,9 +94,16 @@ jobs:
           fi
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
+  verify:
+    name: E2E gate
+    needs: prepare
+    uses: ./.github/workflows/e2e.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+
   build-windows:
     name: Windows x64 (NSIS)
-    needs: prepare
+    needs: [prepare, verify]
     runs-on: windows-2022
     timeout-minutes: 60
     permissions:
@@ -145,7 +152,7 @@ jobs:
 
   build-linux:
     name: Linux x64 (deb + AppImage)
-    needs: prepare
+    needs: [prepare, verify]
     runs-on: ubuntu-24.04
     container: ubuntu:22.04
     timeout-minutes: 60

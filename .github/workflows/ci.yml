@@ -170,10 +170,14 @@ jobs:
       - name: Build Tauri app without installers
         run: pnpm tauri build --debug --no-bundle
 
+  e2e:
+    name: E2E
+    uses: ./.github/workflows/e2e.yml
+
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [tracker, ui, design, rust, tauri-smoke]
+    needs: [tracker, ui, design, rust, tauri-smoke, e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

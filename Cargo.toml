@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/swap-core", "crates/swap-db", "crates/swap-files", "crates/swap-discord", "crates/swap-engine", "crates/swap-sim", "crates/swap-privacy", "crates/swap-acceptance", "src-tauri"]
+members = ["crates/swap-core", "crates/swap-db", "crates/swap-files", "crates/swap-discord", "crates/swap-engine", "crates/swap-sim", "crates/swap-privacy", "crates/swap-acceptance", "crates/swap-e2e", "src-tauri"]
 resolver = "2"
 
 [workspace.package]

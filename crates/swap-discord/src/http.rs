@@ -348,16 +348,36 @@ pub fn is_text_channel(kind: ChannelType) -> bool {
 /// Downloads Discord CDN attachments for immediate intake.
 pub struct HttpAttachmentFetcher {
     client: reqwest::Client,
+    prefixes: Vec<String>,
 }
 
 impl HttpAttachmentFetcher {
     pub fn new() -> Result<Self, AttachmentError> {
+        Self::with_prefixes(vec![
+            "https://cdn.discordapp.com/".to_string(),
+            "https://media.discordapp.net/".to_string(),
+        ])
+    }
+
+    /// Accept one local base URL instead of the Discord CDN. This is a test
+    /// hook for the local Discord simulator and is not part of the production
+    /// API.
+    #[cfg(feature = "test-proxy")]
+    pub fn with_base(base: impl Into<String>) -> Result<Self, AttachmentError> {
+        let mut base = base.into();
+        if !base.ends_with('/') {
+            base.push('/');
+        }
+        Self::with_prefixes(vec![base])
+    }
+
+    fn with_prefixes(prefixes: Vec<String>) -> Result<Self, AttachmentError> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| AttachmentError::Transport(error.to_string()))?;
-        Ok(Self { client })
+        Ok(Self { client, prefixes })
     }
 }
 
@@ -370,9 +390,7 @@ impl Default for HttpAttachmentFetcher {
 #[async_trait]
 impl AttachmentFetcher for HttpAttachmentFetcher {
     async fn fetch(&self, url: &str, max_bytes: u64) -> Result<Vec<u8>, AttachmentError> {
-        if !url.starts_with("https://cdn.discordapp.com/")
-            && !url.starts_with("https://media.discordapp.net/")
-        {
+        if !self.prefixes.iter().any(|prefix| url.starts_with(prefix)) {
             return Err(AttachmentError::InvalidUrl);
         }
         let response = self

@@ -11,7 +11,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{Notify, mpsc, watch};
 
 use async_trait::async_trait;
-use swap_db::{AssignmentRepo, AuditRepo, Db, DmCursorRepo, EventRepo, ProcessedAttachmentRepo};
+use swap_core::RoundStatus;
+use swap_db::{
+    AssignmentRepo, AuditRepo, Db, DmCursorRepo, EventRepo, PackRepo, ProcessedAttachmentRepo,
+    RoundRepo,
+};
 use swap_discord::{
     Action, AttachmentFetcher, DiscordChannelId, DiscordError, DiscordPort, DiscordUserId,
     DmAttachment, InboundEvent, InboundHandler, MessageId,
@@ -19,7 +23,7 @@ use swap_discord::{
 use swap_files::BlobStore;
 
 use crate::clock::Clock;
-use crate::delivery::{DeliveryReport, DeliveryWorker};
+use crate::delivery::{DeliveryReport, DeliveryWorker, PendingDelivery, enqueue_pending};
 use crate::engine::{
     EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed,
     participant_schedule, set_participant_ready, signup, skip, submit_attachment,
@@ -476,7 +480,10 @@ impl InboundService {
         .await
         .map_err(|error| error.to_string())?;
         match outcome {
-            Ok(_) => {
+            Ok(outcome) => {
+                if !outcome.replaced && !outcome.held {
+                    self.enqueue_pack_after_join(&event.id, user_id, now)?;
+                }
                 self.mark_processed(user_id, message_id, &attachment.id)?;
                 self.update_cursor(user_id, channel_id, message_id)?;
                 Ok(())
@@ -496,6 +503,46 @@ impl InboundService {
                 Err(error.to_string())
             }
         }
+    }
+
+    /// Send the host pack to a participant who joins while Round 1 is open.
+    ///
+    /// The pack is enqueued in the durable outbox. A failed DM stays in the
+    /// outbox for the worker and the private-thread fallback.
+    fn enqueue_pack_after_join(
+        &self,
+        event_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        let db = self.lock();
+        let Some(pack) =
+            PackRepo::get_for_event(db.conn(), event_id).map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        let Some(round) =
+            RoundRepo::get(db.conn(), event_id, 1).map_err(|error| error.to_string())?
+        else {
+            return Ok(());
+        };
+        if round.status != RoundStatus::Open {
+            return Ok(());
+        }
+        let deadline = round.deadline_at.unwrap_or(now);
+        let delivery = PendingDelivery::Pack {
+            user_id: user_id.to_string(),
+            filename: pack.filename.clone(),
+            sha256: pack.sha256.clone(),
+            caption: format!(
+                "Monsquaz Swap pack {}. Round 1 seed deadline: {deadline} UTC.",
+                pack.id
+            ),
+        };
+        enqueue_pending(db.conn(), event_id, &delivery, now).map_err(|error| error.to_string())?;
+        drop(db);
+        self.wake.notify_one();
+        Ok(())
     }
 
     async fn handle_attachment(
@@ -592,7 +639,19 @@ impl InboundService {
                                 )
                                 .await;
                         }
-                        Some(swap_core::Membership::Seeded | swap_core::Membership::Active) => {
+                        Some(swap_core::Membership::Seeded) => {
+                            return self
+                                .join_seed(
+                                    &event,
+                                    user_id,
+                                    channel_id,
+                                    message_id,
+                                    author_name,
+                                    attachment,
+                                )
+                                .await;
+                        }
+                        Some(swap_core::Membership::Active) => {
                             self.notify(
                                 user_id,
                                 "You already sent a seed. Wait for the host to start the event.",

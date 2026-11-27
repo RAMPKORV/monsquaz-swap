@@ -15,11 +15,13 @@ live.
 | Adapter contract | recorded Discord JSON / `wiremock` | Twilight request shapes, custom IDs, rate-limit handling | every PR |
 | Simulation | `swap-sim` + fake clock/FS | long events, churn, groups, async queues, adversarial leaks | nightly + release |
 | UI component | Vitest + Testing Library | views, states, accessibility basics | every PR |
-| E2E | WebdriverIO/Tauri driver (later) | packaged app boot, setup, one full journey | release |
-| Live smoke | real test guild, consenting humans | Discord actually accepts intents/commands/DMs | manual/nightly |
+| E2E engine | `swap-e2e` + local Discord simulator | classic and async journeys through Twilight, SQLite, files, and the scheduler | every PR |
+| E2E browser | Playwright + HTTP bridge | the real React UI with real host commands, state, and Discord transport | every PR + release gate |
+| Live smoke | dedicated test guild | bot-side Discord truth only | manual |
 
-No live Discord bot in pull-request CI. Use a fake `DiscordPort` and recorded
-payloads. A nightly/manual job may use a dedicated test guild.
+No live Discord bot in pull-request CI. Use the local Discord simulator and
+recorded payloads. The simulator speaks the real HTTP and gateway shapes; a
+Twilight upgrade must update the simulator contract tests.
 
 ## TDD loop
 

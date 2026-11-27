@@ -62,7 +62,9 @@ jobs:
       - name: Browser journeys
         env:
           MSW_E2E_BRIDGE_BIN: ${{ github.workspace }}/target/debug/e2e-bridge
-        run: pnpm --dir ui e2e
+        run: |
+          mkdir -p target/e2e/screens
+          pnpm --dir ui e2e
       - name: Keep the evidence
         if: always()
         uses: actions/upload-artifact@v4

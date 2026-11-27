@@ -5,7 +5,7 @@
 **PRD:** draft v1  
 **Blocked issues:** 5 · **Ready leaves:** 5  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 1 · **Human queue:** 0  
-**Stale scores:** 24
+**Stale scores:** 23
 
 ## Issues by status
 
@@ -18,8 +18,8 @@
 | Implementation | 0 |
 | Reviewing | 5 |
 | Testing | 0 |
-| Merging | 1 |
-| Done | 55 |
+| Merging | 0 |
+| Done | 56 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -29,9 +29,9 @@
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 2 | `MSW-041` | Formal: reveal gate model | ready | 5 |
-| 10 | `MSW-037` | Formal: classic schedule model | ready | 3 |
-| 11 | `MSW-038` | Formal: async queue model | ready | 3 |
-| 23 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 9 | `MSW-037` | Formal: classic schedule model | ready | 3 |
+| 10 | `MSW-038` | Formal: async queue model | ready | 3 |
+| 22 | `MSW-044` | Delivery transport dedupe | ready | 1 |
 
 ## Open reviews
 

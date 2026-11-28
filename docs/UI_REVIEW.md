@@ -105,6 +105,27 @@ Repeat the matrix after the full event loop exists. Check density at real data
 volume (40 participants, 20 tracks, 10 rounds), the reveal presenter on a
 projector, and the stream-safe mode.
 
+## Human in the loop
+
+The human reviews the UI at every checkpoint. The agent does not continue
+without the human.
+
+1. At every UI checkpoint, the agent captures fresh screenshots of the
+   affected views.
+2. The agent publishes the screenshots to the shared review gallery for the
+   human.
+3. The agent continues only after the agent publishes the screenshots.
+4. When a visual choice is open, the agent renders 2 or 3 variants (A, B, C)
+   as screenshots.
+5. The agent publishes the variants and asks the human to choose one. The
+   agent must not choose silently.
+6. Before the next iteration, the agent reads the human's comments in the
+   gallery.
+7. The agent fixes or answers every comment in the next iteration.
+
+A UI checkpoint is the end of each review wave, a visual choice, and the end
+of the UI issue.
+
 ## Finding format
 
 ```

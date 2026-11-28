@@ -46,6 +46,15 @@ You can run the three waves in parallel. They are independent.
 5. Stop when no `must-fix` remains.
 6. After three rounds with a `must-fix` still open, stop and ask the human.
 
+## Human in the loop
+
+Follow "Human in the loop" in `docs/UI_REVIEW.md` at every checkpoint:
+
+1. Publish fresh screenshots to the shared review gallery before you continue.
+2. For an open visual choice, publish 2 or 3 variants (A, B, C) and ask the
+   human to choose. Do not choose silently.
+3. Read the human's gallery comments before the next iteration.
+
 ## Record
 
 - Write the review to `docs/ui/reviews/MSW-###.md`: the screenshots, each

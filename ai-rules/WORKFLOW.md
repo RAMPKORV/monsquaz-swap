@@ -122,7 +122,7 @@ The reviewer roles depend on the ceremony tier:
 |---|---|
 | `standard` | correctness |
 | `full` | correctness; invariants and anonymity; security |
-| UI work (any tier) | the three waves in `docs/UI_REVIEW.md`: visual design, UX and copy, accessibility |
+| UI work (any tier) | the three waves in `docs/UI_REVIEW.md`: visual design, UX and copy, accessibility; plus the human checkpoints in "Human in the loop" in `docs/UI_REVIEW.md` |
 
 Procedure:
 

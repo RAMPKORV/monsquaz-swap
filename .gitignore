@@ -66,3 +66,6 @@ bin/*
 artifacts/
 logs/
 *.log
+
+# Verus compiled conformance binary
+crates/swap-plan-check/verus/flat_plan_check

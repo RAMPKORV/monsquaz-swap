@@ -3,23 +3,23 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 5 · **Ready leaves:** 5  
+**Blocked issues:** 5 · **Ready leaves:** 14  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 1 · **Human queue:** 0  
-**Stale scores:** 18
+**Stale scores:** 70
 
 ## Issues by status
 
 | Status | Count |
 |---|---|
-| Triage | 11 |
+| Triage | 48 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 7 |
-| Implementation | 0 |
+| Ready for implementation | 16 |
+| Implementation | 6 |
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 61 |
+| Done | 67 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -29,9 +29,14 @@
 |---|---|---|---|---|
 | 1 | `MSW-029` | Release pipeline v0.1.0 draft | ready | 6 |
 | 2 | `MSW-041` | Formal: reveal gate model | ready | 5 |
-| 4 | `MSW-037` | Formal: classic schedule model | ready | 3 |
 | 5 | `MSW-038` | Formal: async queue model | ready | 3 |
 | 17 | `MSW-044` | Delivery transport dedupe | ready | 1 |
+| 20 | `MSW-081` | DB-enforced scheduling invariants | ready | 1 |
+| 21 | `MSW-082` | Host sets the fill-in due time | ready | 1 |
+| 22 | `MSW-083` | Fill-in flow event setting | ready | 1 |
+| 31 | `MSW-092` | Unify the decision logs and fix doc contradictions | ready | 1 |
+| 34 | `MSW-100` | New design-gate rules | ready | 1 |
+| 35 | `MSW-101` | Engine-generated demo fixtures | ready | 1 |
 
 ## Open reviews
 

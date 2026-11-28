@@ -37,6 +37,6 @@ exclude_re = [
   # hash only to order candidates. The contract is a deterministic, fair
   # choice. A different mixer produces a different valid order, so these
   # mutants are equivalent and are not a test gap.
-  "splitmix",
-  "stable_hash",
+  "replace splitmix -> u64 with| in splitmix$",
+  "replace stable_hash -> u64 with| in stable_hash$",
 ]

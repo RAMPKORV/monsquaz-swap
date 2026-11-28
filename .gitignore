@@ -6,6 +6,9 @@ worktrees/
 *.db-shm
 project/ledger/*.tmp
 
+# generated decision dump; ai-rules/DECISIONS.md is the single decision log
+docs/generated/DECISIONS.md
+
 # secrets and local config
 .env
 .env.*

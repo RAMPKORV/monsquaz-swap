@@ -1,10 +1,10 @@
 # Decision log
 
 This file is the single human-readable decision log. It holds the
-hand-written decisions D-001..D-028 and the tracker decisions D-029..D-062.
+hand-written decisions D-001..D-028 and the tracker decisions D-029..D-070.
 The tracker (`./bin/project decision`) is the durable record for D-029 and
-later. `docs/generated/DECISIONS.md` is a generated dump of the tracker; do not
-read it as a second log.
+later. The repository does not keep a generated decision dump. Read the
+tracker only to confirm a code, a status, or a supersession link.
 
 Accepted decisions are immutable. A later decision supersedes an earlier one.
 A superseded entry keeps its text and gets a **Status** line that names the
@@ -445,7 +445,10 @@ the pair is never re-offered. A claim marks the pair seen.
 **Consequences:** the app computes editors per track from songs and claims and
 warns when the value is fractional. The gap report separates exposure gaps from
 edit gaps. Async credits use a handoff index, never a round label.
-**Status:** the expiry part is now the default preset of D-041.
+**Status:** D-041 supersedes the expiry sentences. The re-offer option is a
+setting with `never` as the default. The first expiry starts a 24-hour
+cooldown. The second expiry pauses the participant. The pair is not re-offered
+by default.
 
 ## D-034 — max_handoffs modes and the seed budget
 
@@ -567,14 +570,19 @@ mark and the reveal only; danger is orange-red; a banded 3px green stripe;
 Archivo plus IBM Plex Mono; theme follows the OS; lifecycle nav; queue-first
 mission control; reveal stream-safe by default; engine-generated demo fixtures.
 **Consequences:** supersedes the visual parts of `ai-rules/UX.md`.
+**Status:** decided, building in MSW-099. The current UI does not use the new
+brand tokens.
 
 ## D-047 — Design scale reform
 
 **Date:** 2026-11-28.
 **Decision:** type 12/13/14/16/20/24/32/44 with a locked 12px floor; spacing
 0/4/8/12/16/24/32/48/64; radius 4/8/999. Supersedes D-029 and ADR 0006.
-**Consequences:** every view is migrated with no baseline exceptions for the
+**Consequences:** every view must migrate with no baseline exceptions for the
 old sizes.
+**Status:** decided, building in MSW-099 (scales and brand tokens) and MSW-100
+(gate rules). The UI is not migrated. The old scales in `design/policy.json`
+remain locked until those issues land.
 
 ## D-048 — New design-gate rules
 
@@ -582,6 +590,8 @@ old sizes.
 **Decision:** one primary per view and per dialog, copy hygiene, a single date
 formatter, 24px targets, the status triple, and a pink-token restriction.
 **Consequences:** reject-list items become deterministic checks.
+**Status:** decided, building in MSW-100. The gate does not enforce these rules
+yet.
 
 ## D-049 — Classic fill-ins are never regular participants
 
@@ -726,3 +736,73 @@ planned. The reveal stays one-shot.
 asset, pinned by SHA-256, not from the mutable upstream asset.
 **Consequences:** upstream changes cannot break or alter the formal check.
 Implemented in MSW-119; the update procedure is in `docs/FORMAL_METHODS.md`.
+
+## D-063 — At most one extra fill-in turn per person per round
+
+**Date:** 2026-11-28.
+**Decision:** a seeded participant can take at most one extra tier-2 fill-in
+turn in one round. There is no event-wide cap.
+**Consequences:** rescues spread across people.
+
+## D-064 — Auto-chain falls back to tier 2 before the host
+
+**Date:** 2026-11-28.
+**Decision:** when tier-1 people decline or time out, an `auto_chain` continues
+with eligible tier-2 participants inside the same 3-offer budget. Then the bot
+opens a host decision card.
+**Consequences:** fewer host interruptions.
+
+## D-065 — Fill-in credit marks the turn
+
+**Date:** 2026-11-28.
+**Decision:** the fill-in badge marks a turn that rescued a slot, whoever did
+it. Planned turns of a person with the fill-in role are plain credits. Stats
+count rescued turns.
+**Consequences:** credits describe what happened, not who someone is.
+
+## D-066 — Final title fallback
+
+**Date:** 2026-11-28.
+**Decision:** when the final round cell is empty, the bot asks the person who
+submitted the latest version to name the track. If that person does not answer
+before the reveal, or has left, the host names the track.
+**Consequences:** no track reaches the reveal without a title request.
+
+## D-067 — Classic reveal projection recomputes on round open
+
+**Date:** 2026-11-28.
+**Decision:** the host UI recomputes the classic reveal projection each time a
+round opens or a deadline moves. The host sees the result as an estimate:
+"Reveal about Sat 19 Dec". The schedule-lock projection is not used after the
+event starts.
+**Consequences:** a late round open does not understate the days remaining. The
+projection can move later during the event, and the UI must say that it is an
+estimate.
+
+## D-068 — A restore invitation expires after 7 days
+
+**Date:** 2026-11-28.
+**Decision:** the bot sends one restore invitation to a person who left. The
+Confirm and Decline buttons stop working 7 days after the bot sends the
+invitation. The host sees Restore expired and can send a new invitation.
+**Consequences:** a person cannot rejoin weeks later in a different phase
+without a new host decision. The invitation stores its sent time.
+
+## D-069 — A fill-in offer has a separate claim window
+
+**Date:** 2026-11-28.
+**Decision:** each auto-chain or host-list fill-in offer must be claimed within
+the claim window. The claim window default is 6 hours and it is an event
+setting. The edit due time, default 24 hours, starts when the person claims.
+This decision refines the due-time rule in D-040.
+**Consequences:** a chain of 3 offers takes at most 18 hours before the host is
+asked. Whoever claims gets the full edit window. The engine stores the claim
+deadline and the edit due time separately.
+
+## D-070 — The host-ordered fill-in list has no size limit
+
+**Date:** 2026-11-28.
+**Decision:** the host can order any number of people in a fill-in list. The
+list has no fixed cap. Each offer in the list uses the claim window from D-069.
+**Consequences:** a large list can delay the host decision. The UI shows the
+claim deadline for each offer.

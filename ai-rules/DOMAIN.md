@@ -109,8 +109,10 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   The re-offer setting decides whether the same person can get the same track
   again: never (default), after cooldown, last resort, or host (D-041).
 - Classic "mark missed": the host marks an overdue turn missed. The pair is
-  recorded as seen. The track passes unchanged into the next round, or a
-  fill-in covers the turn. The track does not go back to a pool.
+  recorded as seen. The engine sets the track state to Pool, and the DM says
+  the track returns to the pool. The track still passes unchanged into the next
+  round, or a fill-in covers the turn. MSW-121 fixes the state name and the
+  copy.
 - Once a fill-in claims a slot, the original holder's turn is forfeited by
   default; the host can override with an audit entry.
 

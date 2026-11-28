@@ -4,7 +4,9 @@ Date: 2026-11-26
 
 ## Status
 
-Accepted for MSW-055. Tracker decision D-029.
+Accepted for MSW-055. Tracker decision D-029. Superseded by D-047. The reform
+is decided, building in MSW-099 and MSW-100. The scales in this ADR remain
+locked in `design/policy.json` until those issues land.
 
 ## Context
 

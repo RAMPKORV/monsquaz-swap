@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { BackupCard } from "./views/Backups";
 import {
   backupNow,
@@ -169,7 +175,7 @@ describe("BackupCard", () => {
     ).toBeInTheDocument();
 
     const input = within(dialog).getByLabelText("Type RESTORE to confirm");
-    expect(input).toHaveFocus();
+    await waitFor(() => expect(input).toHaveFocus());
     const restore = within(dialog).getByRole("button", { name: "Restore" });
     expect(restore).toBeDisabled();
     fireEvent.change(input, { target: { value: "RESTOR" } });

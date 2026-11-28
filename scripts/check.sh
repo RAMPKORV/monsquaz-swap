@@ -51,6 +51,11 @@ else
   node scripts/formal/changed.mjs main >/dev/null 2>&1
   mapped=$?
   set -e
+  if [ "$mapped" -eq 2 ]; then
+    echo "formal: FAILED (cannot compare the base or parse specs/tla/mapping.json)" >&2
+    echo "Check the main ref and the mapping file, then rerun scripts/check.sh." >&2
+    exit 1
+  fi
   if [ "$mapped" -eq 0 ]; then
     echo "formal: FAILED (a mapped change needs java)" >&2
     echo "Install java, run scripts/formal/check.sh, and record the output as formal evidence." >&2

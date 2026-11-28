@@ -104,6 +104,14 @@ run_reveal_mutation() {
     "$3" "$4"
 }
 
+run_reveal_open_mutation() {
+  run_named_mutation "$1" "$2" \
+    specs/tla/SwapReveal.tla \
+    specs/tla/SwapRevealOpenMutation.cfg \
+    specs/tla/SwapRevealMutation.tla \
+    "$3" "$4"
+}
+
 echo "TLA+ PR model"
 run_tlc specs/tla/SwapClaimPR.cfg specs/tla/SwapClaimPR.tla
 run_claim_mutation "clock leaves the natural numbers" "TypeOK" "now' = now + 1" "now' = -1"
@@ -141,9 +149,14 @@ run_delivery_mutation "failure drops the host alert" "FailedWereAlerted" \
 
 echo "TLA+ schedule PR model"
 run_tlc specs/tla/SwapSchedulePR.cfg specs/tla/SwapSchedulePR.tla
+echo "TLA+ grouped schedule PR model"
+run_tlc specs/tla/SwapScheduleGroupPR.cfg specs/tla/SwapScheduleGroupPR.tla
 run_schedule_mutation "round cursor leaves the domain" "TypeOK" \
   "    /\ nextRound' = nextRound + 1" \
   "    /\ nextRound' = 1"
+run_schedule_mutation "the seed round loses a track owner" "CompleteRounds" \
+  'THEN [t \in Tracks |-> Owner[t]]' \
+  'THEN [t \in Tracks |-> NoOne]'
 run_schedule_mutation "an exchange round is not a matching" "CompleteRounds" \
   '    /\ \A p \in Participants : Cardinality({t \in Tracks : f[t] = p}) = 1' \
   '    /\ TRUE'
@@ -166,34 +179,34 @@ run_tlc specs/tla/SwapRevealPR.cfg specs/tla/SwapRevealPR.tla
 run_reveal_mutation "event state leaves the domain" "TypeOK" \
   '    /\ eventState'"'"' = "revealed"' \
   '    /\ eventState'"'"' = "reveal"'
-run_reveal_mutation "publish ignores the host action" "NoRevealBeforeHostAction" \
-  '    /\ hostAction
+run_reveal_mutation "publish ignores the host command" "NoRevealBeforeHostAction" \
+  '    /\ hostCommand
     /\ active = {}' \
   '    /\ TRUE
     /\ active = {}'
 run_reveal_mutation "publish ignores active assignments" "NoRevealWithActiveAssignments" \
-  '    /\ hostAction
+  '    /\ hostCommand
     /\ active = {}' \
-  '    /\ hostAction
+  '    /\ hostCommand
     /\ TRUE'
-run_reveal_mutation "owner fact leaks before reveal" "NoIdentityBeforeReveal" \
+run_reveal_mutation "assignment fact leaks in hidden mode" "NoIdentityBeforeReveal" \
   '    /\ projection = SafeProjection' \
-  '    /\ projection = OwnerFacts'
-run_reveal_mutation "contributor fact leaks before reveal" "NoIdentityBeforeReveal" \
+  '    /\ projection = AssignmentFacts'
+run_reveal_open_mutation "owner fact leaks in open mode" "NoIdentityBeforeReveal" \
   '    /\ projection = SafeProjection' \
-  '    /\ projection = ContributorFacts'
-run_reveal_mutation "title fact leaks before reveal" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection \cup OwnerFacts'
+run_reveal_open_mutation "title fact leaks in open mode" "NoIdentityBeforeReveal" \
   '    /\ projection = SafeProjection' \
-  '    /\ projection = TitleFacts'
-run_reveal_mutation "comments fact leaks before reveal" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection \cup TitleFacts'
+run_reveal_open_mutation "comments fact leaks in open mode" "NoIdentityBeforeReveal" \
   '    /\ projection = SafeProjection' \
-  '    /\ projection = CommentFacts'
-run_reveal_mutation "mapping fact leaks before reveal" "NoIdentityBeforeReveal" \
-  '    /\ projection = SafeProjection' \
-  '    /\ projection = MappingFacts'
+  '    /\ projection = SafeProjection \cup CommentFacts'
+run_reveal_mutation "stream-safe starts off" "StreamSafeDefault" \
+  '    /\ streamSafe = TRUE' \
+  '    /\ streamSafe = FALSE'
 run_reveal_mutation "presenter starts with full identities" "StreamSafeDefault" \
-  "    /\ presenter' = SafeProjection" \
-  "    /\ presenter' = FullProjection"
+  '    /\ presenter = {}' \
+  '    /\ presenter = FullProjection'
 run_reveal_mutation "stream-safe turns off without confirmation" "StreamSafeDefault" \
   '    /\ streamSafe
     /\ confirmed
@@ -201,6 +214,16 @@ run_reveal_mutation "stream-safe turns off without confirmation" "StreamSafeDefa
   '    /\ streamSafe
     /\ TRUE
     /\ streamSafe'"'"' = FALSE'
+run_reveal_mutation "publish ignores an incomplete plan" "PublishedImpliesPlanComplete" \
+  '    /\ planComplete
+    /\ commitmentVerified' \
+  '    /\ TRUE
+    /\ commitmentVerified'
+run_reveal_mutation "publish ignores an unverified commitment" "PublishedImpliesCommitmentVerified" \
+  '    /\ planComplete
+    /\ commitmentVerified' \
+  '    /\ planComplete
+    /\ TRUE'
 
 if [ "$MODE" = "nightly" ]; then
   echo "TLA+ claim nightly model"

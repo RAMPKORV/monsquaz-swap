@@ -24,6 +24,12 @@ ASSUME GroupCount \in Nat
 ASSUME GroupCount >= 1
 ASSUME GroupOf \in [Participants -> (1 .. GroupCount)]
 ASSUME \A g \in 1 .. GroupCount : \E p \in Participants : GroupOf[p] = g
+ASSUME \A g \in 1 .. GroupCount :
+    Cardinality({p \in Participants : GroupOf[p] = g}) =
+    Cardinality({t \in Tracks : GroupOf[Owner[t]] = g})
+ASSUME \A g, h \in 1 .. GroupCount :
+    Cardinality({p \in Participants : GroupOf[p] = g}) =
+    Cardinality({p \in Participants : GroupOf[p] = h})
 ASSUME RoundCount \in Nat
 ASSUME RoundCount >= 2
 ASSUME RoundCount <= Cardinality(Participants)

@@ -1,9 +1,9 @@
 -------------------------- MODULE SwapRevealNightly --------------------------
 \* Nightly bound: 3 participants and 3 tracks.
 EXTENDS Naturals, TLC
-CONSTANTS Participants, Tracks, NoOne
-VARIABLES eventState, hostAction, active, streamSafe, confirmed,
-          projection, presenter
+CONSTANTS Participants, Tracks, NoOne, OpenSchedule
+VARIABLES eventState, hostAction, hostCommand, active, streamSafe, confirmed,
+          planComplete, commitmentVerified, projection, presenter
 INSTANCE SwapReveal WITH
     Owner <-
         [t \in Tracks |->

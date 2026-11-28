@@ -50,6 +50,10 @@ unrelated failures. Run `scripts/formal/check.sh`.
 
 ## Mapping
 
+`mapping.json` lists the Rust files and functions that each model covers. The
+CI formal gate reads it through `scripts/formal/changed.mjs`. Keep the table
+below and `mapping.json` in sync.
+
 | TLA+ | Rust / SQLite |
 |---|---|
 | `phase[t][p]` | `assignments.status` |

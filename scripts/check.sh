@@ -23,6 +23,7 @@ echo "== spec gates =="
 node --test scripts/tests/
 node scripts/ste-lint.mjs
 node scripts/trace-scenarios.mjs --check
+scripts/requirements-check.sh --check
 
 echo "== ui =="
 if ! command -v pnpm >/dev/null 2>&1; then

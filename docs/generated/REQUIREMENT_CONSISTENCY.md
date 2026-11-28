@@ -1,0 +1,1131 @@
+# Requirement consistency
+
+> <!-- GENERATED FILE - run `scripts/requirements-check.sh`; do not edit by hand. -->
+
+Status: **PASS**
+
+This report is the output of the finite requirement model in
+`specs/requirements/`. The model formalizes the normative fill-in,
+leave, handoff, and scheduling rules. The natural-language source wins.
+A stale model is a defect.
+
+**PASS means model satisfiability and entailment, not implementation.**
+Formalized scenarios marked `@pending`: **6/22**.
+The pilot has 22 formalized scenarios from 21 source scenarios.
+The other Gherkin scenarios are outside the modeled scope.
+
+The base conjunction is the authoritative global check. Pair checks
+localize a conflict and are subsumed by the base check. The gate fails
+closed: a solver `unknown` or timeout is a failure.
+
+Defaults are separate from the current event settings. A host-set
+12-hour regular claim window is allowed; only the default is 24 hours.
+
+## Model
+
+- Solver: `z3 5.3.2`
+- Rules: **37** must rules.
+- Formalized scenarios: **22** (6 pending).
+- Reachable premises: **14**.
+- Rule pairs checked: **666**.
+- Participants: **3**, tracks: **3**, rounds: **3**, turns: **6**, invitations: **2**.
+
+## Rules
+
+| ID | Kind | Source | Rule (ASD-STE100) | Scenarios |
+|---|---|---|---|---|
+| `R-CLAIM-WINDOW-REGULAR` | `setting` | [D-025](../../ai-rules/DECISIONS.md), [REQ-DELIVERY-002](../../docs/PRD.md), [Claim window](../../docs/EVENT_SETTINGS.md), [A claim delivers the file and starts the deadline](../../specs/features/async_queue.feature) | The default regular claim window must be 24 hours. | `S-CLAIM-24` |
+| `R-CLAIM-WINDOW-FILLIN` | `setting` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The default fill-in claim window must be 6 hours. | `S-FILL-SEQUENCE` |
+| `R-CLAIM-REMINDER` | `setting` | [D-041](../../ai-rules/DECISIONS.md), [Claim reminder](../../docs/EVENT_SETTINGS.md), [The bot reminds the participant to claim](../../specs/features/async_queue.feature) | The default claim reminder must be 12 hours. The claim reminder must occur before the claim window ends. | `S-CLAIM-REMINDER` |
+| `R-EDIT-WINDOW` | `setting` | [D-033](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Async handoff deadline](../../docs/EVENT_SETTINGS.md), [A chain offer has a separate claim and edit window](../../specs/features/fill_ins.feature) | The default edit window must be 24 hours. | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` |
+| `R-CLAIM-EDIT-DUE` | `behaviour` | [REQ-ASYNC-002](../../docs/PRD.md), [D-033](../../ai-rules/DECISIONS.md), [A claim delivers the file and starts the deadline](../../specs/features/async_queue.feature) | A claimed assignment must start the edit due time at the claim. | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` |
+| `R-FILL-AUTO-CHAIN` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [D-064](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | An auto-chain must make at most three offers before the host decides. | `S-FILL-SEQUENCE` |
+| `R-FILL-HOST-LIST` | `setting` | [D-070](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The host orders a fill-in list](../../specs/features/fill_ins.feature) | A host-ordered fill-in list must have no size limit. | `S-FILL-HOST-LIST` |
+| `R-FILL-SEQUENTIAL` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The bot must have at most one open fill-in offer at a time. | `S-FILL-SEQUENCE` |
+| `R-FILL-FIRST-ACCEPT` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The first accept must win the fill-in offer. | `S-FILL-SEQUENCE` |
+| `R-FILL-DUE-APPOINT` | `setting` | [D-040](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Fill-in due time](../../docs/EVENT_SETTINGS.md), [The host sets the fill-in due time](../../specs/features/fill_ins.feature) | A host-appointed fill-in must have a due time at the later of two times. The two times are the round deadline and the default edit window. | `S-FILL-DUE-APPOINT` |
+| `R-FILL-DUE-CLAIM` | `behaviour` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [A chain offer has a separate claim and edit window](../../specs/features/fill_ins.feature) | A claimed fill-in offer must start the edit due time at the claim. | `S-FILL-DUE-CLAIM` |
+| `R-TIER1-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The fill-in pool has two tiers in classic mode](../../specs/features/fill_ins.feature) | A tier-1 offer must go to a person with the fill-in role who is active. The person must be ready, must have a fill-in source, and must not have seen the track. The person must not own the track. | `S-FILL-APPOINT` |
+| `R-TIER2-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must go to an active seeded participant. The participant must have submitted their own turn in the current round. The plan must never give the track. The participant must not have seen the track and must not own it. The offer round must have at most one tier-2 turn. | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-ONLY-NO-TIER1` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track. | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` |
+| `R-TIER2-ONE-PER-ROUND` | `behaviour` | [D-063](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A person must take at most one tier-2 fill-in turn in one round. | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-NO-EVENT-CAP` | `setting` | [D-063](../../ai-rules/DECISIONS.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | The event must not cap the total number of tier-2 fill-in turns. | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-REGULAR` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [D-034](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A planned edit must count toward the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-TIER2-EXTRA` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 rescue must be an extra turn outside the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
+| `R-FILL-PASS-UNCHANGED` | `behaviour` | [D-052](../../ai-rules/DECISIONS.md), [REQ-FILL-005](../../docs/PRD.md), [No eligible fill-in exists](../../specs/features/fill_ins.feature) | When no eligible fill-in exists, classic must pass the track unchanged. Async must return the track to the pool. | `S-FILL-NO-ELIGIBLE`, `S-FILL-PASS-ASYNC` |
+| `R-NO-REPEAT` | `invariant` | [D-007](../../ai-rules/DECISIONS.md), [REQ-SCHED-001](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | A participant must never work on the same track twice. | `S-SCHEDULE-ROUND` |
+| `R-NO-OWN-TRACK` | `invariant` | [D-007](../../ai-rules/DECISIONS.md), [REQ-SCHED-001](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | The app must never assign a participant their own track. | `S-SCHEDULE-ROUND` |
+| `R-ONE-ASSIGNMENT-PER-PERSON-ROUND` | `behaviour` | [D-008](../../ai-rules/DECISIONS.md), [REQ-SCHED-003](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | A round must assign at most one track to each participant. | `S-SCHEDULE-ROUND` |
+| `R-ONE-ASSIGNMENT-PER-TRACK-ROUND` | `behaviour` | [D-008](../../ai-rules/DECISIONS.md), [REQ-SCHED-003](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | A round must assign a track to at most one participant. | `S-SCHEDULE-ROUND` |
+| `R-CLASSIC-LENGTH` | `behaviour` | [D-030](../../ai-rules/DECISIONS.md), [REQ-SCHED-002](../../docs/PRD.md), [A default classic event runs N total rounds](../../specs/features/scheduling.feature) | A full classic event must run N total rounds and N minus one exchange rounds. | `S-CLASSIC-LENGTH` |
+| `R-ROUNDS-HOST-OPENED` | `invariant` | [D-031](../../ai-rules/DECISIONS.md), [D-010](../../ai-rules/DECISIONS.md), [REQ-DEADLINE-001](../../docs/PRD.md), [A default classic event runs N total rounds](../../specs/features/scheduling.feature) | An open round must have a host open action. | `S-CLASSIC-LENGTH` |
+| `R-NO-AUTO-ADVANCE` | `invariant` | [D-010](../../ai-rules/DECISIONS.md), [D-031](../../ai-rules/DECISIONS.md), [REQ-ASYNC-008](../../docs/PRD.md), [A soft deadline does not move a track](../../specs/features/deadlines_and_extensions.feature) | A passed deadline must not advance a round without a host action. | `S-SOFT-DEADLINE` |
+| `R-ONE-OPEN-ROUND` | `behaviour` | [D-031](../../ai-rules/DECISIONS.md), [The host opens at most one round at a time](../../specs/features/deadlines_and_extensions.feature) | The host must open at most one round at a time. | `S-ONE-OPEN-ROUND` |
+| `R-STRICT-REFUSAL` | `behaviour` | [REQ-SCHED-012](../../docs/PRD.md), [Participation](../../docs/EVENT_SETTINGS.md), [Strict participation requires enough handoff budget](../../specs/features/participation.feature) | A strict event must refuse a plan when a handoff cap is below the exchange count. | `S-STRICT-REFUSAL` |
+| `R-REVEAL-AFTER-HOST` | `invariant` | [D-017](../../ai-rules/DECISIONS.md), [REQ-REVEAL-001](../../docs/PRD.md), [Reveal trigger](../../docs/EVENT_SETTINGS.md), [A reveal without the host action is refused](../../specs/features/reveal.feature) | The app must not publish the reveal before the host acts. | `S-REVEAL-NO-HOST` |
+| `R-REVEAL-HOST-TRIGGER` | `behaviour` | [D-017](../../ai-rules/DECISIONS.md), [REQ-REVEAL-001](../../docs/PRD.md), [Reveal trigger](../../docs/EVENT_SETTINGS.md), [The host triggers the reveal](../../specs/features/reveal.feature) | The app must publish the reveal when the host acts after the release stream. The event must have no active assignment. | `S-REVEAL-HOST` |
+| `R-REVEAL-NO-ACTIVE` | `invariant` | [D-017](../../ai-rules/DECISIONS.md), [D-031](../../ai-rules/DECISIONS.md), [REQ-REVEAL-001](../../docs/PRD.md), [The reveal is refused while work is pending](../../specs/features/reveal.feature) | The app must not publish the reveal while an assignment is active. | `S-REVEAL-PENDING` |
+| `R-LEAVE-SEEN` | `behaviour` | [D-051](../../ai-rules/DECISIONS.md), [REQ-JOIN-005](../../docs/PRD.md), [A participant leaves while holding a track](../../specs/features/join_and_seed.feature) | A leave after a claim must mark the held track as seen. | `S-LEAVE-HOLDING` |
+| `R-LEAVE-NO-FUTURE` | `behaviour` | [D-051](../../ai-rules/DECISIONS.md), [REQ-JOIN-005](../../docs/PRD.md), [A participant leaves while holding a track](../../specs/features/join_and_seed.feature) | A leave must remove the future assignments of the person. | `S-LEAVE-HOLDING` |
+| `R-RESTORE-FILLIN-ONLY` | `behaviour` | [D-051](../../ai-rules/DECISIONS.md), [REQ-JOIN-006](../../docs/PRD.md), [A leaver can return as a fill-in](../../specs/features/join_and_seed.feature) | Without the replan option, a leaver must return as a fill-in only. The replan option can give a new personal track. | `S-LEAVER-RETURN` |
+| `R-RESTORE-EXPIRY` | `behaviour` | [D-068](../../ai-rules/DECISIONS.md), [A restore invitation expires after 7 days](../../specs/features/join_and_seed.feature) | A restore invitation must stop working 7 days after the bot sends it. | `S-LEAVER-RETURN` |
+| `R-RESTORE-EXPIRY-SETTING` | `setting` | [D-068](../../ai-rules/DECISIONS.md), [A restore invitation expires after 7 days](../../specs/features/join_and_seed.feature) | The restore invitation must expire after 168 hours. | `S-LEAVER-RETURN`, `S-RESTORE-EXPIRY` |
+| `R-RESTORE-EXPIRED-BLOCKS` | `behaviour` | [D-068](../../ai-rules/DECISIONS.md), [A restore invitation expires after 7 days](../../specs/features/join_and_seed.feature) | An expired restore invitation must not accept a Confirm or Decline action. | `S-RESTORE-EXPIRY` |
+
+## Scenario results
+
+A scenario must have a witness (the pre/action/post conjunction is
+satisfiable) and entailment (the rules plus pre/action imply the
+postcondition). `FAIL` means an impossible scenario or a missing
+postcondition.
+
+| ID | Scenario | Feature | Pending | Witness | Entailment | Rules |
+|---|---|---|---|---|---|---|
+| `S-FILL-SEQUENCE` | The automatic chain offers the slot to one person at a time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-CLAIM-WINDOW-FILLIN`, `R-FILL-AUTO-CHAIN`, `R-FILL-SEQUENTIAL`, `R-FILL-FIRST-ACCEPT` |
+| `S-FILL-HOST-LIST` | The host orders a fill-in list | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-HOST-LIST` |
+| `S-TIER2-EXTRA-TURN` | A seeded participant can take one extra turn | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER2-OFFER-ELIGIBLE`, `R-TIER2-ONLY-NO-TIER1`, `R-TIER2-ONE-PER-ROUND`, `R-TIER2-NO-EVENT-CAP`, `R-BUDGET-REGULAR`, `R-BUDGET-TIER2-EXTRA` |
+| `S-FILL-APPOINT` | The host appoints a fill-in by default | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER1-OFFER-ELIGIBLE` |
+| `S-FILL-POOL` | The fill-in pool has two tiers in classic mode | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER2-ONLY-NO-TIER1` |
+| `S-FILL-NO-ELIGIBLE` | No eligible fill-in exists | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-PASS-UNCHANGED` |
+| `S-FILL-PASS-ASYNC` | No eligible fill-in exists | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-PASS-UNCHANGED` |
+| `S-SCHEDULE-ROUND` | Every participant receives one unseen track per round | [`specs/features/scheduling.feature`](../../specs/features/scheduling.feature) | no | PASS | PASS | `R-NO-REPEAT`, `R-NO-OWN-TRACK`, `R-ONE-ASSIGNMENT-PER-PERSON-ROUND`, `R-ONE-ASSIGNMENT-PER-TRACK-ROUND` |
+| `S-CLASSIC-LENGTH` | A default classic event runs N total rounds | [`specs/features/scheduling.feature`](../../specs/features/scheduling.feature) | yes | PASS | PASS | `R-CLASSIC-LENGTH`, `R-ROUNDS-HOST-OPENED` |
+| `S-REVEAL-HOST` | The host triggers the reveal | [`specs/features/reveal.feature`](../../specs/features/reveal.feature) | yes | PASS | PASS | `R-REVEAL-HOST-TRIGGER` |
+| `S-REVEAL-NO-HOST` | A reveal without the host action is refused | [`specs/features/reveal.feature`](../../specs/features/reveal.feature) | yes | PASS | PASS | `R-REVEAL-AFTER-HOST` |
+| `S-REVEAL-PENDING` | The reveal is refused while work is pending | [`specs/features/reveal.feature`](../../specs/features/reveal.feature) | no | PASS | PASS | `R-REVEAL-NO-ACTIVE` |
+| `S-SOFT-DEADLINE` | A soft deadline does not move a track | [`specs/features/deadlines_and_extensions.feature`](../../specs/features/deadlines_and_extensions.feature) | no | PASS | PASS | `R-NO-AUTO-ADVANCE` |
+| `S-ONE-OPEN-ROUND` | The host opens at most one round at a time | [`specs/features/deadlines_and_extensions.feature`](../../specs/features/deadlines_and_extensions.feature) | yes | PASS | PASS | `R-ONE-OPEN-ROUND` |
+| `S-LEAVE-HOLDING` | A participant leaves while holding a track | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-LEAVE-SEEN`, `R-LEAVE-NO-FUTURE` |
+| `S-LEAVER-RETURN` | A confirmed restore starts at the next round | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-RESTORE-FILLIN-ONLY`, `R-RESTORE-EXPIRY`, `R-RESTORE-EXPIRY-SETTING` |
+| `S-RESTORE-EXPIRY` | A restore invitation expires after 7 days | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-RESTORE-EXPIRED-BLOCKS`, `R-RESTORE-EXPIRY-SETTING` |
+| `S-FILL-DUE-CLAIM` | A chain offer has a separate claim and edit window | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-DUE-CLAIM`, `R-CLAIM-EDIT-DUE`, `R-EDIT-WINDOW` |
+| `S-FILL-DUE-APPOINT` | The host sets the fill-in due time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-DUE-APPOINT`, `R-EDIT-WINDOW` |
+| `S-CLAIM-24` | A claim delivers the file and starts the deadline | [`specs/features/async_queue.feature`](../../specs/features/async_queue.feature) | yes | PASS | PASS | `R-CLAIM-WINDOW-REGULAR`, `R-CLAIM-EDIT-DUE`, `R-EDIT-WINDOW` |
+| `S-CLAIM-REMINDER` | The bot reminds the participant to claim | [`specs/features/async_queue.feature`](../../specs/features/async_queue.feature) | no | PASS | PASS | `R-CLAIM-REMINDER` |
+| `S-STRICT-REFUSAL` | Strict participation requires enough handoff budget | [`specs/features/participation.feature`](../../specs/features/participation.feature) | yes | PASS | PASS | `R-STRICT-REFUSAL` |
+
+## Premises
+
+A premise is a reachable mode. The rules must be satisfiable under
+each premise. The premise name is tracked separately from `domain` in
+the unsat core.
+
+| Premise | Description | Result | Unsat core |
+|---|---|---|---|
+| `P-CLASSIC` | Classic mode is reachable. | SAT | none |
+| `P-ASYNC` | Async mode is reachable. | SAT | none |
+| `P-REGULAR-OFFER` | A regular offer is reachable. | SAT | none |
+| `P-FILL-IN-OFFER` | A fill-in offer is reachable. | SAT | none |
+| `P-AUTO-CHAIN` | The auto-chain flow is reachable. | SAT | none |
+| `P-HOST-LIST` | The host-list flow is reachable. | SAT | none |
+| `P-TIER1-ELIGIBLE` | A tier-1 person can be eligible. | SAT | none |
+| `P-NO-TIER1` | No tier-1 person is eligible. | SAT | none |
+| `P-TIER2-ELIGIBLE` | A tier-2 person can be eligible. | SAT | none |
+| `P-NO-TIER2` | No tier-2 person is eligible. | SAT | none |
+| `P-LEAVE` | A participant can leave. | SAT | none |
+| `P-RESTORE` | A leaver can be restored. | SAT | none |
+| `P-STRICT` | Strict participation is reachable. | SAT | none |
+| `P-FLEXIBLE` | Flexible participation is reachable. | SAT | none |
+
+## Contradiction pairs
+
+None. Every rule pair has a satisfiable conjunction under the domain.
+
+## Base conjunction
+
+| Check | Result | Unsat core |
+|---|---|---|
+| All must rules together | SAT | none |
+
+## Unknown results
+
+None. Every solver query returned sat or unsat.
+
+## Unsat cores
+
+None. The base conjunction, scenarios, and premises are consistent.
+
+## Rule necessity
+
+For each rule, the gate removes it and looks for a linked scenario
+whose postcondition no longer follows. `NO` means the rule is not
+independently exercised by its scenarios.
+
+| Rule | Exercised | Linked scenarios | Counterexample scenario |
+|---|---|---|---|
+| `R-CLAIM-WINDOW-REGULAR` | yes | `S-CLAIM-24` | `S-CLAIM-24` |
+| `R-CLAIM-WINDOW-FILLIN` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
+| `R-CLAIM-REMINDER` | yes | `S-CLAIM-REMINDER` | `S-CLAIM-REMINDER` |
+| `R-EDIT-WINDOW` | yes | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` |
+| `R-CLAIM-EDIT-DUE` | yes | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` |
+| `R-FILL-AUTO-CHAIN` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
+| `R-FILL-HOST-LIST` | yes | `S-FILL-HOST-LIST` | `S-FILL-HOST-LIST` |
+| `R-FILL-SEQUENTIAL` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
+| `R-FILL-FIRST-ACCEPT` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
+| `R-FILL-DUE-APPOINT` | yes | `S-FILL-DUE-APPOINT` | `S-FILL-DUE-APPOINT` |
+| `R-FILL-DUE-CLAIM` | yes | `S-FILL-DUE-CLAIM` | `S-FILL-DUE-CLAIM` |
+| `R-TIER1-OFFER-ELIGIBLE` | yes | `S-FILL-APPOINT` | `S-FILL-APPOINT` |
+| `R-TIER2-OFFER-ELIGIBLE` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-ONLY-NO-TIER1` | yes | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` |
+| `R-TIER2-ONE-PER-ROUND` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-NO-EVENT-CAP` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-REGULAR` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-TIER2-EXTRA` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-FILL-PASS-UNCHANGED` | yes | `S-FILL-NO-ELIGIBLE`, `S-FILL-PASS-ASYNC` | `S-FILL-NO-ELIGIBLE`, `S-FILL-PASS-ASYNC` |
+| `R-NO-REPEAT` | yes | `S-SCHEDULE-ROUND` | `S-SCHEDULE-ROUND` |
+| `R-NO-OWN-TRACK` | yes | `S-SCHEDULE-ROUND` | `S-SCHEDULE-ROUND` |
+| `R-ONE-ASSIGNMENT-PER-PERSON-ROUND` | yes | `S-SCHEDULE-ROUND` | `S-SCHEDULE-ROUND` |
+| `R-ONE-ASSIGNMENT-PER-TRACK-ROUND` | yes | `S-SCHEDULE-ROUND` | `S-SCHEDULE-ROUND` |
+| `R-CLASSIC-LENGTH` | yes | `S-CLASSIC-LENGTH` | `S-CLASSIC-LENGTH` |
+| `R-ROUNDS-HOST-OPENED` | yes | `S-CLASSIC-LENGTH` | `S-CLASSIC-LENGTH` |
+| `R-NO-AUTO-ADVANCE` | yes | `S-SOFT-DEADLINE` | `S-SOFT-DEADLINE` |
+| `R-ONE-OPEN-ROUND` | yes | `S-ONE-OPEN-ROUND` | `S-ONE-OPEN-ROUND` |
+| `R-STRICT-REFUSAL` | yes | `S-STRICT-REFUSAL` | `S-STRICT-REFUSAL` |
+| `R-REVEAL-AFTER-HOST` | yes | `S-REVEAL-NO-HOST` | `S-REVEAL-NO-HOST` |
+| `R-REVEAL-HOST-TRIGGER` | yes | `S-REVEAL-HOST` | `S-REVEAL-HOST` |
+| `R-REVEAL-NO-ACTIVE` | yes | `S-REVEAL-PENDING` | `S-REVEAL-PENDING` |
+| `R-LEAVE-SEEN` | yes | `S-LEAVE-HOLDING` | `S-LEAVE-HOLDING` |
+| `R-LEAVE-NO-FUTURE` | yes | `S-LEAVE-HOLDING` | `S-LEAVE-HOLDING` |
+| `R-RESTORE-FILLIN-ONLY` | yes | `S-LEAVER-RETURN` | `S-LEAVER-RETURN` |
+| `R-RESTORE-EXPIRY` | yes | `S-LEAVER-RETURN` | `S-LEAVER-RETURN` |
+| `R-RESTORE-EXPIRY-SETTING` | yes | `S-LEAVER-RETURN`, `S-RESTORE-EXPIRY` | `S-LEAVER-RETURN`, `S-RESTORE-EXPIRY` |
+| `R-RESTORE-EXPIRED-BLOCKS` | yes | `S-RESTORE-EXPIRY` | `S-RESTORE-EXPIRY` |
+
+## Coverage gaps
+
+None. Every rule has a scenario and every scenario has a rule.
+
+## Known-bad corpus
+
+The corpus reproduces the contradictions from the 2026-11-28 reviews.
+The gate must detect each case and name both sources. The premise is
+separate from the domain definitions.
+
+| Case | Premise | Expected sources | Actual sources | Result | Unsat core |
+|---|---|---|---|---|---|
+| `claim-window-12-vs-6` | `premise:fill-in-offer` | [D-014](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md) | [D-014](../../ai-rules/DECISIONS.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [D-069](../../ai-rules/DECISIONS.md) | DETECTED | KB-CLAIM-6, KB-CLAIM-12 |
+| `max-3-vs-no-cap` | `premise:auto-chain` | [D-014](../../ai-rules/DECISIONS.md), [D-070](../../ai-rules/DECISIONS.md) | [D-014](../../ai-rules/DECISIONS.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [D-070](../../ai-rules/DECISIONS.md) | DETECTED | KB-HOST-LIST-UNLIMITED, KB-GLOBAL-CAP-3 |
+| `shared-budget-vs-extra-turn` | `premise:rescue` | [D-014](../../ai-rules/DECISIONS.md), [D-050](../../ai-rules/DECISIONS.md) | [D-014](../../ai-rules/DECISIONS.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [D-050](../../ai-rules/DECISIONS.md) | DETECTED | KB-EXTRA-TURN, KB-SHARED-BUDGET, premise:rescue |
+
+## Trusted gap
+
+The model is a finite formalization. A wrong or incomplete model can
+miss a contradiction in the natural-language source. The source links
+and the review of the model are mandatory. The base conjunction check
+covers all must rules together; pair checks localize a conflict and
+are subsumed by the base check. The model does not prove the product
+code, the SQLite schema, Discord delivery, or wall-clock time. The
+model uses a finite domain and integer hours.
+
+## Commands
+
+```bash
+scripts/requirements-check.sh           # generate the report
+scripts/requirements-check.sh --check   # fail when the report is stale
+python3 -m unittest discover -s specs/requirements/tests -t . -p 'test_*.py'
+```
+
+## Formula appendix
+
+### `R-CLAIM-WINDOW-REGULAR`
+
+```text
+(= default_claim_window_h 24)
+```
+
+### `R-CLAIM-WINDOW-FILLIN`
+
+```text
+(= default_fill_in_claim_window_h 6)
+```
+
+### `R-CLAIM-REMINDER`
+
+```text
+(and (= default_claim_reminder_h 12) (< claim_reminder_h claim_window_h_0))
+```
+
+### `R-EDIT-WINDOW`
+
+```text
+(= default_edit_window_h 24)
+```
+
+### `R-CLAIM-EDIT-DUE`
+
+```text
+(and (=> turn_claimed_0 (= turn_edit_due_h_0 (+ claim_time_h_0 edit_window_h)))
+     (=> turn_claimed_1 (= turn_edit_due_h_1 (+ claim_time_h_1 edit_window_h)))
+     (=> turn_claimed_2 (= turn_edit_due_h_2 (+ claim_time_h_2 edit_window_h)))
+     (=> turn_claimed_3 (= turn_edit_due_h_3 (+ claim_time_h_3 edit_window_h)))
+     (=> turn_claimed_4 (= turn_edit_due_h_4 (+ claim_time_h_4 edit_window_h)))
+     (=> turn_claimed_5 (= turn_edit_due_h_5 (+ claim_time_h_5 edit_window_h))))
+```
+
+### `R-FILL-AUTO-CHAIN`
+
+```text
+(and fill_in_offer_cap_1 (= max_auto_chain_offers 3))
+```
+
+### `R-FILL-HOST-LIST`
+
+```text
+(not fill_in_offer_cap_2)
+```
+
+### `R-FILL-SEQUENTIAL`
+
+```text
+(<= open_fill_in_offers 1)
+```
+
+### `R-FILL-FIRST-ACCEPT`
+
+```text
+first_accept_wins
+```
+
+### `R-FILL-DUE-APPOINT`
+
+```text
+(let ((a!1 (ite (= turn_round_0 0)
+                round_deadline_h_0
+                (ite (= turn_round_0 1) round_deadline_h_1 round_deadline_h_2)))
+      (a!3 (ite (= turn_round_1 0)
+                round_deadline_h_0
+                (ite (= turn_round_1 1) round_deadline_h_1 round_deadline_h_2)))
+      (a!5 (ite (= turn_round_2 0)
+                round_deadline_h_0
+                (ite (= turn_round_2 1) round_deadline_h_1 round_deadline_h_2)))
+      (a!7 (ite (= turn_round_3 0)
+                round_deadline_h_0
+                (ite (= turn_round_3 1) round_deadline_h_1 round_deadline_h_2)))
+      (a!9 (ite (= turn_round_4 0)
+                round_deadline_h_0
+                (ite (= turn_round_4 1) round_deadline_h_1 round_deadline_h_2)))
+      (a!11 (ite (= turn_round_5 0)
+                 round_deadline_h_0
+                 (ite (= turn_round_5 1) round_deadline_h_1 round_deadline_h_2))))
+(let ((a!2 (= fill_in_due_h_0
+              (ite (>= a!1 (+ appoint_time_h_0 default_edit_window_h))
+                   a!1
+                   (+ appoint_time_h_0 default_edit_window_h))))
+      (a!4 (= fill_in_due_h_1
+              (ite (>= a!3 (+ appoint_time_h_1 default_edit_window_h))
+                   a!3
+                   (+ appoint_time_h_1 default_edit_window_h))))
+      (a!6 (= fill_in_due_h_2
+              (ite (>= a!5 (+ appoint_time_h_2 default_edit_window_h))
+                   a!5
+                   (+ appoint_time_h_2 default_edit_window_h))))
+      (a!8 (= fill_in_due_h_3
+              (ite (>= a!7 (+ appoint_time_h_3 default_edit_window_h))
+                   a!7
+                   (+ appoint_time_h_3 default_edit_window_h))))
+      (a!10 (= fill_in_due_h_4
+               (ite (>= a!9 (+ appoint_time_h_4 default_edit_window_h))
+                    a!9
+                    (+ appoint_time_h_4 default_edit_window_h))))
+      (a!12 (= fill_in_due_h_5
+               (ite (>= a!11 (+ appoint_time_h_5 default_edit_window_h))
+                    a!11
+                    (+ appoint_time_h_5 default_edit_window_h)))))
+  (and (=> (and is_fill_in_turn_0 (= fill_in_flow 0)) a!2)
+       (=> (and is_fill_in_turn_1 (= fill_in_flow 0)) a!4)
+       (=> (and is_fill_in_turn_2 (= fill_in_flow 0)) a!6)
+       (=> (and is_fill_in_turn_3 (= fill_in_flow 0)) a!8)
+       (=> (and is_fill_in_turn_4 (= fill_in_flow 0)) a!10)
+       (=> (and is_fill_in_turn_5 (= fill_in_flow 0)) a!12))))
+```
+
+### `R-FILL-DUE-CLAIM`
+
+```text
+(let ((a!1 (=> (and is_fill_in_turn_0
+                    turn_claimed_0
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_0 (+ claim_time_h_0 edit_window_h))))
+      (a!2 (=> (and is_fill_in_turn_1
+                    turn_claimed_1
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_1 (+ claim_time_h_1 edit_window_h))))
+      (a!3 (=> (and is_fill_in_turn_2
+                    turn_claimed_2
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_2 (+ claim_time_h_2 edit_window_h))))
+      (a!4 (=> (and is_fill_in_turn_3
+                    turn_claimed_3
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_3 (+ claim_time_h_3 edit_window_h))))
+      (a!5 (=> (and is_fill_in_turn_4
+                    turn_claimed_4
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_4 (+ claim_time_h_4 edit_window_h))))
+      (a!6 (=> (and is_fill_in_turn_5
+                    turn_claimed_5
+                    (or (= fill_in_flow 1) (= fill_in_flow 2)))
+               (= fill_in_due_h_5 (+ claim_time_h_5 edit_window_h)))))
+  (and a!1 a!2 a!3 a!4 a!5 a!6))
+```
+
+### `R-TIER1-OFFER-ELIGIBLE`
+
+```text
+(and (=> tier1_offer_0_0
+         (and (= role_0 1)
+              (= membership_0 2)
+              ready_0
+              (not seen_0_0)
+              (distinct owner_0 0)
+              (distinct fill_in_source_0 3)))
+     (=> tier1_offer_0_1
+         (and (= role_0 1)
+              (= membership_0 2)
+              ready_0
+              (not seen_0_1)
+              (distinct owner_1 0)
+              (distinct fill_in_source_0 3)))
+     (=> tier1_offer_0_2
+         (and (= role_0 1)
+              (= membership_0 2)
+              ready_0
+              (not seen_0_2)
+              (distinct owner_2 0)
+              (distinct fill_in_source_0 3)))
+     (=> tier1_offer_1_0
+         (and (= role_1 1)
+              (= membership_1 2)
+              ready_1
+              (not seen_1_0)
+              (distinct owner_0 1)
+              (distinct fill_in_source_1 3)))
+     (=> tier1_offer_1_1
+         (and (= role_1 1)
+              (= membership_1 2)
+              ready_1
+              (not seen_1_1)
+              (distinct owner_1 1)
+              (distinct fill_in_source_1 3)))
+     (=> tier1_offer_1_2
+         (and (= role_1 1)
+              (= membership_1 2)
+              ready_1
+              (not seen_1_2)
+              (distinct owner_2 1)
+              (distinct fill_in_source_1 3)))
+     (=> tier1_offer_2_0
+         (and (= role_2 1)
+              (= membership_2 2)
+              ready_2
+              (not seen_2_0)
+              (distinct owner_0 2)
+              (distinct fill_in_source_2 3)))
+     (=> tier1_offer_2_1
+         (and (= role_2 1)
+              (= membership_2 2)
+              ready_2
+              (not seen_2_1)
+              (distinct owner_1 2)
+              (distinct fill_in_source_2 3)))
+     (=> tier1_offer_2_2
+         (and (= role_2 1)
+              (= membership_2 2)
+              ready_2
+              (not seen_2_2)
+              (distinct owner_2 2)
+              (distinct fill_in_source_2 3))))
+```
+
+### `R-TIER2-OFFER-ELIGIBLE`
+
+```text
+(let ((a!1 (<= (ite (= tier2_offer_round_0_0 0)
+                    tier2_turns_0_0
+                    (ite (= tier2_offer_round_0_0 1)
+                         tier2_turns_0_1
+                         tier2_turns_0_2))
+               1))
+      (a!2 (<= (ite (= tier2_offer_round_0_1 0)
+                    tier2_turns_0_0
+                    (ite (= tier2_offer_round_0_1 1)
+                         tier2_turns_0_1
+                         tier2_turns_0_2))
+               1))
+      (a!3 (<= (ite (= tier2_offer_round_0_2 0)
+                    tier2_turns_0_0
+                    (ite (= tier2_offer_round_0_2 1)
+                         tier2_turns_0_1
+                         tier2_turns_0_2))
+               1))
+      (a!4 (<= (ite (= tier2_offer_round_1_0 0)
+                    tier2_turns_1_0
+                    (ite (= tier2_offer_round_1_0 1)
+                         tier2_turns_1_1
+                         tier2_turns_1_2))
+               1))
+      (a!5 (<= (ite (= tier2_offer_round_1_1 0)
+                    tier2_turns_1_0
+                    (ite (= tier2_offer_round_1_1 1)
+                         tier2_turns_1_1
+                         tier2_turns_1_2))
+               1))
+      (a!6 (<= (ite (= tier2_offer_round_1_2 0)
+                    tier2_turns_1_0
+                    (ite (= tier2_offer_round_1_2 1)
+                         tier2_turns_1_1
+                         tier2_turns_1_2))
+               1))
+      (a!7 (<= (ite (= tier2_offer_round_2_0 0)
+                    tier2_turns_2_0
+                    (ite (= tier2_offer_round_2_0 1)
+                         tier2_turns_2_1
+                         tier2_turns_2_2))
+               1))
+      (a!8 (<= (ite (= tier2_offer_round_2_1 0)
+                    tier2_turns_2_0
+                    (ite (= tier2_offer_round_2_1 1)
+                         tier2_turns_2_1
+                         tier2_turns_2_2))
+               1))
+      (a!9 (<= (ite (= tier2_offer_round_2_2 0)
+                    tier2_turns_2_0
+                    (ite (= tier2_offer_round_2_2 1)
+                         tier2_turns_2_1
+                         tier2_turns_2_2))
+               1)))
+  (and (=> tier2_offer_0_0
+           (and (= role_0 0)
+                (= membership_0 2)
+                ready_0
+                submitted_own_this_round_0
+                (not seen_0_0)
+                (distinct owner_0 0)
+                plan_never_gives_track_0_0
+                a!1))
+       (=> tier2_offer_0_1
+           (and (= role_0 0)
+                (= membership_0 2)
+                ready_0
+                submitted_own_this_round_0
+                (not seen_0_1)
+                (distinct owner_1 0)
+                plan_never_gives_track_0_1
+                a!2))
+       (=> tier2_offer_0_2
+           (and (= role_0 0)
+                (= membership_0 2)
+                ready_0
+                submitted_own_this_round_0
+                (not seen_0_2)
+                (distinct owner_2 0)
+                plan_never_gives_track_0_2
+                a!3))
+       (=> tier2_offer_1_0
+           (and (= role_1 0)
+                (= membership_1 2)
+                ready_1
+                submitted_own_this_round_1
+                (not seen_1_0)
+                (distinct owner_0 1)
+                plan_never_gives_track_1_0
+                a!4))
+       (=> tier2_offer_1_1
+           (and (= role_1 0)
+                (= membership_1 2)
+                ready_1
+                submitted_own_this_round_1
+                (not seen_1_1)
+                (distinct owner_1 1)
+                plan_never_gives_track_1_1
+                a!5))
+       (=> tier2_offer_1_2
+           (and (= role_1 0)
+                (= membership_1 2)
+                ready_1
+                submitted_own_this_round_1
+                (not seen_1_2)
+                (distinct owner_2 1)
+                plan_never_gives_track_1_2
+                a!6))
+       (=> tier2_offer_2_0
+           (and (= role_2 0)
+                (= membership_2 2)
+                ready_2
+                submitted_own_this_round_2
+                (not seen_2_0)
+                (distinct owner_0 2)
+                plan_never_gives_track_2_0
+                a!7))
+       (=> tier2_offer_2_1
+           (and (= role_2 0)
+                (= membership_2 2)
+                ready_2
+                submitted_own_this_round_2
+                (not seen_2_1)
+                (distinct owner_1 2)
+                plan_never_gives_track_2_1
+                a!8))
+       (=> tier2_offer_2_2
+           (and (= role_2 0)
+                (= membership_2 2)
+                ready_2
+                submitted_own_this_round_2
+                (not seen_2_2)
+                (distinct owner_2 2)
+                plan_never_gives_track_2_2
+                a!9))))
+```
+
+### `R-TIER2-ONLY-NO-TIER1`
+
+```text
+(and (=> tier2_offer_0_0
+         (not (or tier1_eligible_0_0 tier1_eligible_1_0 tier1_eligible_2_0)))
+     (=> tier2_offer_0_1
+         (not (or tier1_eligible_0_1 tier1_eligible_1_1 tier1_eligible_2_1)))
+     (=> tier2_offer_0_2
+         (not (or tier1_eligible_0_2 tier1_eligible_1_2 tier1_eligible_2_2)))
+     (=> tier2_offer_1_0
+         (not (or tier1_eligible_0_0 tier1_eligible_1_0 tier1_eligible_2_0)))
+     (=> tier2_offer_1_1
+         (not (or tier1_eligible_0_1 tier1_eligible_1_1 tier1_eligible_2_1)))
+     (=> tier2_offer_1_2
+         (not (or tier1_eligible_0_2 tier1_eligible_1_2 tier1_eligible_2_2)))
+     (=> tier2_offer_2_0
+         (not (or tier1_eligible_0_0 tier1_eligible_1_0 tier1_eligible_2_0)))
+     (=> tier2_offer_2_1
+         (not (or tier1_eligible_0_1 tier1_eligible_1_1 tier1_eligible_2_1)))
+     (=> tier2_offer_2_2
+         (not (or tier1_eligible_0_2 tier1_eligible_1_2 tier1_eligible_2_2))))
+```
+
+### `R-TIER2-ONE-PER-ROUND`
+
+```text
+(and (<= tier2_turns_0_0 1)
+     (<= tier2_turns_0_1 1)
+     (<= tier2_turns_0_2 1)
+     (<= tier2_turns_1_0 1)
+     (<= tier2_turns_1_1 1)
+     (<= tier2_turns_1_2 1)
+     (<= tier2_turns_2_0 1)
+     (<= tier2_turns_2_1 1)
+     (<= tier2_turns_2_2 1))
+```
+
+### `R-TIER2-NO-EVENT-CAP`
+
+```text
+(not event_wide_tier2_cap)
+```
+
+### `R-BUDGET-REGULAR`
+
+```text
+(and (= budget_used_0 planned_edits_0)
+     (= budget_used_1 planned_edits_1)
+     (= budget_used_2 planned_edits_2))
+```
+
+### `R-BUDGET-TIER2-EXTRA`
+
+```text
+(and (= budget_after_tier2_0 budget_used_0)
+     (= budget_after_tier2_1 budget_used_1)
+     (= budget_after_tier2_2 budget_used_2))
+```
+
+### `R-FILL-PASS-UNCHANGED`
+
+```text
+(and (=> (and no_eligible_fill_in (= mode 0)) (= track_outcome 0))
+     (=> (and no_eligible_fill_in (= mode 1)) (= track_outcome 1)))
+```
+
+### `R-NO-REPEAT`
+
+```text
+(and (=> turn_assigned_0 (not repeat_pair_0))
+     (=> turn_assigned_1 (not repeat_pair_1))
+     (=> turn_assigned_2 (not repeat_pair_2))
+     (=> turn_assigned_3 (not repeat_pair_3))
+     (=> turn_assigned_4 (not repeat_pair_4))
+     (=> turn_assigned_5 (not repeat_pair_5)))
+```
+
+### `R-NO-OWN-TRACK`
+
+```text
+(and (=> turn_assigned_0 (not own_track_turn_0))
+     (=> turn_assigned_1 (not own_track_turn_1))
+     (=> turn_assigned_2 (not own_track_turn_2))
+     (=> turn_assigned_3 (not own_track_turn_3))
+     (=> turn_assigned_4 (not own_track_turn_4))
+     (=> turn_assigned_5 (not own_track_turn_5)))
+```
+
+### `R-ONE-ASSIGNMENT-PER-PERSON-ROUND`
+
+```text
+(let ((a!1 (+ (ite (and turn_assigned_0 (= turn_holder_0 0) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 0) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 0) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 0) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 0) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 0) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!2 (+ (ite (and turn_assigned_0 (= turn_holder_0 0) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 0) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 0) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 0) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 0) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 0) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!3 (+ (ite (and turn_assigned_0 (= turn_holder_0 0) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 0) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 0) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 0) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 0) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 0) (= turn_round_5 2))
+                   1
+                   0)))
+      (a!4 (+ (ite (and turn_assigned_0 (= turn_holder_0 1) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 1) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 1) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 1) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 1) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 1) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!5 (+ (ite (and turn_assigned_0 (= turn_holder_0 1) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 1) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 1) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 1) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 1) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 1) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!6 (+ (ite (and turn_assigned_0 (= turn_holder_0 1) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 1) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 1) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 1) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 1) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 1) (= turn_round_5 2))
+                   1
+                   0)))
+      (a!7 (+ (ite (and turn_assigned_0 (= turn_holder_0 2) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 2) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 2) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 2) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 2) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 2) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!8 (+ (ite (and turn_assigned_0 (= turn_holder_0 2) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 2) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 2) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 2) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 2) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 2) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!9 (+ (ite (and turn_assigned_0 (= turn_holder_0 2) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_holder_1 2) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_holder_2 2) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_holder_3 2) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_holder_4 2) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_holder_5 2) (= turn_round_5 2))
+                   1
+                   0))))
+  (and (<= a!1 1)
+       (<= a!2 1)
+       (<= a!3 1)
+       (<= a!4 1)
+       (<= a!5 1)
+       (<= a!6 1)
+       (<= a!7 1)
+       (<= a!8 1)
+       (<= a!9 1)))
+```
+
+### `R-ONE-ASSIGNMENT-PER-TRACK-ROUND`
+
+```text
+(let ((a!1 (+ (ite (and turn_assigned_0 (= turn_track_0 0) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 0) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 0) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 0) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 0) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 0) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!2 (+ (ite (and turn_assigned_0 (= turn_track_0 0) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 0) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 0) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 0) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 0) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 0) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!3 (+ (ite (and turn_assigned_0 (= turn_track_0 0) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 0) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 0) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 0) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 0) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 0) (= turn_round_5 2))
+                   1
+                   0)))
+      (a!4 (+ (ite (and turn_assigned_0 (= turn_track_0 1) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 1) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 1) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 1) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 1) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 1) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!5 (+ (ite (and turn_assigned_0 (= turn_track_0 1) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 1) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 1) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 1) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 1) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 1) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!6 (+ (ite (and turn_assigned_0 (= turn_track_0 1) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 1) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 1) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 1) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 1) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 1) (= turn_round_5 2))
+                   1
+                   0)))
+      (a!7 (+ (ite (and turn_assigned_0 (= turn_track_0 2) (= turn_round_0 0))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 2) (= turn_round_1 0))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 2) (= turn_round_2 0))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 2) (= turn_round_3 0))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 2) (= turn_round_4 0))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 2) (= turn_round_5 0))
+                   1
+                   0)))
+      (a!8 (+ (ite (and turn_assigned_0 (= turn_track_0 2) (= turn_round_0 1))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 2) (= turn_round_1 1))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 2) (= turn_round_2 1))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 2) (= turn_round_3 1))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 2) (= turn_round_4 1))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 2) (= turn_round_5 1))
+                   1
+                   0)))
+      (a!9 (+ (ite (and turn_assigned_0 (= turn_track_0 2) (= turn_round_0 2))
+                   1
+                   0)
+              (ite (and turn_assigned_1 (= turn_track_1 2) (= turn_round_1 2))
+                   1
+                   0)
+              (ite (and turn_assigned_2 (= turn_track_2 2) (= turn_round_2 2))
+                   1
+                   0)
+              (ite (and turn_assigned_3 (= turn_track_3 2) (= turn_round_3 2))
+                   1
+                   0)
+              (ite (and turn_assigned_4 (= turn_track_4 2) (= turn_round_4 2))
+                   1
+                   0)
+              (ite (and turn_assigned_5 (= turn_track_5 2) (= turn_round_5 2))
+                   1
+                   0))))
+  (and (<= a!1 1)
+       (<= a!2 1)
+       (<= a!3 1)
+       (<= a!4 1)
+       (<= a!5 1)
+       (<= a!6 1)
+       (<= a!7 1)
+       (<= a!8 1)
+       (<= a!9 1)))
+```
+
+### `R-CLASSIC-LENGTH`
+
+```text
+(and (= total_rounds participant_count) (= exchange_rounds (- total_rounds 1)))
+```
+
+### `R-ROUNDS-HOST-OPENED`
+
+```text
+(and (=> round_open_0 host_opened_round_0)
+     (=> round_open_1 host_opened_round_1)
+     (=> round_open_2 host_opened_round_2))
+```
+
+### `R-NO-AUTO-ADVANCE`
+
+```text
+(and (not auto_advanced_0) (not auto_advanced_1) (not auto_advanced_2))
+```
+
+### `R-ONE-OPEN-ROUND`
+
+```text
+(<= open_round_count 1)
+```
+
+### `R-STRICT-REFUSAL`
+
+```text
+(and (=> (and (= participation_mode 0) (< max_handoffs_0 exchange_rounds))
+         (not plan_valid))
+     (=> (and (= participation_mode 0) (< max_handoffs_1 exchange_rounds))
+         (not plan_valid))
+     (=> (and (= participation_mode 0) (< max_handoffs_2 exchange_rounds))
+         (not plan_valid)))
+```
+
+### `R-REVEAL-AFTER-HOST`
+
+```text
+(=> reveal_published host_reveal_action)
+```
+
+### `R-REVEAL-HOST-TRIGGER`
+
+```text
+(=> (and host_reveal_action release_stream_finished no_active_assignments)
+    reveal_published)
+```
+
+### `R-REVEAL-NO-ACTIVE`
+
+```text
+(=> reveal_published no_active_assignments)
+```
+
+### `R-LEAVE-SEEN`
+
+```text
+(let ((a!1 (=> leave_after_claim_0
+               (or (and (= leave_held_track_0 0) seen_0_0)
+                   (and (= leave_held_track_0 1) seen_0_1)
+                   (and (= leave_held_track_0 2) seen_0_2))))
+      (a!2 (=> leave_after_claim_1
+               (or (and (= leave_held_track_1 0) seen_1_0)
+                   (and (= leave_held_track_1 1) seen_1_1)
+                   (and (= leave_held_track_1 2) seen_1_2))))
+      (a!3 (=> leave_after_claim_2
+               (or (and (= leave_held_track_2 0) seen_2_0)
+                   (and (= leave_held_track_2 1) seen_2_1)
+                   (and (= leave_held_track_2 2) seen_2_2)))))
+  (and a!1 a!2 a!3))
+```
+
+### `R-LEAVE-NO-FUTURE`
+
+```text
+(and (=> leave_0 (not has_future_assignment_0))
+     (=> leave_1 (not has_future_assignment_1))
+     (=> leave_2 (not has_future_assignment_2)))
+```
+
+### `R-RESTORE-FILLIN-ONLY`
+
+```text
+(let ((a!1 (and (=> restored_0 (and (= role_0 1) (not has_personal_track_0)))
+                (=> restored_1 (and (= role_1 1) (not has_personal_track_1)))
+                (=> restored_2 (and (= role_2 1) (not has_personal_track_2))))))
+  (=> (not replan_allowed) a!1))
+```
+
+### `R-RESTORE-EXPIRY`
+
+```text
+(and (=> invitation_action_0
+         (< invitation_action_h_0 (+ invitation_sent_h_0 168)))
+     (=> invitation_action_1
+         (< invitation_action_h_1 (+ invitation_sent_h_1 168))))
+```
+
+### `R-RESTORE-EXPIRY-SETTING`
+
+```text
+(= invitation_valid_h 168)
+```
+
+### `R-RESTORE-EXPIRED-BLOCKS`
+
+```text
+(and (=> invitation_expired_0 (not invitation_action_0))
+     (=> invitation_expired_1 (not invitation_action_1)))
+```

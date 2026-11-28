@@ -20,6 +20,14 @@ Feature: Reveal and album
     And the host can resolve or explicitly mark each gap
 
   @pending
+  Scenario: A reveal without the host action is refused
+    Given an event whose assignments are all resolved
+    And the host does not press Reveal
+    When the release stream ends
+    Then the app does not publish the reveal
+    And the app publishes nothing to the reveal channel
+
+  @pending
   Scenario: Credits show the full history
     Given a track with a seed and three edits
     When the reveal publishes the credits

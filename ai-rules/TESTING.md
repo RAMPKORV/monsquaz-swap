@@ -105,6 +105,7 @@ scripts/check.sh
 crates/swap-plan-check/verus/conformance.sh
 cargo test -p swap-acceptance --test cucumber
 node scripts/trace-scenarios.mjs     # writes docs/generated/SCENARIO_COVERAGE.md
+scripts/requirements-check.sh        # writes docs/generated/REQUIREMENT_CONSISTENCY.md
 ```
 
 ## CI split
@@ -115,7 +116,8 @@ when a workflow changes.
 - **PR and push to `main` (`ci.yml`):**
   - tracker: rebuild from the ledger, `doctor`, smoke tests;
   - spec gates: gate script tests, `scripts/ste-lint.mjs`,
-    `scripts/trace-scenarios.mjs --check`;
+    `scripts/trace-scenarios.mjs --check`, and
+    `scripts/requirements-check.sh --check`;
   - UI: typecheck, Vitest, build;
   - design: `scripts/design-check.sh`;
   - Rust: fmt, clippy, `cargo test --workspace` (unit, property with bounded
@@ -148,9 +150,18 @@ file that cucumber-rs runs counts as mapped in full and needs no per-test
 comment. When you add a test that proves a scenario, add the `// scenario:`
 comment and remove the `@pending` tag in the same PR.
 
+A new or changed scenario in the modeled scope also updates the formal
+requirement model in `specs/requirements/model.py` and runs
+`scripts/requirements-check.sh` (D-076). A contradiction, an unsatisfiable
+scenario, a missing entailment, an unsatisfiable premise, a rule without a
+necessity witness, or a coverage gap blocks the change. The modeled scope is
+the fill-in, leave, handoff, and scheduling rules.
+
 ## DoD
 
 A behaviour is done when its scenario exists, its test fails before the change
 and passes after, the test declares the scenario with `// scenario:`, the
 scenario has no `@pending` tag, `scripts/check.sh` is green, and the tracker has
-evidence.
+evidence. A change to a requirement, setting, decision, or scenario in the
+modeled scope also updates `specs/requirements/` and the requirement gate
+passes.

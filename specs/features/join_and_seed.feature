@@ -249,7 +249,6 @@ Feature: Joining and seeding
     And the app re-seals the schedule
     And the app shows the change in the audit log
 
-
   @pending
   Scenario: The host pack is required with a review
     Given an event with a host pack

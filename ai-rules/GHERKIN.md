@@ -112,3 +112,20 @@ or an expiry.
 Use stable scenario names and tags. The hand-written PRD links requirements to
 feature files; the tracker issue links to the scenario. Do not duplicate the
 spec in three places — link.
+
+## Requirement consistency (D-076)
+
+A new or changed scenario in the modeled scope updates the formal model in
+`specs/requirements/model.py` in the same PR. Link the scenario to at least one
+rule and link the rule to the scenario. Run `scripts/requirements-check.sh`.
+A contradiction, an unsatisfiable scenario, a missing entailment, an
+unsatisfiable premise, a rule without a necessity witness, or a coverage gap
+blocks the change. The natural-language scenario wins; a stale model is a
+defect.
+
+The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
+pilot has 22 formalized scenarios from 21 source scenarios. The other scenarios are outside the
+modeled scope.
+
+The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. The format and the
+review duty are in `ai-rules/skills/formal-verification/SKILL.md`.

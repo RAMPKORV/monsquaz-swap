@@ -1,9 +1,10 @@
 # Formal methods
 
 Formal verification is a design tool for the event rules. It is not a product
-dependency, a release artifact, or an architecture driver. The program is
-decision D-037 (formal verification program v2). This file describes the
-current tools, the planned routes, and the gates.
+dependency, a release artifact, or an architecture driver. The program starts
+with decision D-037 (formal verification program v2). D-071 sets the
+Rust-first verification pillar. D-076 adds the requirement consistency gate.
+This file describes the current tools, the planned routes, and the gates.
 
 ## Goals
 
@@ -44,6 +45,10 @@ current tools, the planned routes, and the gates.
   (MSW-133). The toolchain is pinned to Verus 0.2026.11.22.1ce6a59 and its
   bundled Z3 4.16.0. The crate is dev-only. The product build does not use
   Verus.
+- **z3-solver 5.3.2.0** for the finite requirement consistency model (D-076).
+  `specs/requirements/` formalizes the normative fill-in, leave, handoff, and
+  scheduling rules. `scripts/requirements-check.sh` runs the checks. CI
+  installs the pinned package from `specs/requirements/requirements.txt`.
 - **Kani** was spiked for the header parser and custom-ID codec. The current
   harnesses exhaust CBMC on standard allocation, so Kani is not in CI. Parser
   and codec safety use property tests instead.
@@ -107,6 +112,7 @@ describes.
 | Assignment lifecycle | `crates/swap-core/tests/assignment_machine.rs` | — | implemented |
 | Parser and custom-ID codec | `custom_id.rs` and `scrub.rs` property tests | — | implemented |
 | Delivery terminal safety | `specs/tla/SwapDelivery.tla` | — | implemented |
+| Requirement consistency | `specs/requirements/` (Z3) | MSW-137 | implemented |
 | Anonymity projections | `swap-sim` outbound audit | — | partial |
 | DB-enforced invariants | SQLite constraints and triggers | MSW-081 | planned |
 | Type-level anonymity | `HostOnly<T>` + `Revealed` capability | MSW-105 | planned |
@@ -144,6 +150,85 @@ describes.
 - `scripts/check.sh` does not run Verus because the toolchain is not a product
   dependency. The CI job is the gate. A local run uses the pinned toolchain
   under `/tmp/opencode/verus`.
+
+## Requirement consistency
+
+D-076 adds a solver-backed consistency gate for the normative requirements.
+The model is in `specs/requirements/`. It is a reviewed formalization, not a
+second source of truth. The natural-language source wins. A stale model is a
+defect.
+
+The gate checks eight properties:
+
+1. The conjunction of all must rules is satisfiable.
+2. No pair of rules has an unsatisfiable conjunction.
+3. Every formalized scenario has a witness: `rules and pre and action and post`
+   is satisfiable.
+4. Every formalized scenario entails its postcondition:
+   `rules and pre and action and not post` is unsatisfiable.
+5. Every reachable premise is satisfiable with all must rules.
+6. Every rule is necessary: remove it, and at least one linked scenario no
+   longer entails its postcondition.
+7. Every rule links at least one scenario, and every scenario links at least
+   one rule.
+8. No solver query returns `unknown` or times out. The gate fails closed.
+
+A failure reports the rule ids, the source links, the premise, and the unsat
+core. The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. It lists the
+rule table, the scenario results, the premises, the contradiction pairs, the
+unsat cores, the rule necessity, the coverage gaps, the known-bad results, and
+the solver version.
+
+The pilot has 22 formalized scenarios from 21 source scenarios. The other
+scenarios are outside the modeled scope. Six of the 22 formalized scenarios
+are `@pending`. PASS means model satisfiability and entailment, not
+implementation.
+
+The domain is finite and explicit: 3 participants, 3 tracks, 3 rounds, 6
+turns, and 2 restore invitations. The model uses integer hours; wall-clock
+time and DST stay outside the model. Defaults are separate from the current
+event settings. A host-set 12-hour regular claim window is allowed.
+
+The replan opt-in in REQ-JOIN-006 is a documented exception. The rule
+`R-RESTORE-FILLIN-ONLY` applies only when `replan_allowed` is false. The tests
+show that the opt-in can give a personal track.
+
+### Known-bad corpus, mutation, and negative tests
+
+`specs/requirements/tests/known_bad.py` reproduces the three contradictions
+from the 2026-11-28 reviews:
+
+- a 12-hour fill-in claim window and a 6-hour window (D-014, D-069);
+- a global 3-offer cap and an unlimited host list (D-014, D-070);
+- a shared handoff budget and an extra tier-2 turn outside the budget
+  (D-014, D-050).
+
+Each case has a separate premise. The gate must detect each case and name both
+sources. The tests include:
+
+- a tier-1 offer to a removed participant is unsatisfiable;
+- a tier-2 offer with no submitted own turn is unsatisfiable;
+- a tier-2 offer with no plan gap is unsatisfiable;
+- a mock solver `unknown` fails the gate;
+- a premise-dependent contradiction is unsatisfiable;
+- a host-set 12-hour regular claim window is satisfiable;
+- the replan opt-in is satisfiable;
+- the restore boundary is exclusive at 168 hours;
+- deleting `R-NO-REPEAT` or mutating the fill-in claim window fails the gate;
+- a rule removal leaves a coverage gap;
+- the link manifest detects a partial link removal.
+
+### Trusted gap
+
+The model is a finite formalization. A wrong or incomplete model can miss a
+contradiction in the natural-language source. The source links and the review
+of the model are mandatory. Entailment is relative to the model: a weak
+postcondition can pass. The necessity check catches a rule that no linked
+scenario exercises. The pair check covers two rules at a time; the base
+conjunction check covers all must rules together and is the authoritative
+global check. The model does not prove the product code, the SQLite schema,
+Discord delivery, or wall-clock time. It does not replace the TLA+ protocol
+models or the tests.
 
 ## Invariants
 
@@ -254,6 +339,8 @@ delivery, and reveal models are required before 1.0.0.
 scripts/formal/check.sh          # TLA+ PR model + mutations
 scripts/formal/check.sh nightly  # deeper model
 node scripts/formal/changed.mjs origin/main   # does this branch touch a model?
+scripts/requirements-check.sh    # requirement consistency + known-bad corpus
+scripts/requirements-check.sh --check   # fail when the report is stale
 cargo test -p swap-core --test assignment_machine
 cargo test -p swap-discord custom_id   # custom-ID property tests
 cargo test -p swap-files scrub         # module-scrub property tests
@@ -265,7 +352,13 @@ cargo test -p swap-files scrub         # module-scrub property tests
   changes.
 - Update `specs/tla/README.md` and `specs/tla/mapping.json` when a property,
   bound, or mapping changes.
+- A change to a PRD requirement, EVENT_SETTINGS row, decision, or Gherkin
+  scenario in the modeled scope updates `specs/requirements/` and runs
+  `scripts/requirements-check.sh` in the same PR. Review the model change like
+  a test.
 - Run the mutation set after a model change.
 - Do not weaken a property to make a check pass. Report the finding.
 - If the model and the code disagree, decide which one is wrong before editing
   either.
+- Do not delete a known-bad case, a seeded mutation, or a coverage-gap test to
+  make the requirement gate pass.

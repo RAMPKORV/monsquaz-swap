@@ -191,6 +191,23 @@ mod tests {
     }
 
     #[test]
+    fn the_tie_break_depends_on_seed_participant_and_track() {
+        let mut values = std::collections::HashSet::new();
+        for seed in 0..4 {
+            for participant in 0..4 {
+                for track in 0..4 {
+                    values.insert(tie_break(
+                        seed,
+                        &format!("P{participant:02}"),
+                        &format!("T{track:02}"),
+                    ));
+                }
+            }
+        }
+        assert_eq!(values.len(), 64, "tie-break collisions");
+    }
+
+    #[test]
     fn a_derangement_still_matches_everyone() {
         let people = (0..4).map(person).collect::<Vec<_>>();
         let mut candidates = BTreeMap::new();

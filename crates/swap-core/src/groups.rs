@@ -377,14 +377,18 @@ pub fn group_schedule(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn the_lookup_matches_the_setting_table() {
         assert_eq!(suggest_groups(9), GroupShape { count: 1, size: 9 });
         assert_eq!(suggest_groups(10), GroupShape { count: 2, size: 5 });
         assert_eq!(suggest_groups(18), GroupShape { count: 3, size: 6 });
+        assert_eq!(suggest_groups(19), GroupShape { count: 4, size: 5 });
+        assert_eq!(suggest_groups(22), GroupShape { count: 4, size: 6 });
         assert_eq!(suggest_groups(20), GroupShape { count: 4, size: 5 });
         assert_eq!(suggest_groups(23), GroupShape { count: 3, size: 8 });
+        assert_eq!(suggest_groups(33), GroupShape { count: 4, size: 9 });
         assert_eq!(suggest_groups(40), GroupShape { count: 4, size: 10 });
         assert_eq!(suggest_groups(41), GroupShape { count: 4, size: 11 });
     }
@@ -496,15 +500,168 @@ mod tests {
     }
 
     #[test]
-    fn an_extra_round_falls_back_to_the_global_pool() {
+    fn group_sizes_keep_every_participant_when_the_shape_overflows() {
+        assert_eq!(group_sizes(100, 1, 10), vec![10, 10, 10, 70]);
+        assert_eq!(group_sizes(0, 2, 0), Vec::<u32>::new());
+        // The balanced branch still splits a roster into at most four groups.
+        assert_eq!(group_sizes(41, 4, 0), vec![11, 11, 11, 8]);
+    }
+
+    #[test]
+    fn the_default_cadence_table_is_stable() {
+        let expected = [
+            1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6,
+        ];
+        for (rounds, cadence) in expected.into_iter().enumerate() {
+            assert_eq!(default_cadence(rounds as u32), cadence, "rounds {rounds}");
+        }
+        for rounds in 3..=200 {
+            let cadence = default_cadence(rounds);
+            let phases = phase_count(rounds, cadence);
+            assert!(
+                (MIN_PHASES..=MAX_PHASES).contains(&phases),
+                "rounds {rounds}: cadence {cadence}, phases {phases}"
+            );
+        }
+    }
+
+    #[test]
+    fn phase_count_handles_a_zero_input() {
+        assert_eq!(phase_count(0, 5), 0);
+        assert_eq!(phase_count(5, 0), 0);
+        assert_eq!(phase_count(1, 1), 1);
+        assert_eq!(phase_count(9, 2), 5);
+    }
+
+    #[test]
+    fn group_warnings_cover_each_boundary() {
+        assert!(group_warnings(&[4], 8, "K rounds").contains(&GroupWarning::Small { size: 4 }));
+        assert!(!group_warnings(&[5], 8, "K rounds").contains(&GroupWarning::Small { size: 5 }));
+        assert!(group_warnings(&[13], 8, "K rounds").contains(&GroupWarning::Large { size: 13 }));
+        assert!(!group_warnings(&[5], 8, "K rounds").contains(&GroupWarning::Large { size: 5 }));
+        assert!(
+            group_warnings(&[5, 7], 8, "K rounds").contains(&GroupWarning::Unequal {
+                smallest: 5,
+                largest: 7
+            })
+        );
+        assert!(
+            !group_warnings(&[5, 6], 8, "K rounds").contains(&GroupWarning::Unequal {
+                smallest: 5,
+                largest: 6
+            })
+        );
+        assert!(
+            !group_warnings(&[5], 0, "K rounds").contains(&GroupWarning::Cadence { phases: 0 })
+        );
+        assert!(group_warnings(&[5], 2, "K rounds").contains(&GroupWarning::Cadence { phases: 2 }));
+        assert!(
+            !group_warnings(&[9], 8, "Exhausted")
+                .contains(&GroupWarning::Exhausted { size: 9, rounds: 8 })
+        );
+        assert!(
+            group_warnings(&[10], 8, "Exhausted").contains(&GroupWarning::Exhausted {
+                size: 10,
+                rounds: 8
+            })
+        );
+    }
+
+    #[test]
+    fn group_schedule_refuses_each_bad_shape() {
         let (people, tracks) = roster(10);
-        let schedule = group_schedule(&people, &tracks, &[5, 5], 9, 2, 42).unwrap();
-        assert_eq!(schedule.phases.len(), 5);
-        assert!(schedule.phases.last().unwrap().global_pool);
-        assert_eq!(schedule.assignments.len(), 90);
-        let mut seen = std::collections::HashSet::new();
+        assert_eq!(
+            group_schedule(&[people[0].clone()], &[], &[1, 0], 1, 1, 1),
+            Err(GroupScheduleError::GroupSizes)
+        );
+        assert_eq!(
+            group_schedule(&[], &[], &[0, 0], 1, 1, 1),
+            Err(GroupScheduleError::GroupSizes)
+        );
+        assert_eq!(
+            group_schedule(&people, &tracks, &[5, 5], 8, 0, 42)
+                .unwrap()
+                .cadence,
+            1
+        );
+    }
+
+    // scenario: Participants rotate between groups
+    #[test]
+    fn group_rotation_uses_three_groups_in_order() {
+        let (people, tracks) = roster(12);
+        let schedule = group_schedule(&people, &tracks, &[4, 4, 4], 6, 2, 42).unwrap();
+        assert_eq!(schedule.phases.len(), 3);
         for assignment in &schedule.assignments {
-            assert!(seen.insert((assignment.participant.0.clone(), assignment.track.0.clone())));
+            let track_group = assignment.track.0[1..].parse::<usize>().unwrap() / 4;
+            let person_group = assignment.participant.0[1..].parse::<usize>().unwrap() / 4;
+            let phase = assignment.round / 2;
+            let expected = (track_group + 3 - (phase as usize % 3)) % 3;
+            assert_eq!(person_group, expected, "round {}", assignment.round);
+        }
+    }
+
+    #[test]
+    fn match_round_refuses_a_mismatched_shape() {
+        let forbidden = HashSet::new();
+        assert_eq!(match_round(2, 3, &forbidden, 1), None);
+        assert_eq!(match_round(0, 0, &forbidden, 1), None);
+        assert!(match_round(3, 3, &forbidden, 1).is_some());
+    }
+
+    #[test]
+    fn a_short_final_phase_is_clamped() {
+        let (people, tracks) = roster(10);
+        let schedule = group_schedule(&people, &tracks, &[5, 5], 5, 2, 42).unwrap();
+        assert_eq!(schedule.phases.len(), 3);
+        assert_eq!(schedule.phases.last().unwrap().rounds, 1);
+        assert_eq!(schedule.assignments.len(), 50);
+        let rounds: HashSet<u32> = schedule
+            .assignments
+            .iter()
+            .map(|assignment| assignment.round)
+            .collect();
+        assert_eq!(rounds.len(), 5);
+    }
+
+    fn group_fingerprint(schedule: &GroupSchedule) -> u64 {
+        let mut hash = 0xCBF2_9CE4_8422_2325_u64;
+        let mut eat = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+            }
+        };
+        for assignment in &schedule.assignments {
+            eat(&assignment.round.to_le_bytes());
+            eat(assignment.track.0.as_bytes());
+            eat(b":");
+            eat(assignment.participant.0.as_bytes());
+            eat(b";");
+        }
+        for phase in &schedule.phases {
+            eat(&phase.index.to_le_bytes());
+            eat(&phase.start_round.to_le_bytes());
+            eat(&phase.rounds.to_le_bytes());
+            eat(&[u8::from(phase.global_pool)]);
+        }
+        hash
+    }
+
+    #[test]
+    fn known_group_seeds_produce_known_schedules() {
+        let (people, tracks) = roster(10);
+        let local = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
+        assert_eq!(group_fingerprint(&local), 0x4ceb27763a323a85);
+        for (seed, expected) in [
+            (1u64, 0xf9ac425bdacc1015),
+            (7, 0x68cf1fbbf303e855),
+            (9, 0x52b4db43fba32abd),
+            (42, 0xa1bedf5f6ad83685),
+            (123, 0x392c53057a6907fd),
+        ] {
+            let fallback = group_schedule(&people, &tracks, &[5, 5], 9, 3, seed).unwrap();
+            assert_eq!(group_fingerprint(&fallback), expected, "seed {seed}");
         }
     }
 
@@ -514,6 +671,28 @@ mod tests {
         let first = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
         let second = group_schedule(&people, &tracks, &[5, 5], 8, 2, 42).unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn an_extra_round_falls_back_to_the_global_pool() {
+        let (people, tracks) = roster(10);
+        let schedule = group_schedule(&people, &tracks, &[5, 5], 9, 3, 42).unwrap();
+        assert_eq!(schedule.phases.len(), 3);
+        assert!(schedule.phases.last().unwrap().global_pool);
+        assert_eq!(schedule.assignments.len(), 90);
+        let mut seen = std::collections::HashSet::new();
+        let mut rounds = std::collections::HashSet::new();
+        for assignment in &schedule.assignments {
+            assert_ne!(
+                assignment.track.0,
+                assignment.participant.0.replace('P', "T"),
+                "own track in the global fallback"
+            );
+            assert!(assignment.round < 9);
+            rounds.insert(assignment.round);
+            assert!(seen.insert((assignment.participant.0.clone(), assignment.track.0.clone())));
+        }
+        assert_eq!(rounds.len(), 9);
     }
 
     #[test]

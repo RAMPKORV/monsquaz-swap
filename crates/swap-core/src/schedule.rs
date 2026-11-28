@@ -958,6 +958,274 @@ mod tests {
     }
 
     #[test]
+    fn generate_with_requires_a_roster_and_tracks() {
+        let people = people(2);
+        let tracks = tracks(&people);
+        assert_eq!(
+            Schedule::generate_with(&[], &tracks, 1, 1, ScheduleStrategy::Balanced),
+            Err(ScheduleError::EmptyRoster)
+        );
+        assert_eq!(
+            Schedule::generate_with(&people, &[], 1, 1, ScheduleStrategy::Balanced),
+            Err(ScheduleError::EmptyRoster)
+        );
+    }
+
+    #[test]
+    fn balance_counts_repeated_handoffs() {
+        let assignment = |round, track: &str, participant: &str| ScheduledAssignment {
+            round,
+            track: TrackCode::new(track),
+            participant: ParticipantId::new(participant),
+        };
+        let schedule = Schedule {
+            seed: 0,
+            rounds: 3,
+            strategy: ScheduleStrategy::Balanced,
+            fallback: false,
+            assignments: vec![
+                assignment(0, "T1", "P02"),
+                assignment(1, "T1", "P01"),
+                assignment(2, "T1", "P02"),
+            ],
+        };
+        assert_eq!(
+            schedule.balance(),
+            BalanceReport {
+                repeated_handoffs: 1,
+                max_pair_meetings: 2,
+                unique_pairs: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn an_equal_roster_uses_the_cyclic_square_without_fallback() {
+        let people = people(6);
+        let tracks = tracks(&people);
+        let schedule =
+            Schedule::generate_with(&people, &tracks, 5, 7, ScheduleStrategy::Cyclic).unwrap();
+        assert!(!schedule.fallback);
+    }
+
+    #[test]
+    fn balanced_keeps_the_first_best_attempt() {
+        let people = people(6);
+        let tracks = tracks(&people);
+        let owners: Vec<usize> = (0..people.len()).collect();
+        let mut saw_tie = false;
+        for seed in 0u64..40 {
+            let attempts: Vec<Vec<ScheduledAssignment>> = (0..BALANCED_ATTEMPTS)
+                .filter_map(|attempt| {
+                    let attempt_seed =
+                        seed.wrapping_add(u64::from(attempt).wrapping_mul(SPLITMIX_GOLDEN));
+                    attempt_balanced(&people, &tracks, &owners, 5, attempt_seed).ok()
+                })
+                .collect();
+            let chosen = balanced_schedule(&people, &tracks, &owners, 5, seed).unwrap();
+            let chosen_report = balance_of(&chosen);
+            let best = attempts
+                .iter()
+                .map(|attempt| balance_of(attempt))
+                .min_by_key(|report| (report.repeated_handoffs, report.max_pair_meetings))
+                .unwrap();
+            assert_eq!(
+                (
+                    chosen_report.repeated_handoffs,
+                    chosen_report.max_pair_meetings
+                ),
+                (best.repeated_handoffs, best.max_pair_meetings),
+                "seed {seed}"
+            );
+            let first = attempts
+                .iter()
+                .find(|attempt| {
+                    let report = balance_of(attempt);
+                    (report.repeated_handoffs, report.max_pair_meetings)
+                        == (best.repeated_handoffs, best.max_pair_meetings)
+                })
+                .unwrap();
+            assert_eq!(&chosen, first, "seed {seed}");
+            if attempts
+                .iter()
+                .filter(|attempt| {
+                    let report = balance_of(attempt);
+                    (report.repeated_handoffs, report.max_pair_meetings)
+                        == (best.repeated_handoffs, best.max_pair_meetings)
+                })
+                .count()
+                > 1
+            {
+                saw_tie = true;
+            }
+        }
+        assert!(saw_tie, "no tied attempts in the sample");
+    }
+
+    #[test]
+    fn a_tie_between_random_and_balanced_keeps_balanced() {
+        let mut saw_tie = false;
+        for count in 3..=6 {
+            let people = people(count);
+            let tracks = tracks(&people);
+            let owners: Vec<usize> = (0..count).collect();
+            for seed in 0..200 {
+                let balanced =
+                    balanced_schedule(&people, &tracks, &owners, count as u32 - 1, seed).unwrap();
+                let random =
+                    random_schedule(&people, &tracks, &owners, count as u32 - 1, seed).unwrap();
+                let balanced_report = balance_of(&balanced);
+                let random_report = balance_of(&random);
+                if (
+                    random_report.repeated_handoffs,
+                    random_report.max_pair_meetings,
+                ) == (
+                    balanced_report.repeated_handoffs,
+                    balanced_report.max_pair_meetings,
+                ) {
+                    let chosen = Schedule::generate_with(
+                        &people,
+                        &tracks,
+                        count as u32 - 1,
+                        seed,
+                        ScheduleStrategy::Balanced,
+                    )
+                    .unwrap();
+                    assert!(!chosen.fallback, "count {count}, seed {seed}");
+                    saw_tie = true;
+                }
+            }
+        }
+        assert!(saw_tie, "no balanced/random tie in the sample");
+    }
+
+    #[test]
+    fn ordered_pair_is_canonical() {
+        assert_eq!(ordered_pair(5, 2), (2, 5));
+        assert_eq!(ordered_pair(2, 5), (2, 5));
+        assert_eq!(ordered_pair(2, 2), (2, 2));
+    }
+
+    #[test]
+    fn match_round_refuses_a_mismatched_shape() {
+        let forbidden = HashSet::new();
+        assert_eq!(match_round(2, 3, &forbidden, 1), None);
+        assert_eq!(match_round(0, 0, &forbidden, 1), None);
+        assert!(match_round(3, 3, &forbidden, 1).is_some());
+    }
+
+    #[test]
+    fn bounded_values_stay_in_range() {
+        let mut rng = SplitMix64::new(42);
+        for upper in 2..=17 {
+            for _ in 0..100 {
+                assert!(rng.next_bounded(upper) < upper);
+            }
+        }
+    }
+
+    #[test]
+    fn shuffle_handles_small_slices() {
+        let mut two = ["a", "b"];
+        SplitMix64::new(2).shuffle(&mut two);
+        assert_eq!(two, ["b", "a"]);
+        let mut two = ["a", "b"];
+        SplitMix64::new(0).shuffle(&mut two);
+        assert_eq!(two, ["a", "b"]);
+        let mut three = ["a", "b", "c"];
+        SplitMix64::new(1).shuffle(&mut three);
+        assert_eq!(three, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_known_seed_produces_a_known_schedule() {
+        let people = people(4);
+        let tracks = tracks(&people);
+        let schedule = Schedule::generate(&people, &tracks, 3, 42).unwrap();
+        assert!(!schedule.fallback);
+        let actual: Vec<(u32, &str, &str)> = schedule
+            .assignments
+            .iter()
+            .map(|assignment| {
+                (
+                    assignment.round,
+                    assignment.track.0.as_str(),
+                    assignment.participant.0.as_str(),
+                )
+            })
+            .collect();
+        let expected = vec![
+            (0, "T00", "P01"),
+            (0, "T01", "P00"),
+            (0, "T02", "P03"),
+            (0, "T03", "P02"),
+            (1, "T00", "P03"),
+            (1, "T01", "P02"),
+            (1, "T02", "P00"),
+            (1, "T03", "P01"),
+            (2, "T00", "P02"),
+            (2, "T01", "P03"),
+            (2, "T02", "P01"),
+            (2, "T03", "P00"),
+        ];
+        assert_eq!(actual, expected);
+    }
+
+    fn schedule_fingerprint(schedule: &Schedule) -> u64 {
+        let mut hash = 0xCBF2_9CE4_8422_2325_u64;
+        let mut eat = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+            }
+        };
+        for assignment in &schedule.assignments {
+            eat(&assignment.round.to_le_bytes());
+            eat(assignment.track.0.as_bytes());
+            eat(b":");
+            eat(assignment.participant.0.as_bytes());
+            eat(b";");
+        }
+        hash
+    }
+
+    #[test]
+    fn known_seeds_produce_known_schedules() {
+        // A deterministic schedule is part of the contract. The fingerprints
+        // protect the cost and recent-pair terms that no report-only test sees.
+        let cases = [
+            (5usize, 4u32, 1u64, 0x6b6d1c414ea88d75),
+            (6, 5, 7, 0x1e34d1469cc6cfad),
+            (7, 6, 42, 0x9abd566c8d2c6190),
+            (8, 7, 42, 0x7b80ef698f9a9485),
+            (8, 7, 123, 0xea38576fbb62f795),
+            (8, 7, 1, 0xcbe8c0b0e464028d),
+        ];
+        for (count, rounds, seed, expected) in cases {
+            let people = people(count);
+            let tracks = tracks(&people);
+            let schedule = Schedule::generate(&people, &tracks, rounds, seed).unwrap();
+            assert_eq!(
+                schedule_fingerprint(&schedule),
+                expected,
+                "{count} people, {rounds} rounds, seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_cyclic_seeds_produce_known_schedules() {
+        let people = people(8);
+        let tracks = tracks(&people);
+        for (seed, expected) in [(5u64, 0xeaa17af2c39b6d3d), (42, 0xfc6c8fc33f994105)] {
+            let schedule =
+                Schedule::generate_with(&people, &tracks, 7, seed, ScheduleStrategy::Cyclic)
+                    .unwrap();
+            assert_eq!(schedule_fingerprint(&schedule), expected, "seed {seed}");
+        }
+    }
+
+    #[test]
     fn a_small_event_is_valid() {
         let people = people(3);
         let tracks = tracks(&people);

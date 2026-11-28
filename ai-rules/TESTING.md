@@ -70,7 +70,8 @@ automatically a bug.
   `ci-gate` and it does not block a pull request.
 - The job uploads `mutants.out/` as an artifact for 14 days.
 
-The job has a 45-minute limit. Expect 15 to 25 minutes on a 4-core runner.
+The job has a 45-minute limit. The final local run took 2 minutes 30 seconds
+with four jobs on a 24-core workstation. Expect 10 to 20 minutes on a 4-core runner.
 
 Read the survivors:
 
@@ -99,6 +100,40 @@ scripts/mutants.sh              # both, in nightly order
 ```
 
 The script stops with a clear message when cargo-mutants 27.1.0 is absent.
+
+### Survivor triage result
+
+The first full run on 2026-11-28 tested 347 mutants. It reported 94 survivors
+and 6 timeouts. The triage added focused tests and line-specific exclusions.
+The final run tests 333 mutants: 315 caught, 18 unviable, 0 survivors, and
+0 timeouts. `.cargo/mutants.toml` documents all 34 excluded mutants: the 20
+private bit-mixing and hash operators and 14 mutants from this triage.
+
+The triage added tests for:
+
+- the ledger `mark` return value and the `is_empty` lifecycle;
+- the async tie-break seed, participant, and track dependence;
+- group lookup, size overflow, cadence, warning boundaries, three-group
+  rotation, short final phases, and the global-pool fallback;
+- the scheduler balance report, cyclic fallback, balanced choice, ordered
+  pair, matching preconditions, bounded PRNG use, small shuffles, and known
+  deterministic schedules;
+- the HMAC key-length boundary;
+- every state-machine terminal state and the overdue restore path.
+
+### Exclusion rule
+
+Add an exclusion only when the mutation cannot change observable behaviour.
+
+1. Name the exact file, line, and mutation. Do not exclude a file or a module.
+2. Write the reason as a comment beside the regex.
+3. Keep the tests that cover the surrounding behaviour.
+4. Ask whether a participant, host, database row, or file can see a
+   difference. If yes, add a test instead.
+
+Use a timeout exclusion only when the mutation makes a loop non-terminating and
+the original code terminates. Raise a timeout only when the code is correct but
+slow. Do not exclude a module to make the job green.
 
 ## Simulation
 

@@ -537,6 +537,76 @@ mod tests {
         assert_eq!(assignment.status, AssignmentStatus::Expired);
     }
 
+    #[test]
+    fn overdue_restore_returns_to_claimed() {
+        let mut assignment = Assignment::offered();
+        assignment.claim().unwrap();
+        assignment.mark_overdue().unwrap();
+        assert_eq!(assignment.restore_claimed(), Ok(()));
+        assert_eq!(assignment.status, AssignmentStatus::Claimed);
+        assert_eq!(assignment.submit(), Ok(()));
+        assert_eq!(assignment.status, AssignmentStatus::Submitted);
+
+        let mut offered = Assignment::offered();
+        assert_eq!(
+            offered.restore_claimed(),
+            Err(offered.invalid("restore_claimed"))
+        );
+        assert_eq!(offered.status, AssignmentStatus::Offered);
+    }
+
+    #[test]
+    fn every_terminal_state_and_invalid_transition_is_explicit() {
+        let event_states = [
+            EventState::Draft,
+            EventState::Signup,
+            EventState::ScheduleReview,
+            EventState::Active,
+            EventState::Paused,
+            EventState::Reveal,
+            EventState::Archived,
+        ];
+        for state in event_states {
+            assert_eq!(state.is_terminal(), state == EventState::Archived);
+        }
+        assert!(EventState::Draft.can_transition_to(EventState::Signup));
+        assert!(!EventState::Draft.can_transition_to(EventState::Archived));
+
+        let memberships = [
+            Membership::SignedUp,
+            Membership::Seeded,
+            Membership::Active,
+            Membership::Left,
+            Membership::Removed,
+        ];
+        for state in memberships {
+            assert_eq!(
+                state.is_terminal(),
+                matches!(state, Membership::Left | Membership::Removed)
+            );
+        }
+        assert!(Membership::SignedUp.can_transition_to(Membership::Seeded));
+        assert!(!Membership::SignedUp.can_transition_to(Membership::Active));
+        assert!(!Membership::Left.can_transition_to(Membership::Active));
+        assert!(!Membership::Removed.can_transition_to(Membership::SignedUp));
+
+        let track_states = [
+            TrackState::Seeded,
+            TrackState::Pool,
+            TrackState::Offered,
+            TrackState::InCustody,
+            TrackState::Submitted,
+            TrackState::Final,
+            TrackState::Retired,
+        ];
+        for state in track_states {
+            assert_eq!(state.is_terminal(), state == TrackState::Retired);
+        }
+        assert!(TrackState::Seeded.can_transition_to(TrackState::Pool));
+        assert!(!TrackState::Seeded.can_transition_to(TrackState::Final));
+        assert!(!TrackState::Retired.can_transition_to(TrackState::Pool));
+    }
+
     fn any_action() -> impl Strategy<Value = u8> {
         0u8..7
     }

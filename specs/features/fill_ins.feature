@@ -163,3 +163,16 @@ Feature: Skips and fill-ins
     Then the fill-in version remains current by default
     And the host can override the choice
     And the app records the override in the audit log
+
+  @pending
+  Scenario: A claimed fill-in offer starts the 24-hour edit time
+    Given a fill-in who claims an offer
+    When the app sets the edit due time
+    Then the edit due time is 24 hours after the claim
+
+  @pending
+  Scenario: A host-appointed fill-in gets the later due time
+    Given a round deadline and a host appointment
+    When the host appoints a fill-in
+    Then the fill-in due time is the later of two times
+    And the two times are the round deadline and 24 hours after the appointment

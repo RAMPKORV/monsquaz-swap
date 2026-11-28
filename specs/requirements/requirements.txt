@@ -1,0 +1,4 @@
+# Requirement consistency gate (D-076).
+# Pin the installed solver. The gate reports the z3 version and fails when the
+# generated report is stale.
+z3-solver==5.3.2.0

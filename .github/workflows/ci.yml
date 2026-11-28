@@ -55,6 +55,13 @@ jobs:
         run: node scripts/ste-lint.mjs
       - name: Gherkin traceability
         run: node scripts/trace-scenarios.mjs --check
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install requirement solver
+        run: python -m pip install --disable-pip-version-check -r specs/requirements/requirements.txt
+      - name: Requirement consistency
+        run: scripts/requirements-check.sh --check
 
   ui:
     name: UI

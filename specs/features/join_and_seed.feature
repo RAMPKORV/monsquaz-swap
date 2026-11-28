@@ -251,6 +251,15 @@ Feature: Joining and seeding
 
 
   @pending
+  Scenario: A restore invitation expires after 7 days
+    Given a person who left the event
+    And a restore invitation that the bot sent 8 days ago
+    When the person presses Confirm
+    Then the app refuses the restore
+    And the app shows Restore expired
+    And the host can send a new invitation
+
+  @pending
   Scenario: The host pack is required with a review
     Given an event with a host pack
     When a participant submits a seed that adds an unknown sample

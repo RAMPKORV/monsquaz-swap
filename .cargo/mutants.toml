@@ -1,0 +1,42 @@
+# Reviewed mutation scope for the nightly job (.github/workflows/mutants.yml).
+#
+# The scope is the pure domain crate, which owns the no-repeat and no-own-track
+# invariants and the seeded classic scheduler. The nightly job splits the scope
+# into two runs: swap-core first, then the scheduler module.
+#
+# cargo-mutants reads this file by default from `.cargo/mutants.toml`.
+# Run `scripts/mutants.sh --list` to review the effective scope.
+
+# Mutate only the pure domain crate. This is a name filter, not a file glob.
+# A command-line --file filter combines with examine_globs, so a bare
+# `cargo mutants` would widen to the whole workspace. The name filter keeps a
+# bare run on swap-core and lets the script split the scope with --file.
+examine_re = ["^crates/swap-core/src/"]
+
+# Run the domain tests, not the whole workspace. The engine and acceptance
+# tests are slow and they exercise other crates; the nightly budget is for
+# swap-core coverage.
+test_package = ["swap-core"]
+
+# Per-mutant limits. The test timeout is the larger of 30 seconds and five
+# times the baseline test time. A hang in the scheduler must not stop the job.
+minimum_test_timeout = 30.0
+timeout_multiplier = 5.0
+build_timeout_multiplier = 4.0
+
+# Reviewed exclusions. Each regex matches the full mutant name.
+# `scripts/mutants.sh --list` shows the remaining mutants.
+exclude_re = [
+  # The exact SplitMix64 bit mixing is an implementation detail. The contract
+  # is a deterministic, well-spread stream. Any deterministic mixer produces a
+  # different but valid schedule, so these mutants are equivalent under the
+  # contract and cannot be caught without asserting a private stream.
+  "SplitMix64::next_u64",
+
+  # The async-queue tie-break uses a private SplitMix64 function and an FNV
+  # hash only to order candidates. The contract is a deterministic, fair
+  # choice. A different mixer produces a different valid order, so these
+  # mutants are equivalent and are not a test gap.
+  "splitmix",
+  "stable_hash",
+]

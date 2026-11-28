@@ -94,6 +94,7 @@ pnpm --dir ui build   # before cargo test on a clean checkout
 cargo test --workspace
 scripts/check.sh
 scripts/design-check.sh   # Refract + contrast + focus + token policy
+scripts/mutants.sh --check         # nightly mutation scope (cargo-mutants 27.1.0)
 node scripts/ste-lint.mjs          # STE gate
 node scripts/trace-scenarios.mjs   # Gherkin traceability gate
 scripts/formal/check.sh            # TLA+ models (needs java)

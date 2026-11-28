@@ -388,7 +388,17 @@ async fn the_classic_loop_reaches_a_reveal() {
     let round_two = fixture.open(2);
     assert_eq!(round_two.len(), 4);
     let blocked = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap_err();
-    assert!(matches!(blocked, EngineError::PendingAssignments { .. }));
+    let EngineError::PendingAssignments { count, mut ids } = blocked else {
+        panic!("expected pending assignments, got {blocked:?}");
+    };
+    let mut expected_ids = round_two
+        .iter()
+        .map(|(_, assignment_id, _)| assignment_id.clone())
+        .collect::<Vec<_>>();
+    ids.sort();
+    expected_ids.sort();
+    assert_eq!(count, 4);
+    assert_eq!(ids, expected_ids);
     for (_, assignment_id, _) in &round_two {
         expire_offer(&fixture.db, EVENT, assignment_id, T4 + 172_801).unwrap();
     }
@@ -854,12 +864,19 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
         EventState::Active
     );
     assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 6);
+    let recovered = DeliveryRepo::pending(db.conn(), 100).unwrap();
+    assert_eq!(recovered.len(), 6);
     let discord = FakeDiscord::new();
     let report = dispatch_pending(&db, &store, &discord, T5, 100)
         .await
         .unwrap();
     assert_eq!(report.sent, 6);
     assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+    for row in &recovered {
+        let row = DeliveryRepo::get(db.conn(), &row.id).unwrap().unwrap();
+        assert_eq!(row.status, "sent");
+        assert_eq!(row.sent_at, Some(T5));
+    }
     drop(db);
 
     let db = Db::open(&database).unwrap();
@@ -2370,6 +2387,7 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
     );
 }
 
+// scenario: Comments are published with attribution
 // scenario: The reveal order does not follow submission time
 #[test]
 fn the_reveal_package_carries_titles_comments_and_credits() {
@@ -2676,7 +2694,7 @@ fn the_previous_submitter_can_name_the_final_track() {
         T5,
     )
     .unwrap();
-    submit(
+    let final_submit = submit(
         &fixture.db,
         &fixture.store,
         &PassthroughPreparer,
@@ -2689,6 +2707,25 @@ fn the_previous_submitter_can_name_the_final_track() {
         T6,
     )
     .unwrap();
+    let prompt = final_submit
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Dm { user_id, content } if user_id == &previous => Some(content),
+            _ => None,
+        })
+        .expect("the previous submitter gets the title prompt");
+    assert!(prompt.contains(&final_track));
+    assert!(prompt.contains("round 1"));
+    assert!(prompt.contains("/swap title"));
+
+    let untitled = reveal_package(&fixture.db, EVENT).unwrap();
+    let untitled_track = untitled
+        .album
+        .iter()
+        .find(|track| track.track_code == final_track)
+        .unwrap();
+    assert_eq!(untitled_track.title, None);
 
     assert!(matches!(
         set_track_title_for_user_on_track(

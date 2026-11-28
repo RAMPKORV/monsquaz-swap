@@ -75,6 +75,34 @@ test("a scenario comment must sit directly above a test", () => {
   assert.deepEqual(findMappings(ts, "t.test.ts").errors, []);
 });
 
+test("a doc comment and another attribute between the mapping and the test pass", () => {
+  const rust = "    // scenario: Mapped one\n    /// Explains the test.\n    #[allow(clippy::too_many_lines)]\n    #[tokio::test]\n    async fn works() {}\n";
+  assert.deepEqual(findMappings(rust, "t.rs").errors, []);
+});
+
+test("a mapping above a cfg(test) module fails", () => {
+  const rust = "// scenario: Mapped one\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn works() {}\n}\n";
+  assert.equal(findMappings(rust, "t.rs").errors.length, 1);
+});
+
+test("a mapping above a plain function without a test attribute fails", () => {
+  assert.equal(findMappings("// scenario: Mapped one\nfn helper() {}\n", "t.rs").errors.length, 1);
+});
+
+test("a mapping above a proptest block passes", () => {
+  assert.deepEqual(findMappings("// scenario: Mapped one\nproptest! {\n", "t.rs").errors, []);
+});
+
+test("tags on a Rule line apply to its scenarios", () => {
+  const feature = "Feature: F\n\n  @pending\n  Rule: R\n\n    Scenario: Inside\n      Given x\n";
+  assert.deepEqual(parseFeature(feature, "f")[0].tags, ["@pending"]);
+});
+
+test("text inside a doc string is not a scenario", () => {
+  const feature = 'Feature: F\n  Scenario: Real\n    Given a note\n      """\n      Scenario: Fake\n      """\n';
+  assert.deepEqual(parseFeature(feature, "f").map((s) => s.name), ["Real"]);
+});
+
 test("the cucumber runner names its feature files", () => {
   const source = 'SwapWorld::run("../../specs/features/core_invariants.feature").await;';
   assert.deepEqual(cucumberFeatures(source), ["specs/features/core_invariants.feature"]);

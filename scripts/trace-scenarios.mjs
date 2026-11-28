@@ -27,18 +27,27 @@ const CUCUMBER_RUNNERS = ["crates/swap-acceptance/tests/cucumber.rs"];
 const BASELINE = "scripts/trace-scenarios.baseline.json";
 const REPORT = "docs/generated/SCENARIO_COVERAGE.md";
 const MAPPING_RE = /^\s*\/\/\s*scenario:\s*(.+?)\s*$/;
-// The line after the mapping comments must start a test.
-const TEST_START_RE = /^\s*(#\[|(pub\s+)?(async\s+)?fn\s|it\(|test\(|it\.each|test\.each)/;
+// After the mapping comments, the scanner skips blank lines, comments, doc
+// comments, and non-test attributes. The next line must start a real test.
+const TEST_START_RE =
+  /^\s*(#\[test\]|#\[tokio::test|#\[proptest\]|proptest!\s*\{|(it|test)(\.each\([^)]*\))?\()/;
+const SKIP_RE = /^\s*(\/\/|#\[|$)/;
 
 /** Parse one feature file into scenarios with their effective tags. */
 export function parseFeature(text, file) {
   const scenarios = [];
   let featureTags = [];
+  let ruleTags = [];
   let pendingTags = [];
   let seenFeature = false;
+  let inDocString = false;
   text.split("\n").forEach((raw, index) => {
     const line = raw.trim();
-    if (line.startsWith("#") || line === "") return;
+    if (line.startsWith('"""') || line.startsWith("```")) {
+      inDocString = !inDocString;
+      return;
+    }
+    if (inDocString || line.startsWith("#") || line === "") return;
     if (line.startsWith("@")) {
       pendingTags.push(...line.split(/\s+/).filter((tag) => tag.startsWith("@")));
       return;
@@ -50,13 +59,18 @@ export function parseFeature(text, file) {
       pendingTags = [];
       return;
     }
+    if (/^Rule:/.test(line)) {
+      ruleTags = pendingTags;
+      pendingTags = [];
+      return;
+    }
     const scenario = line.match(/^Scenario(?: Outline)?:\s*(.+)$/);
     if (scenario) {
       scenarios.push({
         name: scenario[1].trim(),
         file,
         line: index + 1,
-        tags: [...featureTags, ...pendingTags],
+        tags: [...featureTags, ...ruleTags, ...pendingTags],
       });
     }
     pendingTags = [];
@@ -73,7 +87,7 @@ export function findMappings(text, file) {
     const match = line.match(MAPPING_RE);
     if (!match) return;
     let next = index + 1;
-    while (next < lines.length && (MAPPING_RE.test(lines[next]) || lines[next].trim() === "")) next += 1;
+    while (next < lines.length && !TEST_START_RE.test(lines[next]) && SKIP_RE.test(lines[next])) next += 1;
     if (next >= lines.length || !TEST_START_RE.test(lines[next])) {
       errors.push(`${file}:${index + 1}: scenario comment is not directly above a test`);
     }

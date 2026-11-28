@@ -54,7 +54,7 @@ Feature: Anonymous scheduling
   deadline" or "after the claim window".
 - Never assert on exact DM prose; assert on the decision/effect. Copy tests are
   separate snapshots.
-- One feature file should be readable in one sitting.
+- A reader must be able to read one feature file in one sitting.
 
 ## Executable features
 

@@ -242,7 +242,6 @@ mod tests {
         assert_eq!(first.len(), 64);
     }
 
-    // scenario: A commitment does not publish a file hash
     #[test]
     fn the_commitment_changes_with_the_policy() {
         let assignments = [assignment(0, "SAAAA", "alice")];

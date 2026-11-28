@@ -98,7 +98,10 @@ class World:
         self.budget_after_tier2 = [
             z3.Int(f"budget_after_tier2_{person}") for person in range(PARTICIPANTS)
         ]
-        self.submitted_own = [z3.Bool(f"submitted_own_{person}") for person in range(PARTICIPANTS)]
+        self.submitted_own_this_round = [
+            z3.Bool(f"submitted_own_this_round_{person}")
+            for person in range(PARTICIPANTS)
+        ]
         self.fill_in_source = [
             z3.Int(f"fill_in_source_{person}") for person in range(PARTICIPANTS)
         ]
@@ -341,7 +344,7 @@ class World:
                         self.role[person] == Role.PARTICIPANT,
                         self.membership[person] == Membership.ACTIVE,
                         self.ready[person],
-                        self.submitted_own[person],
+                        self.submitted_own_this_round[person],
                         z3.Not(self.seen[person][track]),
                         self.owner[track] != person,
                         self.plan_never_gives_track[person][track],
@@ -709,7 +712,8 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase=(
                 "A tier-2 offer must go to an active seeded participant. "
-                "The participant must have submitted their own turn and the plan must never give the track. "
+                "The participant must have submitted their own turn in the current round. "
+                "The plan must never give the track. "
                 "The participant must not have seen the track and must not own it. "
                 "The offer round must have at most one tier-2 turn."
             ),
@@ -721,7 +725,7 @@ def build_rules(world: World) -> list[Rule]:
                             world.role[person] == Role.PARTICIPANT,
                             world.membership[person] == Membership.ACTIVE,
                             world.ready[person],
-                            world.submitted_own[person],
+                            world.submitted_own_this_round[person],
                             z3.Not(world.seen[person][track]),
                             world.owner[track] != person,
                             world.plan_never_gives_track[person][track],
@@ -1289,7 +1293,7 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.role[1] == Role.PARTICIPANT,
                 world.membership[1] == Membership.ACTIVE,
                 world.ready[1],
-                world.submitted_own[1],
+                world.submitted_own_this_round[1],
                 z3.Not(world.seen[1][0]),
                 world.owner[0] != 1,
                 world.plan_never_gives_track[1][0],

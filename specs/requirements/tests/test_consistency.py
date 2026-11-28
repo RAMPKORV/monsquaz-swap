@@ -185,13 +185,13 @@ class RequirementConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(z3.unsat, self._check_sat(extra))
 
-    def test_tier2_offer_without_a_submitted_own_turn_is_unsat(self):
+    def test_tier2_offer_without_a_submitted_own_this_round_turn_is_unsat(self):
         extra = z3.And(
             self.world.tier2_offer[1][0],
             self.world.role[1] == 0,  # PARTICIPANT
             self.world.membership[1] == 2,  # ACTIVE
             self.world.ready[1],
-            z3.Not(self.world.submitted_own[1]),
+            z3.Not(self.world.submitted_own_this_round[1]),
             z3.Not(self.world.seen[1][0]),
             self.world.owner[0] == 0,
             self.world.plan_never_gives_track[1][0],
@@ -204,7 +204,7 @@ class RequirementConsistencyTests(unittest.TestCase):
             self.world.role[1] == 0,  # PARTICIPANT
             self.world.membership[1] == 2,  # ACTIVE
             self.world.ready[1],
-            self.world.submitted_own[1],
+            self.world.submitted_own_this_round[1],
             z3.Not(self.world.seen[1][0]),
             self.world.owner[0] == 0,
             z3.Not(self.world.plan_never_gives_track[1][0]),
@@ -219,7 +219,7 @@ class RequirementConsistencyTests(unittest.TestCase):
             self.world.role[1] == 0,  # PARTICIPANT
             self.world.membership[1] == 2,  # ACTIVE
             self.world.ready[1],
-            self.world.submitted_own[1],
+            self.world.submitted_own_this_round[1],
             z3.Not(self.world.seen[1][0]),
             self.world.owner[0] == 0,
             self.world.plan_never_gives_track[1][0],

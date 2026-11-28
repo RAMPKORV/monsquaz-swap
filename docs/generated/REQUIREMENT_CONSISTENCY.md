@@ -46,7 +46,7 @@ Defaults are separate from the current event settings. A host-set
 | `R-FILL-DUE-APPOINT` | `setting` | [D-040](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Fill-in due time](../../docs/EVENT_SETTINGS.md), [A host-appointed fill-in gets the later due time](../../specs/features/fill_ins.feature) | A host-appointed fill-in must have a due time at the later of two times. The two times are the round deadline and the default edit window. | `S-FILL-DUE-APPOINT` |
 | `R-FILL-DUE-CLAIM` | `behaviour` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [A claimed fill-in offer starts the 24-hour edit time](../../specs/features/fill_ins.feature) | A claimed fill-in offer must start the edit due time at the claim. | `S-FILL-DUE-CLAIM` |
 | `R-TIER1-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The fill-in pool has three sources](../../specs/features/fill_ins.feature) | A tier-1 offer must go to a person with the fill-in role who is active. The person must be ready, must have a fill-in source, and must not have seen the track. The person must not own the track. | `S-FILL-POOL` |
-| `R-TIER2-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must go to an active seeded participant. The participant must have submitted their own turn and the plan must never give the track. The participant must not have seen the track and must not own it. The offer round must have at most one tier-2 turn. | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must go to an active seeded participant. The participant must have submitted their own turn in the current round. The plan must never give the track. The participant must not have seen the track and must not own it. The offer round must have at most one tier-2 turn. | `S-TIER2-EXTRA-TURN` |
 | `R-TIER2-ONLY-NO-TIER1` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track. | `S-TIER2-EXTRA-TURN` |
 | `R-TIER2-ONE-PER-ROUND` | `behaviour` | [D-063](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A person must take at most one tier-2 fill-in turn in one round. | `S-TIER2-EXTRA-TURN` |
 | `R-TIER2-NO-EVENT-CAP` | `setting` | [D-063](../../ai-rules/DECISIONS.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | The event must not cap the total number of tier-2 fill-in turns. | `S-TIER2-EXTRA-TURN` |
@@ -496,7 +496,7 @@ first_accept_wins
            (and (= role_0 0)
                 (= membership_0 2)
                 ready_0
-                submitted_own_0
+                submitted_own_this_round_0
                 (not seen_0_0)
                 (distinct owner_0 0)
                 plan_never_gives_track_0_0
@@ -505,7 +505,7 @@ first_accept_wins
            (and (= role_0 0)
                 (= membership_0 2)
                 ready_0
-                submitted_own_0
+                submitted_own_this_round_0
                 (not seen_0_1)
                 (distinct owner_1 0)
                 plan_never_gives_track_0_1
@@ -514,7 +514,7 @@ first_accept_wins
            (and (= role_0 0)
                 (= membership_0 2)
                 ready_0
-                submitted_own_0
+                submitted_own_this_round_0
                 (not seen_0_2)
                 (distinct owner_2 0)
                 plan_never_gives_track_0_2
@@ -523,7 +523,7 @@ first_accept_wins
            (and (= role_1 0)
                 (= membership_1 2)
                 ready_1
-                submitted_own_1
+                submitted_own_this_round_1
                 (not seen_1_0)
                 (distinct owner_0 1)
                 plan_never_gives_track_1_0
@@ -532,7 +532,7 @@ first_accept_wins
            (and (= role_1 0)
                 (= membership_1 2)
                 ready_1
-                submitted_own_1
+                submitted_own_this_round_1
                 (not seen_1_1)
                 (distinct owner_1 1)
                 plan_never_gives_track_1_1
@@ -541,7 +541,7 @@ first_accept_wins
            (and (= role_1 0)
                 (= membership_1 2)
                 ready_1
-                submitted_own_1
+                submitted_own_this_round_1
                 (not seen_1_2)
                 (distinct owner_2 1)
                 plan_never_gives_track_1_2
@@ -550,7 +550,7 @@ first_accept_wins
            (and (= role_2 0)
                 (= membership_2 2)
                 ready_2
-                submitted_own_2
+                submitted_own_this_round_2
                 (not seen_2_0)
                 (distinct owner_0 2)
                 plan_never_gives_track_2_0
@@ -559,7 +559,7 @@ first_accept_wins
            (and (= role_2 0)
                 (= membership_2 2)
                 ready_2
-                submitted_own_2
+                submitted_own_this_round_2
                 (not seen_2_1)
                 (distinct owner_1 2)
                 plan_never_gives_track_2_1
@@ -568,7 +568,7 @@ first_accept_wins
            (and (= role_2 0)
                 (= membership_2 2)
                 ready_2
-                submitted_own_2
+                submitted_own_this_round_2
                 (not seen_2_2)
                 (distinct owner_2 2)
                 plan_never_gives_track_2_2

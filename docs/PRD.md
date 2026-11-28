@@ -187,7 +187,7 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-DELIVERY-001 | must | The bot SHALL offer a track with its opaque code and deadline; the file SHALL be sent only after the participant claims. | `delivery.feature` |
-| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 24h) without marking the pair seen. The expiry preset (D-041) SHALL decide the next step; presets other than the default are decided, building in MSW-084. The default preset starts a 24h cooldown at the first expiry and pauses the participant at the second expiry. An auto-pause SHALL alert the host. | `delivery.feature` |
+| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 24h) without marking the pair seen. The expiry preset (D-041) SHALL decide the next step; all presets are decided, building in MSW-084. The default preset starts a 24h cooldown at the first expiry and pauses the participant at the second expiry. The auto-pause host alert is part of MSW-084. | `delivery.feature` |
 | REQ-DELIVERY-003 | must | A claimed submission SHALL be downloaded immediately, hashed, validated, and stored; a receipt SHALL confirm what happens next. | `files.feature` |
 | REQ-DELIVERY-004 | must | A participant SHALL resubmit before the deadline; the latest valid version wins and all versions are retained. | `delivery.feature` |
 | REQ-DELIVERY-005 | must | If a DM is blocked, the bot SHALL use a host-approved private thread and alert the host; it SHALL never silently drop a delivery. | `delivery.feature` |

@@ -7,7 +7,9 @@ time is a wall-clock time in the host IANA zone (D-042). Decided, building in
 MSW-087: the code still reads the release time as UTC.
 
 A row marked **decided, building in MSW-###** is an accepted decision that the
-code does not implement yet. The named issue builds it.
+code does not implement yet. The named issue builds it. Range enforcement is a
+target specification: the app rejects only a value at or below zero for the
+time windows today.
 
 ## 1. Event identity
 
@@ -183,15 +185,15 @@ Rules:
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
-| Claim first | On | On; push files | Yes |
+| Claim first | On | On (fixed; D-004) | Yes |
 | Claim window | 24 hours | 1–48 hours | Yes |
 | Claim reminder | 12 hours after offer | 6h; 12h; none; custom. The reminder must be before the end of the claim window. Decided, building in MSW-086 | No |
 | Ready gate | On | On; off | Yes |
 | Expiry protection | Strike + cooldown: the first expiry starts a 24-hour cooldown, the second expiry pauses the participant | Strike + cooldown; cooldown only; host review; none. Decided, building in MSW-084 | No |
 | Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host. Decided, building in MSW-085 | No |
-| Release windows | One per day, two waves | One wave; two waves; four; fixed interval; continuous | No |
+| Release windows | Two waves, two hours apart | Two waves (fixed; D-025) | No |
 | Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable. Decided, building in MSW-087 (the code uses UTC) | No |
-| Release change | Future offers shift; claimed assignments keep their due date | Future shifts; shift all; fixed after start | No |
+| Release change | Unclaimed offers shift; claimed assignments keep their due date | Unclaimed shift, claimed keep (fixed; D-025) | No |
 | DM fallback | Private thread | Private thread; host mediation; block join | Yes |
 | Submission channel | DM attachment | DM; slash command | Yes |
 | Receipt | On | On; off | No |
@@ -215,12 +217,23 @@ Rules:
 | At-deadline prompt | On | On; off | No |
 | Extensions | +1h, +6h, +12h | Host-defined presets | No |
 | First extension | Auto-approve up to 6h | Auto; host approval | No |
-| Maximum extensions | 2 per assignment | 0–3 | No |
+| Maximum extensions | 2 per assignment | 0–2 (D-010); the code uses 2 | No |
 | No-response fallback | Grace, then host | Grace + host; auto-skip; wait | Yes |
 | Host deadline prompt | DM + decision card; 6h target | 6h target; no target; host-set | No |
 | Event pause | Host action | On. Decided, building in MSW-113 | No |
 
-## 9. Join, leave, rejoin
+## 9. Fill-ins
+
+| Setting | Default | Options | Lock at commit |
+|---|---|---|---|
+| Fill-in due time | max(round deadline, now + 24h) | Host-set due time. Decided, building in MSW-082 | No |
+| Fill-in flow | `host_appoints` | `host_appoints`; `auto_chain`; `host_list`. Decided, building in MSW-083 (D-064, D-070) | No |
+| Fill-in offer claim window | 6 hours | Event setting. The edit due time starts at claim. Decided, building in MSW-083 (D-069) | No |
+
+A seeded participant can take at most one extra tier-2 fill-in turn in one
+round. There is no event-wide cap. Decided, building in MSW-080 (D-063).
+
+## 10. Join, leave, rejoin
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
@@ -229,11 +242,11 @@ Rules:
 | Late seed cutoff | Seed deadline | Seed deadline; host close | No |
 | Late seed integration | Host choice; if allowed in a capped event, extra quota + minimum editor quota | Extra quota + minimum; no late seeds; fill-in only | Yes |
 | Unseeded signup | Auto fill-in | Fill-in; waitlist; remove; spectator (not in v1) | Yes |
-| Leave | Allowed | Allowed; before lock only; host approval | Yes |
-| Rejoin | Fill-in only | Fill-in; rejoin with replan; next event; host | Yes |
+| Leave | Allowed | Allowed; before lock only; host approval. Decided, building in MSW-109 | Yes |
+| Rejoin | Fill-in only | Fill-in; rejoin with replan; next event; host. Fill-in return: decided, building in MSW-109. Replan: decided, building in MSW-128 | Yes |
 | Participant cap | None | None; cap; waitlist | No |
 
-## 10. Comments, naming, reveal
+## 11. Comments, naming, reveal
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
@@ -253,22 +266,22 @@ Rules:
 | Large export delivery | Host chooses; default host-mediated link | Host-mediated link; split DMs; Discord parts | No |
 | Album order | Secret-shuffled | Secret-shuffled; host curated; submission order | No |
 
-## 11. Commit-reveal, audit, privacy
+## 12. Commit-reveal, audit, privacy
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
 | Commit-reveal | On | On; audit only; off | Yes |
-| Replans | No cap (D-043) | Each replan creates a new commitment and an audit entry | Yes |
+| Replans | Not in v1 | No cap when built (D-043); each replan creates a new commitment and an audit entry. Decided, building in MSW-128 | Yes |
 | Verification file | `verify.txt` in the reveal | Participants check the seal with `sha256sum` and `/swap verify` (D-043). Decided, building in MSW-088 | Yes |
 | Audit log | On | On | Yes |
 | Mapping access | Host only until co-hosts exist (MSW-117) | Host; co-hosts; per-person | No |
-| Data location | User-chosen library | Library; app data | No |
+| Data location | User-chosen library | Library; app data. The app uses the app data folder today; the library choice is not built (D-005) | No |
 | Backups | Auto + restore wizard | Auto; manual; off. Decided, building in MSW-115 | No |
 | Retention | Until host deletes/archives | Per-event; fixed period | No |
 | Telemetry | Off | Off; opt-in diagnostics | No |
 | Update | Off | Off; later | No |
 
-## 12. Lock matrix
+## 13. Lock matrix
 
 At schedule commit, these settings lock:
 
@@ -279,6 +292,7 @@ At schedule commit, these settings lock:
 - allowlist, format-change policy, metadata scrub;
 - claim-first, claim window, Ready gate, DM fallback, submission channel;
 - deadline type, no-response fallback;
+- fill-in due time, fill-in flow, fill-in offer claim window;
 - join mode, late-seed policy, unseeded-signup policy, leave/rejoin policy;
 - comments visibility and requirement, final naming, commit-reveal.
 
@@ -292,7 +306,7 @@ These settings stay changeable with an audit entry:
 - reveal layout and audience;
 - backups, retention, diagnostics.
 
-## 13. Presets
+## 14. Presets
 
 | Preset | Mode | Length | Groups | Deadline | Release | Notes |
 |---|---|---|---|---|---|---|
@@ -305,7 +319,7 @@ These settings stay changeable with an audit entry:
 The host can save a custom preset. The wizard must show a reset-to-recommended
 action for each section.
 
-## 14. Open settings questions
+## 15. Open settings questions
 
 | # | Question | Default | Trigger |
 |---|---|---|---|

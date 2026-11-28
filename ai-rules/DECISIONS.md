@@ -525,9 +525,11 @@ now+24h)). The event setting `fill_in_flow` is `host_appoints` (default),
 `auto_chain`, or `host_list`.
 **Consequences:** the next classic round waits for a fill-in. No silent
 auto-advance.
-**Status:** refined by D-069. A fill-in offer has a separate claim window
-(default 6 hours). The edit due time, default 24 hours, starts at claim. The
-"host sets the fill-in due time" sentence remains the edit due time.
+**Status:** refined by D-069. D-069 supersedes the old due-time default for
+auto-chain and host-list offers. Those offers have a separate claim window
+(default 6 hours). The edit due time starts at claim (default 24 hours). The
+D-040 slot default `max(round deadline, now + 24h)` remains for a host
+appointment.
 
 ## D-041 — Build the async expiry, re-offer, and claim-reminder settings
 

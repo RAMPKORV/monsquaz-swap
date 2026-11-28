@@ -530,6 +530,32 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the async expiry, re-offer, reminder, and zoned release settings", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Event setup" }));
+    await screen.findByRole("heading", { level: 1, name: "Event setup" });
+    fireEvent.click(screen.getByRole("radio", { name: /Async/ }));
+    expect(screen.getByLabelText("Expiry protection")).toHaveValue(
+      "strike_cooldown",
+    );
+    expect(screen.getByLabelText("Re-offer after expiry")).toHaveValue("never");
+    expect(screen.getByLabelText("Claim reminder")).toHaveValue("12");
+    expect(
+      screen.getByLabelText("Release time"),
+    ).toHaveAttribute("type", "time");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Strike and cooldown")).toBeInTheDocument();
+    expect(
+      screen.getByText("12 hours after the offer"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Europe\/Stockholm, two waves/),
+    ).toBeInTheDocument();
+  });
+
   it("uses roster lookup groups and disables the manual fields", async () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });

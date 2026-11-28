@@ -775,6 +775,32 @@ impl AssignmentRepo {
         Ok(changed > 0)
     }
 
+    /// Mark the one claim reminder for this offer (MSW-086). The return value
+    /// is true only for the first call.
+    pub fn mark_claim_reminder(
+        conn: &Connection,
+        id: &str,
+        reminded_at: i64,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE assignments SET claim_reminded_at = ?1
+             WHERE id = ?2 AND claim_reminded_at IS NULL",
+            params![reminded_at, id],
+        )? > 0)
+    }
+
+    pub fn claim_reminder_sent(conn: &Connection, id: &str) -> Result<bool, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT claim_reminded_at FROM assignments WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .is_some())
+    }
+
     pub fn claim(
         conn: &Connection,
         id: &str,
@@ -3214,4 +3240,240 @@ impl FillInChainRepo {
         .into_iter()
         .next())
     }
+}
+
+/// The expiry state of one participant in one event (MSW-084). A missing row
+/// means zero strikes and no cooldown.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExpiryStateRecord {
+    pub event_id: String,
+    pub participant_id: String,
+    pub strikes: u32,
+    pub cooldown_until: Option<i64>,
+    pub paused_at: Option<i64>,
+    pub updated_at: i64,
+}
+
+pub struct ExpiryStateRepo;
+
+impl ExpiryStateRepo {
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: &str,
+    ) -> Result<Option<ExpiryStateRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT event_id, participant_id, strikes, cooldown_until, paused_at,
+                        updated_at
+                 FROM participant_expiry_state
+                 WHERE event_id = ?1 AND participant_id = ?2",
+                params![event_id, participant_id],
+                |row| {
+                    Ok(ExpiryStateRecord {
+                        event_id: row.get(0)?,
+                        participant_id: row.get(1)?,
+                        strikes: row.get::<_, i64>(2)? as u32,
+                        cooldown_until: row.get(3)?,
+                        paused_at: row.get(4)?,
+                        updated_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn upsert(conn: &Connection, state: &ExpiryStateRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO participant_expiry_state
+                (event_id, participant_id, strikes, cooldown_until, paused_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(event_id, participant_id) DO UPDATE SET
+                strikes = excluded.strikes,
+                cooldown_until = excluded.cooldown_until,
+                paused_at = excluded.paused_at,
+                updated_at = excluded.updated_at",
+            params![
+                &state.event_id,
+                &state.participant_id,
+                state.strikes as i64,
+                state.cooldown_until,
+                state.paused_at,
+                state.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Clear the strikes and the cooldown. The caller records the audit entry.
+    pub fn reset(conn: &Connection, event_id: &str, participant_id: &str) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "DELETE FROM participant_expiry_state
+             WHERE event_id = ?1 AND participant_id = ?2",
+            params![event_id, participant_id],
+        )? > 0)
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<ExpiryStateRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT event_id, participant_id, strikes, cooldown_until, paused_at, updated_at
+             FROM participant_expiry_state
+             WHERE event_id = ?1
+             ORDER BY participant_id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], |row| {
+                Ok(ExpiryStateRecord {
+                    event_id: row.get(0)?,
+                    participant_id: row.get(1)?,
+                    strikes: row.get::<_, i64>(2)? as u32,
+                    cooldown_until: row.get(3)?,
+                    paused_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+/// One `(track, participant)` pair whose offer expired (MSW-085). The pair is
+/// not seen; the re-offer setting decides whether the pair can come back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiredPairRecord {
+    pub event_id: String,
+    pub track_code: String,
+    pub participant_id: String,
+    pub expiries: u32,
+    pub last_expired_at: i64,
+    pub cooldown_until: Option<i64>,
+    pub last_assignment_id: Option<String>,
+}
+
+pub struct ExpiredPairRepo;
+
+impl ExpiredPairRepo {
+    /// Record one expiry. A second expiry of the same pair increments the
+    /// count and keeps the latest facts.
+    pub fn record(conn: &Connection, pair: &ExpiredPairRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO expired_pairs
+                (event_id, track_code, participant_id, expiries, last_expired_at,
+                 cooldown_until, last_assignment_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(event_id, track_code, participant_id) DO UPDATE SET
+                expiries = expired_pairs.expiries + 1,
+                last_expired_at = excluded.last_expired_at,
+                cooldown_until = excluded.cooldown_until,
+                last_assignment_id = excluded.last_assignment_id",
+            params![
+                &pair.event_id,
+                &pair.track_code,
+                &pair.participant_id,
+                pair.expiries as i64,
+                pair.last_expired_at,
+                pair.cooldown_until,
+                &pair.last_assignment_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get(
+        conn: &Connection,
+        event_id: &str,
+        track_code: &str,
+        participant_id: &str,
+    ) -> Result<Option<ExpiredPairRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT event_id, track_code, participant_id, expiries, last_expired_at,
+                        cooldown_until, last_assignment_id
+                 FROM expired_pairs
+                 WHERE event_id = ?1 AND track_code = ?2 AND participant_id = ?3",
+                params![event_id, track_code, participant_id],
+                row_to_expired_pair,
+            )
+            .optional()?)
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<ExpiredPairRecord>, DbError> {
+        Self::query(conn, event_id, None)
+    }
+
+    pub fn list_for_participant(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: &str,
+    ) -> Result<Vec<ExpiredPairRecord>, DbError> {
+        Self::query(conn, event_id, Some(participant_id))
+    }
+
+    fn query(
+        conn: &Connection,
+        event_id: &str,
+        participant_id: Option<&str>,
+    ) -> Result<Vec<ExpiredPairRecord>, DbError> {
+        match participant_id {
+            Some(participant_id) => {
+                let mut statement = conn.prepare(
+                    "SELECT event_id, track_code, participant_id, expiries, last_expired_at,
+                            cooldown_until, last_assignment_id
+                     FROM expired_pairs
+                     WHERE event_id = ?1 AND participant_id = ?2
+                     ORDER BY track_code",
+                )?;
+                let rows = statement
+                    .query_map(params![event_id, participant_id], row_to_expired_pair)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            }
+            None => {
+                let mut statement = conn.prepare(
+                    "SELECT event_id, track_code, participant_id, expiries, last_expired_at,
+                            cooldown_until, last_assignment_id
+                     FROM expired_pairs
+                     WHERE event_id = ?1
+                     ORDER BY participant_id, track_code",
+                )?;
+                let rows = statement
+                    .query_map(params![event_id], row_to_expired_pair)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows)
+            }
+        }
+    }
+
+    /// Set the cooldown after a host decision.
+    pub fn set_cooldown(
+        conn: &Connection,
+        event_id: &str,
+        track_code: &str,
+        participant_id: &str,
+        cooldown_until: Option<i64>,
+    ) -> Result<bool, DbError> {
+        Ok(conn.execute(
+            "UPDATE expired_pairs SET cooldown_until = ?4
+             WHERE event_id = ?1 AND track_code = ?2 AND participant_id = ?3",
+            params![event_id, track_code, participant_id, cooldown_until],
+        )? > 0)
+    }
+}
+
+fn row_to_expired_pair(row: &Row<'_>) -> rusqlite::Result<ExpiredPairRecord> {
+    Ok(ExpiredPairRecord {
+        event_id: row.get(0)?,
+        track_code: row.get(1)?,
+        participant_id: row.get(2)?,
+        expiries: row.get::<_, i64>(3)? as u32,
+        last_expired_at: row.get(4)?,
+        cooldown_until: row.get(5)?,
+        last_assignment_id: row.get(6)?,
+    })
 }

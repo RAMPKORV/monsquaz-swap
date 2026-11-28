@@ -156,6 +156,21 @@ Feature: Skips and fill-ins
     Then the bot asks the fill-in for the final title
     And the app stores the title for the reveal
 
+  Scenario: The default re-offer rule blocks an expired fill-in pair
+    Given a fill-in offer that expired
+    And the default never re-offer setting
+    When the host appoints that fill-in to the same track
+    Then the app refuses the appointment
+    And the app does not mark the pair as seen
+
+  Scenario: A fill-in re-offer waits for the cooldown
+    Given a fill-in offer that expired
+    And the after-cooldown re-offer setting
+    When the host appoints that fill-in before the cooldown ends
+    Then the app refuses the appointment
+    When the host appoints that fill-in after the cooldown ends
+    Then the app sends a new offer for the same track
+
   @pending
   Scenario: A fill-in wins over a late original holder
     Given a fill-in who claimed a skipped slot

@@ -537,6 +537,57 @@ CREATE UNIQUE INDEX one_pending_restore
     ON restore_requests(event_id, user_id) WHERE status = 'pending';
 CREATE INDEX restore_requests_by_user ON restore_requests(event_id, user_id);
 "#,
+    r#"
+-- Migration 014: async expiry protection and claim reminders (MSW-084..086).
+-- The expired pair is explicit. An expiry never writes the seen ledger. The
+-- policy (never, after cooldown, last resort, host) reads this table.
+CREATE TABLE expired_pairs (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    track_code TEXT NOT NULL,
+    participant_id TEXT NOT NULL,
+    expiries INTEGER NOT NULL DEFAULT 1 CHECK (expiries >= 1),
+    last_expired_at INTEGER NOT NULL,
+    cooldown_until INTEGER,
+    last_assignment_id TEXT,
+    PRIMARY KEY (event_id, track_code, participant_id),
+    FOREIGN KEY (event_id, track_code)
+        REFERENCES tracks(event_id, code) ON DELETE CASCADE,
+    FOREIGN KEY (event_id, participant_id)
+        REFERENCES participants(event_id, user_id) ON DELETE CASCADE
+) STRICT;
+
+CREATE INDEX expired_pairs_by_participant
+    ON expired_pairs(event_id, participant_id);
+
+-- Backfill the pairs that expired before this migration. The default
+-- re-offer rule is never, so these pairs must not come back.
+INSERT INTO expired_pairs
+    (event_id, track_code, participant_id, expiries, last_expired_at,
+     cooldown_until, last_assignment_id)
+SELECT event_id, track_code, participant_id, COUNT(*), MAX(offered_at), NULL, MAX(id)
+FROM assignments
+WHERE status = 'expired'
+GROUP BY event_id, track_code, participant_id;
+
+-- Strikes and the cooldown live per participant per event. Resume deletes the
+-- row. The row is not a substitute for expired_pairs: one records the person
+-- state, the other records the pair state.
+CREATE TABLE participant_expiry_state (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    participant_id TEXT NOT NULL,
+    strikes INTEGER NOT NULL DEFAULT 0 CHECK (strikes >= 0),
+    cooldown_until INTEGER,
+    paused_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (event_id, participant_id),
+    FOREIGN KEY (event_id, participant_id)
+        REFERENCES participants(event_id, user_id) ON DELETE CASCADE
+) STRICT;
+
+-- One claim reminder for each offer. A claim changes the status, so the
+-- reminder stops. A new offer is a new assignment and a new reminder.
+ALTER TABLE assignments ADD COLUMN claim_reminded_at INTEGER;
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

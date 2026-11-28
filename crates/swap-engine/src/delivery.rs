@@ -313,6 +313,14 @@ pub(crate) fn leave_button(event_id: &str) -> Vec<Button> {
         .unwrap_or_default()
 }
 
+/// The offer DM. It uses a Discord timestamp, never a raw epoch second.
+pub(crate) fn offer_content(track_code: &str, claim_window_secs: i64, due_at: i64) -> String {
+    let hours = (claim_window_secs as f64) / 3600.0;
+    format!(
+        "Track {track_code} is available. Claim within {hours} hours. The claim window ends <t:{due_at}:f> (<t:{due_at}:R>)."
+    )
+}
+
 fn restore_buttons(event_id: &str) -> Vec<Button> {
     let mut buttons = Vec::new();
     for (action, label, style) in [
@@ -393,12 +401,7 @@ impl DeliveryWorker {
                 due_at,
                 claim_window_secs,
                 ..
-            } => {
-                let hours = (*claim_window_secs as f64) / 3600.0;
-                format!(
-                    "Track {track_code} is available. Claim within {hours} hours (due {due_at})."
-                )
-            }
+            } => offer_content(track_code, *claim_window_secs, *due_at),
             PendingDelivery::File {
                 filename,
                 sha256,
@@ -830,10 +833,7 @@ async fn deliver(
             claim_window_secs,
             ..
         } => {
-            let hours = (*claim_window_secs as f64) / 3600.0;
-            let content = format!(
-                "Track {track_code} is available. Claim within {hours} hours (due {due_at})."
-            );
+            let content = offer_content(track_code, *claim_window_secs, *due_at);
             discord
                 .send_dm(
                     &DiscordUserId::new(user_id.clone()),

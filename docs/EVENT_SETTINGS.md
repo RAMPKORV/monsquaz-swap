@@ -3,8 +3,8 @@
 This file lists every event setting, its default, its options, and its lock
 behaviour. The host can change a setting only when the lock column allows it.
 All instants are UTC in the database and local in the UI. The async release
-time is a wall-clock time in the host IANA zone (D-042). Decided, building in
-MSW-087: the code still reads the release time as UTC.
+time is a wall-clock time in the host IANA zone (D-042). The event stores the
+zone. The release keeps its local time across a daylight-saving change.
 
 A row marked **decided, building in MSW-###** is an accepted decision that the
 code does not implement yet. The named issue builds it. Range enforcement is a
@@ -34,7 +34,7 @@ time windows today.
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
 | Async expected songs | Seeded track count | 1–1000; must be reached before start | Yes |
 | Async claims per participant | Tracks minus one | 1–40; must be below the track count | Yes |
-| Async release | 18:00 in the host IANA zone, two waves two hours apart | Any HH:MM in the host IANA zone; the second wave is two hours after the first. Decided, building in MSW-087 (the code uses UTC) | Yes |
+| Async release | 18:00 in the host IANA zone, two waves two hours apart | Any HH:MM in the host IANA zone; the second wave is two hours after the first | Yes |
 | Async late seeds | Off | Off; host review with a feasibility check. Decided, building in MSW-091 | Yes |
 | Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
 | Participation | Strict full exposure | Strict; Flexible earliest rounds with gaps | Yes |
@@ -187,12 +187,12 @@ Rules:
 |---|---|---|---|
 | Claim first | On | On (fixed; D-004) | Yes |
 | Claim window | 24 hours | 1–48 hours | Yes |
-| Claim reminder | 12 hours after offer | 6h; 12h; none; custom. The reminder must be before the end of the claim window. Decided, building in MSW-086 | No |
+| Claim reminder | 12 hours after offer | 6h; 12h; none; custom. The reminder must be before the end of the claim window | No |
 | Ready gate | On | On; off | Yes |
-| Expiry protection | Strike + cooldown: the first expiry starts a 24-hour cooldown, the second expiry pauses the participant | Strike + cooldown; cooldown only; host review; none. Decided, building in MSW-084 | No |
-| Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host. Decided, building in MSW-085 | No |
+| Expiry protection | Strike + cooldown: the first expiry starts a 24-hour cooldown, the second expiry pauses the participant | Strike + cooldown; cooldown only; host review; none | No |
+| Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host | No |
 | Release windows | Two waves, two hours apart | Two waves (fixed; D-025) | No |
-| Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable. Decided, building in MSW-087 (the code uses UTC) | No |
+| Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable | No |
 | Release change | Unclaimed offers shift; claimed assignments keep their due date | Unclaimed shift, claimed keep (fixed; D-025) | No |
 | DM fallback | Private thread | Private thread; host mediation; block join | Yes |
 | Submission channel | DM attachment | DM; slash command | Yes |
@@ -204,8 +204,34 @@ Rules:
 - A claim starts the async deadline.
 - An unclaimed offer does not mark the pair seen.
 - A claim-then-skip marks the pair seen.
-- Not built yet (MSW-084): strikes reset when the participant resumes, and an
-  auto-pause alerts the host.
+- The claim reminder is one DM for each offer. A claim cancels it. The text
+  states the remaining time and a Discord timestamp.
+- The app refuses a claim reminder at or after the end of the claim window.
+- The expiry presets (D-041):
+  - **Strike + cooldown** (default): the first expiry starts a 24-hour
+    cooldown. The second expiry pauses the participant and alerts the host.
+  - **Cooldown only**: every expiry starts a 24-hour cooldown. The app does not
+    pause the participant.
+  - **Host review**: the expiry opens a host decision. The app sets no automatic
+    cooldown or pause.
+  - **None**: the expiry has no automatic effect.
+- An expired offer never marks the pair seen.
+- A resume clears the participant's expiry strikes and cooldown.
+- The app does not offer a track to a participant in an active cooldown. The
+  queue reports the cooldown as the reason.
+- Re-offer after expiry (D-041):
+  - **Never** (default): the app never offers the expired pair again.
+  - **After cooldown**: the app can offer the pair after the 24-hour pair
+    cooldown.
+  - **Last resort**: the app can offer the pair only when no other eligible
+    person can take the track.
+  - **Host decides**: the expiry opens a host decision. The host can re-offer
+    the pair.
+- The classic fill-in path applies the same expired-pair rule. The host list and
+  the automatic chain cannot bypass it.
+- The release time is a wall-clock time in the stored host IANA zone. A time in
+  a spring-forward gap moves forward by the gap width. An ambiguous time uses
+  the earlier offset. Two waves run two hours apart.
 
 ### Fill-ins (classic)
 
@@ -350,6 +376,8 @@ At schedule commit, these settings lock:
 These settings stay changeable with an audit entry:
 
 - release time and future offers;
+- expiry protection and same-track re-offer;
+- claim reminder;
 - reminders and quiet hours;
 - extensions;
 - co-hosts;

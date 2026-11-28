@@ -10,7 +10,7 @@
       "covers": [
         {
           "path": "crates/swap-engine/src/engine.rs",
-          "functions": ["open_round", "dispatch_async_wave", "dispatch_async_release", "claim", "submit", "submit_attachment", "submit_inner", "skip", "expire_offer", "tick_deadlines", "decide_deadline", "assign_fill_in", "move_track"]
+          "functions": ["open_round", "dispatch_async_wave", "dispatch_async_release", "claim", "submit", "submit_attachment", "submit_inner", "skip", "expire_offer", "tick_deadlines", "decide_deadline", "assign_fill_in", "move_track", "apply_expiry_policy", "record_expired_pair", "decide_expiry"]
         },
         {
           "path": "crates/swap-core/src/ledger.rs",
@@ -30,7 +30,7 @@
         },
         {
           "path": "crates/swap-db/src/repos.rs",
-          "functions": ["SeenRepo::record", "AssignmentRepo::claim", "AssignmentRepo::submit", "AssignmentRepo::update_status"]
+          "functions": ["SeenRepo::record", "AssignmentRepo::claim", "AssignmentRepo::submit", "AssignmentRepo::update_status", "ExpiredPairRepo::record", "ExpiredPairRepo::get"]
         },
         {
           "path": "crates/swap-db/src/migrations.rs",

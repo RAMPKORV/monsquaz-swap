@@ -50,6 +50,16 @@ The test message uses the `DiscordPort` adapter. The adapter opens the direct
 message channel, sends one message, and returns the Discord message id. The
 app does not send a file in the test.
 
+## Host timezone and release
+
+The app stores the host IANA zone in the host settings. The event copies the
+zone when the host creates the event. The async release time is a wall-clock
+time in that stored zone. A change to the host settings does not change an
+event that already exists. To use a new zone, create a new event after the
+change. The event keeps its local release time across DST. The app moves a
+spring-forward gap time forward by the gap width and uses the earlier offset
+for an ambiguous time.
+
 ## Verification
 
 ```bash

@@ -25,7 +25,7 @@ The models describe the event rules, not the implementation. See
 | `AtMostOneOfferPerTrack` | A track has at most one open offer. | PRD REQ-SCHED-003 |
 | `AtMostOneOfferPerPerson` | A participant has at most one open offer. | PRD REQ-SCHED-003 |
 | `AtMostOneActivePerPerson` | A participant has at most one open offer or held track. | PRD REQ-SCHED-003 |
-| `NoExpiredReoffer` | An expired pair is never offered again. | PRD REQ-DELIVERY-002 |
+| `NoExpiredReoffer` | An expired pair is never offered again under the default `never` setting. | PRD REQ-DELIVERY-002 |
 | `TypeOK` | Variables have the expected shape. | model hygiene |
 
 Delivery properties:
@@ -58,7 +58,7 @@ below and `mapping.json` in sync.
 |---|---|
 | `phase[t][p]` | `assignments.status` |
 | `seen` | `seen_pairs` primary key |
-| `banned` | offer history (planned with the async queue) |
+| `banned` | `expired_pairs` primary key |
 | `holder[t]` | active assignment plus `tracks.state` |
 | `due[t][p]` | `assignments.due_at` in UTC seconds |
 | `now` | injected clock value |
@@ -70,9 +70,18 @@ below and `mapping.json` in sync.
 | `alerted` | a committed `audit_log` row `delivery.failed` |
 | `Key[e]` | `deliveries.id` (the dedupe key) |
 
-The `banned` set is a design requirement. The async queue must add the backing
-table before it relies on the no-reoffer rule. Until then, `NoExpiredReoffer`
-is a model property and not a claim about the current engine.
+The `banned` set is the expired-pair rule under `reoffer_after_expiry = never`.
+`SwapClaim.tla` models that default setting only. The after-cooldown, last-resort,
+and host-decides options are not modeled. `expired_pairs` stores the backing
+rows (MSW-085). The model keeps `NoExpiredReoffer` for the default setting. The
+engine has regression tests for the other three options.
+
+## Gaps
+
+`SwapAsync.tla` does not exist. The async queue, expiry protection presets,
+claim reminder, and zoned release have no TLA+ model. Their Gherkin scenarios
+and Rust tests are the current evidence. Do not claim formal coverage for these
+rules. The async model is issue MSW-038.
 
 ## Bounds
 

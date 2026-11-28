@@ -88,10 +88,8 @@ pub async fn dispatch(
                 claim_window_secs,
                 ..
             } => {
-                let hours = (*claim_window_secs as f64) / 3600.0;
-                let content = format!(
-                    "Track {track_code} is available. Claim within {hours} hours (due {due_at})."
-                );
+                let content =
+                    crate::delivery::offer_content(track_code, *claim_window_secs, *due_at);
                 discord
                     .send_dm(
                         &DiscordUserId::new(user_id.clone()),

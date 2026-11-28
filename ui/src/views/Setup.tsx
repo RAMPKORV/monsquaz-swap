@@ -123,7 +123,9 @@ export function SetupView({
 
         </div>
 
-        {step === 0 ? <BasicsStep draft={draft} update={update} /> : null}
+        {step === 0 ? (
+          <BasicsStep draft={draft} update={update} timezone={timezone} />
+        ) : null}
         {step === 1 ? <FilesStep draft={draft} update={update} /> : null}
         {step === 2 ? (
           draft.mode === "Async" ? (
@@ -179,10 +181,21 @@ export function SetupView({
 function BasicsStep({
   draft,
   update,
+  timezone,
 }: {
   draft: EventDraft;
   update: <K extends keyof EventDraft>(key: K, value: EventDraft[K]) => void;
+  timezone?: string;
 }) {
+  const zone = timezone || draft.hostTimezone || "UTC";
+  const reminderMode =
+    draft.claimReminderHours === null
+      ? "none"
+      : draft.claimReminderHours === 6
+        ? "6"
+        : draft.claimReminderHours === 12
+          ? "12"
+          : "custom";
   return (
     <div className="wizard-grid">
       <Field
@@ -550,7 +563,7 @@ function BasicsStep({
             label="Release time"
             htmlFor="async-release"
             helpId="async-release-help"
-            help="The first daily wave starts at this time. The second wave follows two hours later. Times use UTC in this version."
+            help={`The first daily wave starts at this time in ${zone}. The second wave follows two hours later. The release keeps this wall-clock time across a daylight-saving change.`}
           >
             <input
               id="async-release"
@@ -571,6 +584,108 @@ function BasicsStep({
               description="Off by default. A late seed changes the track count and the target. The host must confirm it."
             />
           </div>
+          <Field
+            label="Expiry protection"
+            htmlFor="async-expiry-protection"
+            helpId="async-expiry-protection-help"
+            help="An expired offer never counts as seen. Strike and cooldown starts a 24-hour cooldown at the first expiry and pauses the participant at the second expiry. Cooldown only never pauses. Host review opens a decision. None has no automatic effect."
+          >
+            <select
+              id="async-expiry-protection"
+              className="input"
+              aria-describedby="async-expiry-protection-help"
+              value={draft.expiryProtection}
+              onChange={(event) =>
+                update(
+                  "expiryProtection",
+                  event.target.value as EventDraft["expiryProtection"],
+                )
+              }
+            >
+              <option value="strike_cooldown">Strike and cooldown</option>
+              <option value="cooldown_only">Cooldown only</option>
+              <option value="host_review">Host review</option>
+              <option value="none">None</option>
+            </select>
+          </Field>
+          <Field
+            label="Re-offer after expiry"
+            htmlFor="async-reoffer"
+            helpId="async-reoffer-help"
+            help="The default never offers the same track to the same person again. After cooldown waits for the expiry cooldown. Last resort uses the pair only when no other person can take the track. Host decides opens a decision."
+          >
+            <select
+              id="async-reoffer"
+              className="input"
+              aria-describedby="async-reoffer-help"
+              value={draft.reofferAfterExpiry}
+              onChange={(event) =>
+                update(
+                  "reofferAfterExpiry",
+                  event.target.value as EventDraft["reofferAfterExpiry"],
+                )
+              }
+            >
+              <option value="never">Never</option>
+              <option value="after_cooldown">After cooldown</option>
+              <option value="last_resort">Last resort</option>
+              <option value="host_decides">Host decides</option>
+            </select>
+          </Field>
+          <Field
+            label="Claim reminder"
+            htmlFor="async-claim-reminder"
+            helpId="async-claim-reminder-help"
+            help={`The bot sends one reminder to the current holder before the claim window ends. The reminder must be before the end of the ${draft.claimWindowHours}-hour claim window.`}
+          >
+            <select
+              id="async-claim-reminder"
+              className="input"
+              aria-describedby="async-claim-reminder-help"
+              value={reminderMode}
+              onChange={(event) => {
+                const value = event.target.value;
+                update(
+                  "claimReminderHours",
+                  value === "none"
+                    ? null
+                    : value === "6"
+                      ? 6
+                      : value === "12"
+                        ? 12
+                        : draft.claimReminderHours &&
+                            ![6, 12].includes(draft.claimReminderHours)
+                          ? draft.claimReminderHours
+                          : 18,
+                );
+              }}
+            >
+              <option value="6">6 hours after the offer</option>
+              <option value="12">12 hours after the offer</option>
+              <option value="none">No reminder</option>
+              <option value="custom">Custom hours</option>
+            </select>
+            {reminderMode === "custom" ? (
+              <div className="number-control">
+                <input
+                  id="async-claim-reminder-custom"
+                  aria-label="Custom claim reminder hours"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={draft.claimWindowHours - 1}
+                  value={draft.claimReminderHours ?? 18}
+                  onChange={(event) =>
+                    update(
+                      "claimReminderHours",
+                      Number(event.target.value) || 1,
+                    )
+                  }
+                />
+                <span>hours</span>
+              </div>
+            ) : null}
+          </Field>
         </div>
       ) : null}
     </div>
@@ -908,7 +1023,40 @@ function ReviewStep({
             <div>
               <dt>Release</dt>
               <dd>
-                {draft.asyncReleaseTime} UTC, two waves
+                {draft.asyncReleaseTime} {timezone || draft.hostTimezone}, two
+                waves
+              </dd>
+            </div>
+            <div>
+              <dt>Expiry protection</dt>
+              <dd>
+                {draft.expiryProtection === "strike_cooldown"
+                  ? "Strike and cooldown"
+                  : draft.expiryProtection === "cooldown_only"
+                    ? "Cooldown only"
+                    : draft.expiryProtection === "host_review"
+                      ? "Host review"
+                      : "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Re-offer after expiry</dt>
+              <dd>
+                {draft.reofferAfterExpiry === "never"
+                  ? "Never"
+                  : draft.reofferAfterExpiry === "after_cooldown"
+                    ? "After cooldown"
+                    : draft.reofferAfterExpiry === "last_resort"
+                      ? "Last resort"
+                      : "Host decides"}
+              </dd>
+            </div>
+            <div>
+              <dt>Claim reminder</dt>
+              <dd>
+                {draft.claimReminderHours === null
+                  ? "None"
+                  : `${draft.claimReminderHours} hours after the offer`}
               </dd>
             </div>
             <div>

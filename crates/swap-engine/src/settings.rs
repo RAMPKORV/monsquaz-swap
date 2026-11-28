@@ -29,6 +29,36 @@ pub enum FillInFlow {
     HostList,
 }
 
+/// How the app protects the queue after an unclaimed offer expires (D-041).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpiryProtection {
+    /// The first expiry starts a 24-hour cooldown. The second expiry pauses
+    /// the participant until a resume or a host action.
+    #[default]
+    StrikeCooldown,
+    /// Every expiry starts a 24-hour cooldown. The app never pauses the
+    /// participant.
+    CooldownOnly,
+    /// The expiry opens a host decision. No automatic cooldown or pause.
+    HostReview,
+    /// The expiry has no automatic effect. The re-offer setting still
+    /// applies.
+    None,
+}
+
+/// When the queue can offer an expired `(track, participant)` pair again
+/// (D-041). The default is never.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReofferAfterExpiry {
+    #[default]
+    Never,
+    AfterCooldown,
+    LastResort,
+    HostDecides,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EventSettings {
@@ -56,6 +86,15 @@ pub struct EventSettings {
     pub async_release_time: Option<String>,
     pub async_wave_offset_secs: i64,
     pub async_late_seeds: Option<bool>,
+    /// The IANA zone of the host for the release wall-clock time (D-042).
+    /// `None` keeps the old UTC behaviour for an event that has no zone.
+    pub host_timezone: Option<String>,
+    /// Seconds after the offer when the bot reminds the holder to claim.
+    /// `None` disables the reminder. It must be before the claim window
+    /// (MSW-086).
+    pub claim_reminder_secs: Option<i64>,
+    pub expiry_protection: ExpiryProtection,
+    pub reoffer_after_expiry: ReofferAfterExpiry,
     pub quiet_hours_start: u8,
     pub quiet_hours_end: u8,
     /// The default edit time a fill-in has after the claim, in seconds.
@@ -96,6 +135,10 @@ impl Default for EventSettings {
             async_release_time: None,
             async_wave_offset_secs: 2 * 60 * 60,
             async_late_seeds: None,
+            host_timezone: None,
+            claim_reminder_secs: Some(12 * 60 * 60),
+            expiry_protection: ExpiryProtection::StrikeCooldown,
+            reoffer_after_expiry: ReofferAfterExpiry::Never,
             quiet_hours_start: 22,
             quiet_hours_end: 8,
             fill_in_window_secs: 24 * 60 * 60,
@@ -137,6 +180,10 @@ pub enum SettingsError {
     AsyncClaims,
     #[error("the release time must use HH:MM")]
     AsyncReleaseTime,
+    #[error("the host timezone must be a valid IANA zone")]
+    HostTimezone,
+    #[error("the claim reminder must be before the end of the claim window")]
+    ClaimReminder,
     #[error("the second wave offset must be positive")]
     AsyncWaveOffset,
     #[error("the quiet hours must be between 0 and 23")]
@@ -217,6 +264,16 @@ impl EventSettings {
         }
         if self.async_wave_offset_secs <= 0 {
             return Err(SettingsError::AsyncWaveOffset);
+        }
+        if let Some(timezone) = &self.host_timezone
+            && timezone.parse::<chrono_tz::Tz>().is_err()
+        {
+            return Err(SettingsError::HostTimezone);
+        }
+        if let Some(reminder) = self.claim_reminder_secs
+            && (reminder <= 0 || reminder >= self.claim_window_secs)
+        {
+            return Err(SettingsError::ClaimReminder);
         }
         if self.quiet_hours_start > 23 || self.quiet_hours_end > 23 {
             return Err(SettingsError::QuietHours);
@@ -380,5 +437,83 @@ mod tests {
         assert_eq!(settings.fill_in_window_secs, 86_400);
         assert_eq!(settings.fill_in_claim_window_secs, 21_600);
         assert_eq!(settings.fill_in_flow, FillInFlow::HostAppoints);
+        assert_eq!(settings.claim_reminder_secs, Some(43_200));
+        assert_eq!(settings.expiry_protection, ExpiryProtection::StrikeCooldown);
+        assert_eq!(settings.reoffer_after_expiry, ReofferAfterExpiry::Never);
+        assert_eq!(settings.host_timezone, None);
+    }
+
+    #[test]
+    fn the_expiry_and_reoffer_presets_use_snake_case() {
+        let settings: EventSettings = serde_json::from_str(
+            r#"{
+                "expiry_protection": "host_review",
+                "reoffer_after_expiry": "last_resort"
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(settings.expiry_protection, ExpiryProtection::HostReview);
+        assert_eq!(
+            settings.reoffer_after_expiry,
+            ReofferAfterExpiry::LastResort
+        );
+        for (expiry, reoffer) in [
+            ("cooldown_only", "after_cooldown"),
+            ("none", "host_decides"),
+            ("strike_cooldown", "never"),
+        ] {
+            let json = format!(
+                r#"{{"expiry_protection": "{expiry}", "reoffer_after_expiry": "{reoffer}"}}"#
+            );
+            let settings: EventSettings = serde_json::from_str(&json).unwrap();
+            settings.validate().unwrap();
+        }
+        assert!(
+            serde_json::from_str::<EventSettings>(r#"{"expiry_protection": "pause"}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<EventSettings>(r#"{"reoffer_after_expiry": "always"}"#).is_err()
+        );
+    }
+
+    // scenario: The claim reminder must be before the claim window
+    #[test]
+    fn the_claim_reminder_must_be_before_the_claim_window() {
+        for (window, reminder, valid) in [
+            (86_400_i64, None, true),
+            (86_400, Some(21_600), true),
+            (86_400, Some(43_200), true),
+            (86_400, Some(86_400), false),
+            (86_400, Some(86_401), false),
+            (86_400, Some(0), false),
+            (86_400, Some(-1), false),
+            (6 * 3_600, Some(6 * 3_600), false),
+            (6 * 3_600, Some(5 * 3_600), true),
+        ] {
+            let settings = EventSettings {
+                claim_window_secs: window,
+                claim_reminder_secs: reminder,
+                ..EventSettings::default()
+            };
+            assert_eq!(
+                settings.validate().is_ok(),
+                valid,
+                "window={window} reminder={reminder:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_invalid_host_zone_is_refused() {
+        let settings = EventSettings {
+            host_timezone: Some("Europe/Nowhere".to_string()),
+            ..EventSettings::default()
+        };
+        assert_eq!(settings.validate(), Err(SettingsError::HostTimezone));
+        let settings = EventSettings {
+            host_timezone: Some("America/New_York".to_string()),
+            ..EventSettings::default()
+        };
+        settings.validate().unwrap();
     }
 }

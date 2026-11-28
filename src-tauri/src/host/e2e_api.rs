@@ -171,7 +171,7 @@ impl E2eHost {
                 self.clear_bot()?;
                 self.settings_value()
             }
-            "host_event_setup" => to_value(setup_data(db)?),
+            "host_event_setup" => to_value(setup_data(db, &self.settings.timezone)?),
             "host_mission_control" => {
                 to_value(mission_control_with_health(db, &self.settings, None)?)
             }
@@ -310,6 +310,13 @@ impl E2eHost {
                     now_secs(),
                 )
                 .map_err(|error| error.to_string())?;
+                Ok(Value::Null)
+            }
+            "host_decide_expiry" => {
+                let decision_id = string(args, "decisionId")?;
+                let action = string(args, "action")?;
+                swap_engine::decide_expiry(db, &decision_id, &action, now_secs())
+                    .map_err(|error| error.to_string())?;
                 Ok(Value::Null)
             }
             "host_plan_edit_candidates" => {
@@ -460,8 +467,9 @@ impl E2eHost {
                 let track_code = string(args, "trackCode")?;
                 let round_no = u32_arg(args, "roundNo")?;
                 let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
-                let candidates = fill_in_candidates(db, &event.id, &track_code, round_no)
-                    .map_err(|error| error.to_string())?;
+                let candidates =
+                    fill_in_candidates(db, &event.id, &track_code, round_no, now_secs())
+                        .map_err(|error| error.to_string())?;
                 to_value(
                     candidates
                         .into_iter()

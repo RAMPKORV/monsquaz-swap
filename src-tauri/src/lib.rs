@@ -181,6 +181,7 @@ pub fn run() {
             host::host_redact_track_comment,
             host::host_decide_extension,
             host::host_decide_deadline,
+            host::host_decide_expiry,
             host::host_start_event,
             host::host_start_async_event,
             host::host_create_event,

@@ -1024,6 +1024,10 @@ function defaultDraft(): EventDraft {
     asyncClaimsPerParticipant: null,
     asyncReleaseTime: "18:00",
     asyncLateSeeds: false,
+    hostTimezone: "Europe/Stockholm",
+    claimReminderHours: 12,
+    expiryProtection: "strike_cooldown",
+    reofferAfterExpiry: "never",
     fillInWindowHours: 24,
     fillInClaimWindowHours: 6,
     fillInFlow: "host_appoints",
@@ -1188,6 +1192,9 @@ function personRow(index: number, long = false): PersonRow {
     maxHandoffs: 12,
     joined: `25 Nov, ${String(9 + (index % 8)).padStart(2, "0")}:${String((index * 7) % 60).padStart(2, "0")}`,
     deliveryRisk: index === 6,
+    expiryStrikes: index === 3 ? 2 : index === 5 ? 1 : 0,
+    cooldownUntil:
+      index === 5 ? Math.floor(Date.now() / 1000) + 12 * 3600 : null,
     away:
       index === 0
         ? [

@@ -1,7 +1,9 @@
 ---------------------------- MODULE SwapClaim ----------------------------
 \* Design model for the classic claim, offer, custody, and expiry rules.
 \* It checks the core safety invariants for a small finite roster. It does
-\* not model files, Discord, SQLite, the UI, or real time.
+\* not model files, Discord, SQLite, the UI, or real time. It models the
+\* default re-offer setting `never`; the other re-offer options are out of
+\* scope (MSW-085).
 EXTENDS Naturals, Integers, FiniteSets, TLC
 
 CONSTANTS Participants, Tracks, Owner, NoOne, ClaimWindow, MaxTime

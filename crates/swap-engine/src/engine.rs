@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use chrono::{TimeZone, Timelike, Utc};
+use chrono::{Duration as ChronoDuration, NaiveDate, Offset, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use swap_core::{
     AssignmentStatus, AsyncCandidate, EventState, Membership, ParticipantId, Readiness, Role,
@@ -9,10 +9,11 @@ use swap_core::{
 };
 use swap_db::{
     AssignmentRecord, AssignmentRepo, AuditRepo, AvailabilityRecord, AvailabilityRepo, Connection,
-    Db, DbError, DeadlineRepo, EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo,
-    FillInChainRepo, HostDecisionRecord, HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo,
-    PackRecord, PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord,
-    PlanRepo, ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
+    Db, DbError, DeadlineRepo, EventRecord, EventRepo, EventRoundRecord, ExpiredPairRecord,
+    ExpiredPairRepo, ExpiryStateRecord, ExpiryStateRepo, FileRecord, FileRepo, FillInChainRepo,
+    HostDecisionRecord, HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord,
+    PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
+    ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
     TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction,
     TransactionBehavior,
 };
@@ -27,7 +28,7 @@ use crate::ids::{
     track_code, track_code_from_secret,
 };
 use crate::prepare::{DeliveryPreparer, PreparedBytes};
-use crate::settings::{EventSettings, Mode, SettingsError};
+use crate::settings::{EventSettings, ExpiryProtection, Mode, ReofferAfterExpiry, SettingsError};
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -171,6 +172,10 @@ pub enum EngineError {
     DecisionNotOpen,
     #[error("the host decision has an unexpected kind: {0}")]
     WrongDecisionKind(String),
+    #[error("the re-offer setting does not allow a host re-offer")]
+    ReofferNotAllowed,
+    #[error("the participant cannot take a new offer: {0}")]
+    ExpiryNotEligible(String),
     #[error("the assignment has used the maximum number of extensions")]
     ExtensionLimit,
     #[error("the assignment has no edit deadline")]
@@ -299,6 +304,15 @@ pub struct GroupRepairOutcome {
 pub struct AsyncWaveOutcome {
     pub offers: usize,
     pub effects: Vec<Effect>,
+    /// Ready people that the wave passed over, with the reason.
+    pub skips: Vec<AsyncSkip>,
+}
+
+/// One ready participant that the queue did not offer a track this wave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsyncSkip {
+    pub participant_id: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2553,19 +2567,39 @@ pub fn set_participant_ready(
     };
     participant.updated_at = now;
     ParticipantRepo::upsert(&transaction, &participant)?;
-    AuditRepo::insert(
-        &transaction,
-        event_id,
-        now,
-        "Participant",
-        if ready {
-            "Participant ready"
-        } else {
-            "Participant paused"
-        },
-        Some(user_id),
-        "{}",
-    )?;
+    if ready {
+        let reset = ExpiryStateRepo::reset(&transaction, event_id, user_id)?;
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "Participant",
+            "Participant ready",
+            Some(user_id),
+            &serde_json::json!({ "expiryStrikesReset": reset }).to_string(),
+        )?;
+        if reset {
+            AuditRepo::insert(
+                &transaction,
+                event_id,
+                now,
+                "Participant",
+                "Expiry state reset",
+                Some(user_id),
+                "{}",
+            )?;
+        }
+    } else {
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "Participant",
+            "Participant paused",
+            Some(user_id),
+            "{}",
+        )?;
+    }
     commit(transaction)?;
     Ok(())
 }
@@ -2668,18 +2702,76 @@ pub struct AsyncRelease {
     pub next_at: i64,
 }
 
-fn async_release_anchor(settings: &EventSettings, now: i64) -> i64 {
-    let (hour, minute) = settings
+fn async_release_parts(settings: &EventSettings) -> (u32, u32) {
+    settings
         .async_release_time
         .as_deref()
         .and_then(|value| {
-            let hour = value.get(..2)?.parse::<i64>().ok()?;
-            let minute = value.get(3..)?.parse::<i64>().ok()?;
+            let hour = value.get(..2)?.parse::<u32>().ok()?;
+            let minute = value.get(3..)?.parse::<u32>().ok()?;
             Some((hour, minute))
         })
-        .unwrap_or((18, 0));
-    let day = now.div_euclid(86_400) * 86_400;
-    day + hour * 3_600 + minute * 60
+        .unwrap_or((18, 0))
+}
+
+fn release_zone(settings: &EventSettings) -> Tz {
+    settings
+        .host_timezone
+        .as_deref()
+        .and_then(|zone| zone.parse::<Tz>().ok())
+        .unwrap_or(chrono_tz::UTC)
+}
+
+/// The UTC instant of one local wall-clock time (D-042).
+///
+/// A time in a spring-forward gap moves forward to the first valid local time.
+/// A time in a fall-back overlap uses the earlier offset.
+fn local_release_instant(date: NaiveDate, hour: u32, minute: u32, zone: Tz) -> i64 {
+    let naive = date
+        .and_hms_opt(hour, minute, 0)
+        .expect("the release time is validated as HH:MM");
+    match zone.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(value) => value.timestamp(),
+        chrono::LocalResult::Ambiguous(earliest, _) => earliest.timestamp(),
+        chrono::LocalResult::None => {
+            // The wall-clock time is inside a spring-forward gap. Move the
+            // time forward by the width of the gap, which keeps the minute.
+            for step in 1..=180 {
+                let shifted = naive + ChronoDuration::minutes(step);
+                match zone.from_local_datetime(&shifted) {
+                    chrono::LocalResult::Single(first_valid) => {
+                        let before = first_valid - ChronoDuration::minutes(1);
+                        let width = i64::from(
+                            first_valid.offset().fix().local_minus_utc()
+                                - before.offset().fix().local_minus_utc(),
+                        );
+                        let adjusted = naive + ChronoDuration::seconds(width);
+                        return match zone.from_local_datetime(&adjusted) {
+                            chrono::LocalResult::Single(value) => value.timestamp(),
+                            chrono::LocalResult::Ambiguous(earliest, _) => earliest.timestamp(),
+                            chrono::LocalResult::None => first_valid.timestamp(),
+                        };
+                    }
+                    chrono::LocalResult::Ambiguous(earliest, _) => return earliest.timestamp(),
+                    chrono::LocalResult::None => {}
+                }
+            }
+            naive.and_utc().timestamp()
+        }
+    }
+}
+
+/// The first wave of the release day that contains `now`, and that local day.
+fn async_release_anchor(settings: &EventSettings, now: i64) -> (i64, NaiveDate) {
+    let (hour, minute) = async_release_parts(settings);
+    let zone = release_zone(settings);
+    let local_now = Utc
+        .timestamp_opt(now, 0)
+        .single()
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap())
+        .with_timezone(&zone);
+    let date = local_now.date_naive();
+    (local_release_instant(date, hour, minute, zone), date)
 }
 
 pub fn next_async_release(db: &Db, event_id: &str, now: i64) -> Result<AsyncRelease, EngineError> {
@@ -2688,7 +2780,7 @@ pub fn next_async_release(db: &Db, event_id: &str, now: i64) -> Result<AsyncRele
     if settings.mode != Mode::Async {
         return Err(EngineError::NotAsyncMode);
     }
-    let first = async_release_anchor(&settings, now);
+    let (first, date) = async_release_anchor(&settings, now);
     let second = first + settings.async_wave_offset_secs;
     if now < first {
         Ok(AsyncRelease {
@@ -2701,15 +2793,17 @@ pub fn next_async_release(db: &Db, event_id: &str, now: i64) -> Result<AsyncRele
             next_at: second,
         })
     } else {
+        let (hour, minute) = async_release_parts(&settings);
+        let tomorrow = date.succ_opt().unwrap_or(date);
         Ok(AsyncRelease {
             next_wave: 1,
-            next_at: first + 86_400,
+            next_at: local_release_instant(tomorrow, hour, minute, release_zone(&settings)),
         })
     }
 }
 
 /// Dispatch the release wave that is due now. The host can call this from the
-/// periodic worker. It never sends the same wave twice for one day.
+/// periodic worker. It never sends the same wave twice for one local day.
 pub fn dispatch_async_release(
     db: &Db,
     event_id: &str,
@@ -2720,24 +2814,28 @@ pub fn dispatch_async_release(
     if settings.mode != Mode::Async {
         return Err(EngineError::NotAsyncMode);
     }
-    let first = async_release_anchor(&settings, now);
+    let (first, date) = async_release_anchor(&settings, now);
     let second = first + settings.async_wave_offset_secs;
-    let (wave, wave_at) = if now >= second {
-        (2, second)
+    let wave = if now >= second {
+        2
     } else if now >= first {
-        (1, first)
+        1
     } else {
         return Ok(AsyncWaveOutcome {
             offers: 0,
             effects: Vec::new(),
+            skips: Vec::new(),
         });
     };
-    let day = wave_at.div_euclid(86_400);
-    let key = format!("async-release:{event_id}:{day}:{wave}");
+    let key = format!(
+        "async-release:{event_id}:{}:{wave}",
+        date.format("%Y-%m-%d")
+    );
     if MetaRepo::get(db.conn(), &key)?.is_some() {
         return Ok(AsyncWaveOutcome {
             offers: 0,
             effects: Vec::new(),
+            skips: Vec::new(),
         });
     }
     let outcome = dispatch_async_wave(db, event_id, now)?;
@@ -2766,26 +2864,41 @@ pub fn dispatch_async_wave(
         return Err(EngineError::NotAsyncMode);
     }
     let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
-    let ready: Vec<&ParticipantRecord> = participants
+    let expiry_states = ExpiryStateRepo::list_for_event(db.conn(), event_id)?;
+    let state_by_person: HashMap<&str, &ExpiryStateRecord> = expiry_states
         .iter()
-        .filter(|participant| {
-            participant.membership == Membership::Active
-                && participant.role == Role::Participant
-                && participant.readiness == Readiness::Ready
-                && MetaRepo::get(
-                    db.conn(),
-                    &format!("async-cooldown:{}:{}", event_id, participant.user_id),
-                )
-                .ok()
-                .flatten()
-                .and_then(|value| value.parse::<i64>().ok())
-                .is_none_or(|until| until <= now)
-        })
+        .map(|state| (state.participant_id.as_str(), state))
         .collect();
+    let mut ready: Vec<&ParticipantRecord> = Vec::new();
+    let mut skips: Vec<AsyncSkip> = Vec::new();
+    for participant in &participants {
+        if participant.membership != Membership::Active
+            || participant.role != Role::Participant
+            || participant.readiness != Readiness::Ready
+        {
+            continue;
+        }
+        if let Some(until) = state_by_person
+            .get(participant.user_id.as_str())
+            .and_then(|state| state.cooldown_until)
+            && until > now
+        {
+            skips.push(AsyncSkip {
+                participant_id: participant.user_id.clone(),
+                reason: format!(
+                    "the expiry cooldown runs until {until}; the queue waits {} hours",
+                    (until - now + 3_599) / 3_600
+                ),
+            });
+            continue;
+        }
+        ready.push(participant);
+    }
     if ready.is_empty() {
         return Ok(AsyncWaveOutcome {
             offers: 0,
             effects: Vec::new(),
+            skips,
         });
     }
     let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
@@ -2803,13 +2916,13 @@ pub fn dispatch_async_wave(
         .iter()
         .map(|pair| (pair.track_code.as_str(), pair.participant_id.as_str()))
         .collect();
-    let expired: HashSet<(&str, &str)> = assignments
+    let expired_pairs = ExpiredPairRepo::list_for_event(db.conn(), event_id)?;
+    let expired: HashMap<(&str, &str), &ExpiredPairRecord> = expired_pairs
         .iter()
-        .filter(|assignment| assignment.status == AssignmentStatus::Expired)
-        .map(|assignment| {
+        .map(|pair| {
             (
-                assignment.track_code.as_str(),
-                assignment.participant_id.as_str(),
+                (pair.track_code.as_str(), pair.participant_id.as_str()),
+                pair,
             )
         })
         .collect();
@@ -2859,32 +2972,92 @@ pub fn dispatch_async_wave(
         .filter(|participant| !active_people.contains(participant.user_id.as_str()))
         .map(|participant| ParticipantId::new(participant.user_id.clone()))
         .collect();
-    let mut candidates: BTreeMap<ParticipantId, Vec<AsyncCandidate>> = BTreeMap::new();
+    let pair_meetings = |participant: &str, track: &str| -> u32 {
+        let mut meetings = 0u32;
+        if let Some(people) = holders.get(track) {
+            for other in people {
+                if *other == participant {
+                    continue;
+                }
+                meetings += pair_counts
+                    .get(&ordered_pair(participant, other))
+                    .copied()
+                    .unwrap_or(0);
+            }
+        }
+        meetings
+    };
+    // The base options exclude every expired pair. The re-offer setting can
+    // add a pair back: after the pair cooldown, or as a last resort when no
+    // other person can take the track (MSW-085).
+    let mut base: BTreeMap<ParticipantId, Vec<AsyncCandidate>> = BTreeMap::new();
     for participant in &ready_people {
         let mut options = Vec::new();
         for track in &tracks {
             if track.owner_id == participant.0
                 || seen.contains(&(track.code.as_str(), participant.0.as_str()))
-                || expired.contains(&(track.code.as_str(), participant.0.as_str()))
+                || expired.contains_key(&(track.code.as_str(), participant.0.as_str()))
             {
                 continue;
             }
-            let mut pair_meetings = 0u32;
-            if let Some(people) = holders.get(track.code.as_str()) {
-                for other in people {
-                    if *other == participant.0 {
-                        continue;
-                    }
-                    pair_meetings += pair_counts
-                        .get(&ordered_pair(&participant.0, other))
-                        .copied()
-                        .unwrap_or(0);
+            options.push(AsyncCandidate {
+                track: TrackCode::new(track.code.clone()),
+                pair_meetings: pair_meetings(&participant.0, track.code.as_str()),
+            });
+        }
+        if !options.is_empty() {
+            base.insert(participant.clone(), options);
+        }
+    }
+    let tracks_with_candidate: HashSet<String> = base
+        .values()
+        .flat_map(|options| options.iter().map(|candidate| candidate.track.0.clone()))
+        .collect();
+    let mut offer_reasons: HashMap<(String, String), &'static str> = HashMap::new();
+    let mut candidates = base;
+    for participant in &ready_people {
+        let mut options = candidates.get(participant).cloned().unwrap_or_default();
+        for track in &tracks {
+            if track.owner_id == participant.0
+                || seen.contains(&(track.code.as_str(), participant.0.as_str()))
+            {
+                continue;
+            }
+            let Some(pair) = expired.get(&(track.code.as_str(), participant.0.as_str())) else {
+                continue;
+            };
+            let (allowed, reason) = match settings.reoffer_after_expiry {
+                ReofferAfterExpiry::Never => (false, "the re-offer rule is never"),
+                ReofferAfterExpiry::AfterCooldown => {
+                    let host_waiting = pair.last_assignment_id.as_deref().is_some_and(|id| {
+                        HostDecisionRepo::open_for_assignment(db.conn(), id, "expiry")
+                            .ok()
+                            .flatten()
+                            .is_some()
+                    });
+                    (
+                        !host_waiting && pair.cooldown_until.is_none_or(|until| until <= now),
+                        "re-offer after the cooldown",
+                    )
                 }
+                ReofferAfterExpiry::LastResort => (
+                    !tracks_with_candidate.contains(&track.code),
+                    "re-offer as a last resort",
+                ),
+                ReofferAfterExpiry::HostDecides => (false, "the host decides the re-offer"),
+            };
+            if !allowed
+                || options
+                    .iter()
+                    .any(|candidate| candidate.track.0 == track.code)
+            {
+                continue;
             }
             options.push(AsyncCandidate {
                 track: TrackCode::new(track.code.clone()),
-                pair_meetings,
+                pair_meetings: pair_meetings(&participant.0, track.code.as_str()),
             });
+            offer_reasons.insert((participant.0.clone(), track.code.clone()), reason);
         }
         if !options.is_empty() {
             candidates.insert(participant.clone(), options);
@@ -2896,10 +3069,26 @@ pub fn dispatch_async_wave(
         &candidates,
         event.seed.wrapping_add(now as u64),
     );
+    let chosen: HashSet<&str> = choices
+        .iter()
+        .map(|choice| choice.participant.0.as_str())
+        .collect();
+    for participant in &ready_people {
+        if !chosen.contains(participant.0.as_str()) {
+            skips.push(AsyncSkip {
+                participant_id: participant.0.clone(),
+                reason: format!(
+                    "no eligible track under the re-offer rule {:?}",
+                    settings.reoffer_after_expiry
+                ),
+            });
+        }
+    }
     if choices.is_empty() {
         return Ok(AsyncWaveOutcome {
             offers: 0,
             effects: Vec::new(),
+            skips,
         });
     }
     let round = assignments
@@ -2961,6 +3150,25 @@ pub fn dispatch_async_wave(
             }
             return Err(error);
         }
+        let reason = offer_reasons
+            .get(&(choice.participant.0.clone(), choice.track.0.clone()))
+            .copied()
+            .unwrap_or("eligible track");
+        AuditRepo::insert(
+            &transaction,
+            event_id,
+            now,
+            "worker",
+            "Async offer",
+            Some(&choice.track.0),
+            &serde_json::json!({
+                "round": round,
+                "trackCode": choice.track.0,
+                "participantId": choice.participant.0,
+                "reason": reason,
+            })
+            .to_string(),
+        )?;
         move_track(&transaction, event_id, &choice.track.0, TrackState::Offered)?;
         let effect = Effect::Offer {
             user_id: choice.participant.0.clone(),
@@ -2980,12 +3188,21 @@ pub fn dispatch_async_wave(
         "worker",
         "Async wave dispatched",
         None,
-        &serde_json::json!({ "offers": effects.len(), "round": round }).to_string(),
+        &serde_json::json!({
+            "offers": effects.len(),
+            "round": round,
+            "skips": skips.iter().map(|skip| serde_json::json!({
+                "participantId": skip.participant_id,
+                "reason": skip.reason,
+            })).collect::<Vec<_>>(),
+        })
+        .to_string(),
     )?;
     commit(transaction)?;
     Ok(AsyncWaveOutcome {
         offers: effects.len(),
         effects,
+        skips,
     })
 }
 
@@ -3774,6 +3991,22 @@ pub fn expire_offer(
         event_id,
         &assignment.track_code,
         TrackState::Pool,
+    )?;
+    let settings = parse_settings(&event)?;
+    apply_expiry_policy(&transaction, &assignment, &settings, now)?;
+    AuditRepo::insert(
+        &transaction,
+        event_id,
+        now,
+        "worker",
+        "Offer expired",
+        None,
+        &serde_json::json!({
+            "assignmentId": assignment.id,
+            "trackCode": assignment.track_code,
+            "participantId": assignment.participant_id,
+        })
+        .to_string(),
     )?;
     crate::fill_in_chain::on_slot_stranded(&transaction, &assignment, now)?;
     commit(transaction)?;
@@ -4936,8 +5169,454 @@ pub fn decide_deadline(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiryDecisionOutcome {
+    pub action: String,
+    pub assignment_id: Option<String>,
+}
+
+/// Decide one expired offer (MSW-084, MSW-085). The host can pause the
+/// participant, start a cooldown, ignore the expiry, or re-offer the same
+/// track when the re-offer setting is `host_decides`.
+pub fn decide_expiry(
+    db: &Db,
+    decision_id: &str,
+    action: &str,
+    now: i64,
+) -> Result<ExpiryDecisionOutcome, EngineError> {
+    let transaction = begin(db)?;
+    let decision = HostDecisionRepo::get(&transaction, decision_id)?
+        .ok_or_else(|| EngineError::DecisionNotFound(decision_id.to_string()))?;
+    if decision.kind != "expiry" {
+        return Err(EngineError::WrongDecisionKind(decision.kind));
+    }
+    if decision.status != "open" {
+        return Err(EngineError::DecisionNotOpen);
+    }
+    let assignment_id = decision
+        .assignment_id
+        .clone()
+        .ok_or_else(|| EngineError::DecisionNotFound(decision_id.to_string()))?;
+    let assignment = AssignmentRepo::get(&transaction, &assignment_id)?
+        .ok_or_else(|| EngineError::AssignmentNotFound(assignment_id.clone()))?;
+    let event = EventRepo::get(&transaction, &assignment.event_id)?
+        .ok_or_else(|| EngineError::EventNotFound(assignment.event_id.clone()))?;
+    require_open_event(&event, "expiry decision")?;
+    let settings = parse_settings(&event)?;
+    let mut participant = ParticipantRepo::get(
+        &transaction,
+        &assignment.event_id,
+        &assignment.participant_id,
+    )?
+    .ok_or_else(|| EngineError::ParticipantNotFound(assignment.participant_id.clone()))?;
+    match action {
+        "ignore" => {
+            HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, action)?;
+        }
+        "cooldown" => {
+            let until = now + EXPIRY_COOLDOWN_SECS;
+            let mut state = ExpiryStateRepo::get(
+                &transaction,
+                &assignment.event_id,
+                &assignment.participant_id,
+            )?
+            .unwrap_or_else(|| ExpiryStateRecord {
+                event_id: assignment.event_id.clone(),
+                participant_id: assignment.participant_id.clone(),
+                updated_at: now,
+                ..ExpiryStateRecord::default()
+            });
+            state.cooldown_until = Some(until);
+            state.updated_at = now;
+            ExpiryStateRepo::upsert(&transaction, &state)?;
+            ExpiredPairRepo::set_cooldown(
+                &transaction,
+                &assignment.event_id,
+                &assignment.track_code,
+                &assignment.participant_id,
+                Some(until),
+            )?;
+            HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, action)?;
+            enqueue_effect(
+                &transaction,
+                &assignment.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content: "The host set a 24-hour cooldown on your next offer.".to_string(),
+                },
+                now,
+            )?;
+        }
+        "pause" => {
+            participant.readiness = Readiness::Paused;
+            participant.updated_at = now;
+            ParticipantRepo::upsert(&transaction, &participant)?;
+            let mut state = ExpiryStateRepo::get(
+                &transaction,
+                &assignment.event_id,
+                &assignment.participant_id,
+            )?
+            .unwrap_or_else(|| ExpiryStateRecord {
+                event_id: assignment.event_id.clone(),
+                participant_id: assignment.participant_id.clone(),
+                updated_at: now,
+                ..ExpiryStateRecord::default()
+            });
+            state.paused_at = Some(now);
+            state.updated_at = now;
+            ExpiryStateRepo::upsert(&transaction, &state)?;
+            HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, action)?;
+            enqueue_effect(
+                &transaction,
+                &assignment.event_id,
+                &Effect::Dm {
+                    user_id: assignment.participant_id.clone(),
+                    content: "The host paused your offers. Use /swap resume when you are ready."
+                        .to_string(),
+                },
+                now,
+            )?;
+        }
+        "reoffer" => {
+            if settings.reoffer_after_expiry != ReofferAfterExpiry::HostDecides {
+                return Err(EngineError::ReofferNotAllowed);
+            }
+            if participant.readiness != Readiness::Ready
+                || participant.membership != Membership::Active
+            {
+                return Err(EngineError::ExpiryNotEligible(
+                    "the participant is not ready".to_string(),
+                ));
+            }
+            if AssignmentRepo::list_active(&transaction, &assignment.event_id)?
+                .iter()
+                .any(|active| active.participant_id == assignment.participant_id)
+            {
+                return Err(EngineError::ExpiryNotEligible(
+                    "the participant already holds a track".to_string(),
+                ));
+            }
+            if SeenRepo::has(
+                &transaction,
+                &assignment.event_id,
+                &assignment.track_code,
+                &assignment.participant_id,
+            )? {
+                return Err(EngineError::SeenPairOffer {
+                    track: assignment.track_code.clone(),
+                    participant: assignment.participant_id.clone(),
+                });
+            }
+            let track = TrackRepo::get(&transaction, &assignment.event_id, &assignment.track_code)?
+                .ok_or_else(|| EngineError::TrackNotFound(assignment.track_code.clone()))?;
+            if matches!(track.state, TrackState::Final | TrackState::Retired) {
+                return Err(EngineError::TrackPath(assignment.track_code.clone()));
+            }
+            if AssignmentRepo::list_active(&transaction, &assignment.event_id)?
+                .iter()
+                .any(|active| active.track_code == assignment.track_code)
+            {
+                return Err(EngineError::ExpiryNotEligible(
+                    "the track has an active holder".to_string(),
+                ));
+            }
+            let round = AssignmentRepo::list_for_event(&transaction, &assignment.event_id)?
+                .iter()
+                .map(|row| row.round)
+                .max()
+                .map(|round| round + 1)
+                .unwrap_or(0);
+            let id = crate::ids::assignment_id(&assignment.event_id, round, &assignment.track_code);
+            let due_at = now + settings.claim_window_secs;
+            insert_offer(
+                &transaction,
+                &AssignmentRecord {
+                    id: id.clone(),
+                    event_id: assignment.event_id.clone(),
+                    track_code: assignment.track_code.clone(),
+                    participant_id: assignment.participant_id.clone(),
+                    round,
+                    status: AssignmentStatus::Offered,
+                    offered_at: now,
+                    claimed_at: None,
+                    due_at: Some(due_at),
+                    submitted_at: None,
+                    created_at: now,
+                    updated_at: now,
+                    extension_secs: 0,
+                    claim_deadline_at: Some(due_at),
+                },
+            )?;
+            move_track(
+                &transaction,
+                &assignment.event_id,
+                &assignment.track_code,
+                TrackState::Offered,
+            )?;
+            HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, action)?;
+            enqueue_effect(
+                &transaction,
+                &assignment.event_id,
+                &Effect::Offer {
+                    user_id: assignment.participant_id.clone(),
+                    event_id: assignment.event_id.clone(),
+                    assignment_id: id.clone(),
+                    track_code: assignment.track_code.clone(),
+                    due_at,
+                    claim_window_secs: settings.claim_window_secs,
+                },
+                now,
+            )?;
+            AuditRepo::insert(
+                &transaction,
+                &assignment.event_id,
+                now,
+                "Host",
+                "Expired pair re-offered",
+                Some(&assignment.track_code),
+                &serde_json::json!({
+                    "participantId": assignment.participant_id,
+                    "assignmentId": id,
+                    "round": round,
+                })
+                .to_string(),
+            )?;
+            AuditRepo::insert(
+                &transaction,
+                &assignment.event_id,
+                now,
+                "Host",
+                "Expiry decided",
+                Some(&assignment.participant_id),
+                &serde_json::json!({
+                    "action": action,
+                    "assignmentId": assignment_id,
+                })
+                .to_string(),
+            )?;
+            commit(transaction)?;
+            return Ok(ExpiryDecisionOutcome {
+                action: action.to_string(),
+                assignment_id: Some(id),
+            });
+        }
+        _ => {
+            return Err(EngineError::WrongDecisionKind(format!(
+                "unknown expiry action {action}"
+            )));
+        }
+    }
+    AuditRepo::insert(
+        &transaction,
+        &assignment.event_id,
+        now,
+        "Host",
+        "Expiry decided",
+        Some(&assignment.participant_id),
+        &serde_json::json!({
+            "action": action,
+            "assignmentId": assignment.id,
+        })
+        .to_string(),
+    )?;
+    commit(transaction)?;
+    Ok(ExpiryDecisionOutcome {
+        action: action.to_string(),
+        assignment_id: None,
+    })
+}
+
 pub fn open_decisions(db: &Db, event_id: &str) -> Result<Vec<HostDecisionRecord>, EngineError> {
     Ok(HostDecisionRepo::list_open(db.conn(), event_id)?)
+}
+
+/// The length of the automatic cooldown after an expired offer (D-041).
+pub const EXPIRY_COOLDOWN_SECS: i64 = 24 * 60 * 60;
+
+fn record_expired_pair(
+    conn: &Connection,
+    assignment: &AssignmentRecord,
+    now: i64,
+    cooldown_until: Option<i64>,
+) -> Result<(), EngineError> {
+    ExpiredPairRepo::record(
+        conn,
+        &ExpiredPairRecord {
+            event_id: assignment.event_id.clone(),
+            track_code: assignment.track_code.clone(),
+            participant_id: assignment.participant_id.clone(),
+            expiries: 1,
+            last_expired_at: now,
+            cooldown_until,
+            last_assignment_id: Some(assignment.id.clone()),
+        },
+    )?;
+    Ok(())
+}
+
+/// Apply the expiry protection preset (MSW-084). A classic expiry only
+/// records the pair: classic has no async cooldown or pause.
+pub(crate) fn apply_expiry_policy(
+    conn: &Connection,
+    assignment: &AssignmentRecord,
+    settings: &EventSettings,
+    now: i64,
+) -> Result<(), EngineError> {
+    let event_id = assignment.event_id.as_str();
+    if settings.mode == Mode::Classic {
+        record_expired_pair(conn, assignment, now, Some(now + EXPIRY_COOLDOWN_SECS))?;
+        return Ok(());
+    }
+    record_expired_pair(conn, assignment, now, None)?;
+    let Some(mut participant) = ParticipantRepo::get(conn, event_id, &assignment.participant_id)?
+    else {
+        return Ok(());
+    };
+    let mut state = ExpiryStateRepo::get(conn, event_id, &assignment.participant_id)?
+        .unwrap_or_else(|| ExpiryStateRecord {
+            event_id: event_id.to_string(),
+            participant_id: assignment.participant_id.clone(),
+            updated_at: now,
+            ..ExpiryStateRecord::default()
+        });
+    state.strikes = state.strikes.saturating_add(1);
+    state.updated_at = now;
+    let mut cooldown_until = None;
+    let mut pause = false;
+    let mut host_review = false;
+    match settings.expiry_protection {
+        ExpiryProtection::StrikeCooldown => {
+            if state.strikes >= 2 {
+                pause = true;
+                state.paused_at = Some(now);
+            } else {
+                cooldown_until = Some(now + EXPIRY_COOLDOWN_SECS);
+            }
+        }
+        ExpiryProtection::CooldownOnly => {
+            cooldown_until = Some(now + EXPIRY_COOLDOWN_SECS);
+        }
+        ExpiryProtection::HostReview => host_review = true,
+        ExpiryProtection::None => {}
+    }
+    state.cooldown_until = cooldown_until;
+    ExpiryStateRepo::upsert(conn, &state)?;
+    if let Some(until) = cooldown_until {
+        ExpiredPairRepo::set_cooldown(
+            conn,
+            event_id,
+            &assignment.track_code,
+            &assignment.participant_id,
+            Some(until),
+        )?;
+    }
+    if pause {
+        participant.readiness = Readiness::Paused;
+        participant.updated_at = now;
+        ParticipantRepo::upsert(conn, &participant)?;
+        enqueue_effect(
+            conn,
+            event_id,
+            &Effect::Dm {
+                user_id: assignment.participant_id.clone(),
+                content: "A second offer expired. The queue paused your offers until you use /swap resume or the host resumes you.".to_string(),
+            },
+            now,
+        )?;
+        enqueue_effect(
+            conn,
+            event_id,
+            &Effect::HostAlert {
+                key: format!("expiry-pause:{}", assignment.id),
+                content: format!(
+                    "{} had a second expired offer. The queue paused {} until a resume or a host action.",
+                    participant.display_name, participant.display_name
+                ),
+            },
+            now,
+        )?;
+        AuditRepo::insert(
+            conn,
+            event_id,
+            now,
+            "worker",
+            "Participant auto-paused",
+            Some(&assignment.participant_id),
+            &serde_json::json!({
+                "reason": "second expired offer",
+                "assignmentId": assignment.id,
+                "trackCode": assignment.track_code,
+                "strikes": state.strikes,
+            })
+            .to_string(),
+        )?;
+    } else if let Some(until) = cooldown_until {
+        let hours = (until - now).max(0) / 3_600;
+        enqueue_effect(
+            conn,
+            event_id,
+            &Effect::Dm {
+                user_id: assignment.participant_id.clone(),
+                content: format!(
+                    "Your offer expired. The queue waits {hours} hours before the next offer."
+                ),
+            },
+            now,
+        )?;
+    }
+    if host_review || settings.reoffer_after_expiry == ReofferAfterExpiry::HostDecides {
+        if HostDecisionRepo::open_for_assignment(conn, &assignment.id, "expiry")?.is_none() {
+            HostDecisionRepo::insert(
+                conn,
+                &HostDecisionRecord {
+                    id: format!("{}:expiry", assignment.id),
+                    event_id: event_id.to_string(),
+                    assignment_id: Some(assignment.id.clone()),
+                    kind: "expiry".to_string(),
+                    status: "open".to_string(),
+                    requested_hours: None,
+                    created_at: now,
+                    decided_at: None,
+                    reason: Some(format!(
+                        "expiry protection {:?}; re-offer {:?}",
+                        settings.expiry_protection, settings.reoffer_after_expiry
+                    )),
+                },
+            )?;
+            enqueue_effect(
+                conn,
+                event_id,
+                &Effect::HostAlert {
+                    key: format!("expiry-review:{}", assignment.id),
+                    content: format!(
+                        "An offer for track {} expired. The host decides the next step.",
+                        assignment.track_code
+                    ),
+                },
+                now,
+            )?;
+        }
+        enqueue_effect(
+            conn,
+            event_id,
+            &Effect::Dm {
+                user_id: assignment.participant_id.clone(),
+                content: "Your offer expired. The host decides the next step.".to_string(),
+            },
+            now,
+        )?;
+    } else if !pause && cooldown_until.is_none() {
+        enqueue_effect(
+            conn,
+            event_id,
+            &Effect::Dm {
+                user_id: assignment.participant_id.clone(),
+                content: "Your offer expired. The track returns to the pool.".to_string(),
+            },
+            now,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> {
@@ -4995,6 +5674,7 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                         .to_string(),
                     )?;
                     report.expired_offers += 1;
+                    apply_expiry_policy(&transaction, assignment, &settings, now)?;
                     crate::fill_in_chain::on_slot_stranded(&transaction, assignment, now)?;
                 }
             }
@@ -5021,50 +5701,7 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                         &assignment.track_code,
                         TrackState::Pool,
                     )?;
-                    if let Some(mut participant) =
-                        ParticipantRepo::get(&transaction, &event.id, &assignment.participant_id)?
-                    {
-                        let strike_key =
-                            format!("async-strikes:{}:{}", event.id, assignment.participant_id);
-                        let strikes = MetaRepo::get(&transaction, &strike_key)?
-                            .and_then(|value| value.parse::<u32>().ok())
-                            .unwrap_or(0)
-                            + 1;
-                        MetaRepo::set(&transaction, &strike_key, &strikes.to_string())?;
-                        if strikes >= 2 {
-                            participant.readiness = Readiness::Paused;
-                            participant.updated_at = now;
-                            ParticipantRepo::upsert(&transaction, &participant)?;
-                            enqueue_effect(
-                                &transaction,
-                                &event.id,
-                                &Effect::Dm {
-                                    user_id: assignment.participant_id.clone(),
-                                    content: "A second offer expired. The queue paused your offers until you use /swap resume.".to_string(),
-                                },
-                                now,
-                            )?;
-                        } else {
-                            let cooldown_key = format!(
-                                "async-cooldown:{}:{}",
-                                event.id, assignment.participant_id
-                            );
-                            MetaRepo::set(
-                                &transaction,
-                                &cooldown_key,
-                                &(now + 24 * 60 * 60).to_string(),
-                            )?;
-                            enqueue_effect(
-                                &transaction,
-                                &event.id,
-                                &Effect::Dm {
-                                    user_id: assignment.participant_id.clone(),
-                                    content: "Your offer expired. The queue waits 24 hours before the next offer.".to_string(),
-                                },
-                                now,
-                            )?;
-                        }
-                    }
+                    apply_expiry_policy(&transaction, assignment, &settings, now)?;
                     AuditRepo::insert(
                         &transaction,
                         &event.id,
@@ -5080,25 +5717,28 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                         .to_string(),
                     )?;
                     report.expired_offers += 1;
-                } else if claim_deadline_at - now <= 12 * 60 * 60 {
-                    let key = format!("async-claim-reminded:{}", assignment.id);
-                    if MetaRepo::get(&transaction, &key)?.is_none() {
-                        enqueue_effect(
-                            &transaction,
-                            &event.id,
-                            &Effect::Prompt {
-                                user_id: assignment.participant_id.clone(),
-                                event_id: event.id.clone(),
-                                content: format!(
-                                    "Track {} expires in 12 hours. Claim it in the server.",
-                                    assignment.track_code
-                                ),
-                            },
-                            now,
-                        )?;
-                        MetaRepo::set(&transaction, &key, "1")?;
-                        report.reminders += 1;
-                    }
+                } else if let Some(reminder_secs) = settings.claim_reminder_secs
+                    && claim_deadline_at - now <= reminder_secs
+                    && AssignmentRepo::mark_claim_reminder(&transaction, &assignment.id, now)?
+                {
+                    let remaining = claim_deadline_at - now;
+                    enqueue_effect(
+                        &transaction,
+                        &event.id,
+                        &Effect::Prompt {
+                            user_id: assignment.participant_id.clone(),
+                            event_id: event.id.clone(),
+                            content: format!(
+                                "Track {} is still unclaimed. The claim window ends in {} at <t:{}:f> (<t:{}:R>).",
+                                assignment.track_code,
+                                human_duration(remaining),
+                                claim_deadline_at,
+                                claim_deadline_at
+                            ),
+                        },
+                        now,
+                    )?;
+                    report.reminders += 1;
                 }
             }
         }
@@ -5249,6 +5889,23 @@ pub(crate) fn participant_timezone(
         .iter()
         .find(|participant| participant.user_id == user_id)
         .and_then(|participant| participant.timezone.parse().ok())
+}
+
+pub(crate) fn human_duration(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let hours = seconds / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    match (hours, minutes) {
+        (0, 0) => "less than a minute".to_string(),
+        (0, 1) => "1 minute".to_string(),
+        (0, minutes) => format!("{minutes} minutes"),
+        (1, 0) => "1 hour".to_string(),
+        (hours, 0) => format!("{hours} hours"),
+        (1, 1) => "1 hour and 1 minute".to_string(),
+        (1, minutes) => format!("1 hour and {minutes} minutes"),
+        (hours, 1) => format!("{hours} hours and 1 minute"),
+        (hours, minutes) => format!("{hours} hours and {minutes} minutes"),
+    }
 }
 
 pub(crate) fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {

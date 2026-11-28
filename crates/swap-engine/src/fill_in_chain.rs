@@ -302,7 +302,7 @@ fn advance(
         AUTO_CHAIN_OFFERS
     };
     let next = if (chain.offers as usize) < limit {
-        next_person(conn, chain)?
+        next_person(conn, settings, chain, now)?
     } else {
         None
     };
@@ -351,9 +351,18 @@ fn advance(
 /// host list entry who is not eligible now is passed over and never offered.
 fn next_person(
     conn: &Connection,
+    settings: &EventSettings,
     chain: &mut FillInChainRecord,
+    now: i64,
 ) -> Result<Option<String>, EngineError> {
-    let slot = Slot::load(conn, &chain.event_id, &chain.track_code, chain.round)?;
+    let slot = Slot::load(
+        conn,
+        &chain.event_id,
+        &chain.track_code,
+        chain.round,
+        settings,
+        now,
+    )?;
     let ranked = slot.ranked(conn)?;
     if chain.flow != "host_list" {
         return Ok(ranked

@@ -7,11 +7,11 @@ use swap_db::{
     ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, SeenRepo,
 };
 use swap_engine::{
-    Effect, EngineError, EventSettings, FillInFlow, FillInTier, JoinRequest, LeaveActor,
-    PassthroughPreparer, SubmitRequest, assign_fill_in, claim, create_event_with_secret,
-    event_status, fill_in_candidates, generate_schedule, join_with_seed, leave_event, lock_roster,
-    move_round_deadline, open_round, open_seed_round, set_track_title, skip, start_event,
-    start_fill_in_list, submit, tick_deadlines,
+    Effect, EngineError, EventSettings, ExpiryProtection, FillInFlow, FillInTier, JoinRequest,
+    LeaveActor, PassthroughPreparer, ReofferAfterExpiry, SubmitRequest, assign_fill_in, claim,
+    create_event_with_secret, event_status, fill_in_candidates, generate_schedule, join_with_seed,
+    leave_event, lock_roster, move_round_deadline, open_round, open_seed_round, set_track_title,
+    skip, start_event, start_fill_in_list, submit, tick_deadlines,
 };
 use swap_files::BlobStore;
 
@@ -426,7 +426,7 @@ fn the_default_fill_in_due_time_keeps_a_later_round_deadline() {
 }
 
 fn candidate_ids(fixture: &Fixture, track: &str) -> Vec<String> {
-    fill_in_candidates(&fixture.db, EVENT, track, 2)
+    fill_in_candidates(&fixture.db, EVENT, track, 2, T4)
         .unwrap()
         .into_iter()
         .map(|candidate| candidate.participant_id)
@@ -519,7 +519,7 @@ fn a_group_participant_who_submitted_is_an_extra_turn_candidate() {
         !expected.is_empty(),
         "the group plan must leave someone out"
     );
-    let candidates = fill_in_candidates(&fixture.db, EVENT, &track, 2).unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &track, 2, T4).unwrap();
     let mut ids: Vec<String> = candidates
         .iter()
         .map(|candidate| candidate.participant_id.clone())
@@ -582,7 +582,7 @@ fn an_extra_turn_is_hidden_while_a_volunteer_is_eligible() {
     let (track, round_zero) = fixture.strand_round_zero(0);
     let extra = expected_extra_turns(&fixture, &track, &round_zero, 0);
     assert!(!extra.is_empty());
-    let candidates = fill_in_candidates(&fixture.db, EVENT, &track, 2).unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &track, 2, T4).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].participant_id, "volunteer");
     assert_eq!(candidates[0].tier, FillInTier::Volunteer);
@@ -608,7 +608,7 @@ fn a_volunteer_never_receives_the_same_track_twice() {
     skip(&fixture.db, EVENT, &user_id, T4 + 101).unwrap();
     let round_no = 3;
     assert!(
-        fill_in_candidates(&fixture.db, EVENT, &track, round_no)
+        fill_in_candidates(&fixture.db, EVENT, &track, round_no, T4)
             .unwrap()
             .iter()
             .all(|candidate| candidate.participant_id != "volunteer")
@@ -672,7 +672,7 @@ fn an_extra_turn_does_not_use_the_handoff_cap() {
             .len(),
         3
     );
-    let candidates = fill_in_candidates(&fixture.db, EVENT, &second_track, 3).unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &second_track, 3, T4).unwrap();
     assert!(
         candidates
             .iter()
@@ -737,11 +737,11 @@ fn candidates_rank_by_fewest_edits() {
     volunteers(&fixture, 2);
     let (first, round_zero) = fixture.strand_round_zero(1);
     let second = round_zero[1].2.clone();
-    let ranked = fill_in_candidates(&fixture.db, EVENT, &first, 2).unwrap();
+    let ranked = fill_in_candidates(&fixture.db, EVENT, &first, 2, T4).unwrap();
     let busy = ranked[0].participant_id.clone();
     let outcome = assign_fill_in(&fixture.db, EVENT, &first, 2, &busy, None, T4 + 10).unwrap();
     fixture.claim_and_submit(&busy, &outcome.assignment_id, T4 + 20);
-    let ranked = fill_in_candidates(&fixture.db, EVENT, &second, 2).unwrap();
+    let ranked = fill_in_candidates(&fixture.db, EVENT, &second, 2, T4).unwrap();
     assert_eq!(ranked.len(), 2);
     assert_eq!(ranked[0].edits, 0);
     assert_eq!(ranked[1].participant_id, busy);
@@ -761,7 +761,7 @@ fn an_auto_chain_offers_three_people_in_rank_order_then_asks_the_host() {
     let ranked: Vec<String> = {
         skip(&fixture.db, EVENT, &holder, T4 + 1).unwrap();
         let (first, _) = fill_in_offer(&fixture.db, &track).expect("the chain offers at once");
-        let mut rest: Vec<String> = fill_in_candidates(&fixture.db, EVENT, &track, 2)
+        let mut rest: Vec<String> = fill_in_candidates(&fixture.db, EVENT, &track, 2, T4)
             .unwrap()
             .into_iter()
             .map(|candidate| candidate.participant_id)
@@ -1008,14 +1008,14 @@ fn a_person_cannot_take_two_extra_turns_in_the_same_round() {
     let fixture = Fixture::started(10, group_settings());
     let (first_track, round_zero) = fixture.strand_round_zero(1);
     let second_track = round_zero[1].2.clone();
-    let candidates = fill_in_candidates(&fixture.db, EVENT, &first_track, 2).unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &first_track, 2, T4).unwrap();
     let helper = candidates[0].participant_id.clone();
     let outcome =
         assign_fill_in(&fixture.db, EVENT, &first_track, 2, &helper, None, T4 + 10).unwrap();
     fixture.claim_and_submit(&helper, &outcome.assignment_id, T4 + 20);
 
     assert!(
-        fill_in_candidates(&fixture.db, EVENT, &second_track, 2)
+        fill_in_candidates(&fixture.db, EVENT, &second_track, 2, T4)
             .unwrap()
             .iter()
             .all(|candidate| candidate.participant_id != helper),
@@ -1319,8 +1319,66 @@ fn a_reoffer_after_a_pre_claim_skip_can_be_claimed() {
     assert_ne!(first.assignment_id, second.assignment_id);
 }
 
+// scenario: A fill-in re-offer waits for the cooldown
 #[test]
-fn a_reoffer_after_an_expired_fill_in_offer_can_be_claimed() {
+fn a_reoffer_after_an_expired_fill_in_offer_waits_for_the_cooldown() {
+    let fixture = Fixture::started(
+        4,
+        EventSettings {
+            reoffer_after_expiry: ReofferAfterExpiry::AfterCooldown,
+            expiry_protection: ExpiryProtection::None,
+            ..EventSettings::default()
+        },
+    );
+    add_fill_in(&fixture.db, "volunteer");
+    let round_zero = offers(&open_round(&fixture.db, EVENT, 0, T4).unwrap().effects);
+    let (holder, _, track) = round_zero[0].clone();
+    skip(&fixture.db, EVENT, &holder, T4 + 1).unwrap();
+    let first = assign_fill_in(
+        &fixture.db,
+        EVENT,
+        &track,
+        2,
+        "volunteer",
+        Some(T4 + 100),
+        T4 + 2,
+    )
+    .unwrap();
+    tick_deadlines(&fixture.db, T4 + 100).unwrap();
+    assert_eq!(
+        AssignmentRepo::get(fixture.db.conn(), &first.assignment_id)
+            .unwrap()
+            .unwrap()
+            .status,
+        AssignmentStatus::Expired
+    );
+    let early =
+        assign_fill_in(&fixture.db, EVENT, &track, 2, "volunteer", None, T4 + 101).unwrap_err();
+    assert!(matches!(early, EngineError::FillInNotEligible(_)));
+    let second = assign_fill_in(
+        &fixture.db,
+        EVENT,
+        &track,
+        2,
+        "volunteer",
+        None,
+        T4 + 24 * 60 * 60 + 101,
+    )
+    .unwrap();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &second.assignment_id,
+        "volunteer",
+        T4 + 24 * 60 * 60 + 102,
+    )
+    .expect("a pair can come back after the cooldown");
+}
+
+// scenario: The default re-offer rule blocks an expired fill-in pair
+#[test]
+fn the_default_reoffer_rule_blocks_an_expired_fill_in_pair() {
     let fixture = Fixture::started(4, EventSettings::default());
     add_fill_in(&fixture.db, "volunteer");
     let round_zero = offers(&open_round(&fixture.db, EVENT, 0, T4).unwrap().effects);
@@ -1344,17 +1402,17 @@ fn a_reoffer_after_an_expired_fill_in_offer_can_be_claimed() {
             .status,
         AssignmentStatus::Expired
     );
-    let second =
-        assign_fill_in(&fixture.db, EVENT, &track, 2, "volunteer", None, T4 + 101).unwrap();
-    claim(
+    let refused = assign_fill_in(
         &fixture.db,
-        &fixture.store,
         EVENT,
-        &second.assignment_id,
+        &track,
+        2,
         "volunteer",
-        T4 + 102,
+        None,
+        T4 + 10 * 24 * 60 * 60,
     )
-    .expect("an expired offer must not block a later claim");
+    .unwrap_err();
+    assert!(matches!(refused, EngineError::FillInNotEligible(_)));
 }
 
 #[test]
@@ -1476,7 +1534,7 @@ fn a_dedicated_fill_in_respects_the_handoff_cap() {
     .unwrap();
     fixture.claim_and_submit("volunteer", &outcome.assignment_id, T4 + 20);
     assert!(
-        fill_in_candidates(&fixture.db, EVENT, &second_track, 2)
+        fill_in_candidates(&fixture.db, EVENT, &second_track, 2, T4)
             .unwrap()
             .iter()
             .all(|candidate| candidate.participant_id != "volunteer")

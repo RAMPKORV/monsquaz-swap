@@ -143,7 +143,8 @@ export type Decision = {
     | "Schedule"
     | "Delivery"
     | "Seeds"
-    | "Fill-in";
+    | "Fill-in"
+    | "Expiry";
   title: string;
   detail: string;
   due: string;
@@ -156,6 +157,8 @@ export type Decision = {
   extensionsUsed?: number;
   trackCode?: string;
   roundNo?: number;
+  /** The host can re-offer the expired pair (MSW-085). */
+  canReoffer?: boolean;
 };
 
 export type ActivityEntry = {
@@ -281,10 +284,28 @@ export type EventDraft = {
   asyncClaimsPerParticipant: number | null;
   asyncReleaseTime: string;
   asyncLateSeeds: boolean;
+  /** The host IANA zone for the release wall-clock time (MSW-087). */
+  hostTimezone: string;
+  /** `null` disables the claim reminder (MSW-086). */
+  claimReminderHours: number | null;
+  expiryProtection: ExpiryProtection;
+  reofferAfterExpiry: ReofferAfterExpiry;
   fillInWindowHours: number;
   fillInClaimWindowHours: number;
   fillInFlow: "host_appoints" | "auto_chain" | "host_list";
 };
+
+export type ExpiryProtection =
+  | "strike_cooldown"
+  | "cooldown_only"
+  | "host_review"
+  | "none";
+
+export type ReofferAfterExpiry =
+  | "never"
+  | "after_cooldown"
+  | "last_resort"
+  | "host_decides";
 
 export type SetupData = {
   firstRun: boolean;
@@ -306,6 +327,10 @@ export type PersonRow = {
   away: AwayRange[];
   /** The bot asked a participant who left to come back (D-051). */
   restorePending?: boolean;
+  /** Expired offers since the last resume (MSW-084). */
+  expiryStrikes: number;
+  /** The end of the expiry cooldown, in UTC seconds (MSW-084). */
+  cooldownUntil: number | null;
 };
 
 export type AwayRange = {

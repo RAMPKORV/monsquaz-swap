@@ -7,8 +7,8 @@ use std::collections::HashSet;
 
 use swap_plan_check::corpus::{self, CaseKind};
 use swap_plan_check::{
-    Assignment, MAX_ASSIGNMENTS, MAX_PEOPLE, MAX_ROUNDS, MAX_TRACKS, NO_OWNER, PlanInput, Policy,
-    Round, check_plan, verify_hall_certificate,
+    Assignment, HallCertificate, MAX_ASSIGNMENTS, MAX_PEOPLE, MAX_ROUNDS, MAX_TRACKS, NO_OWNER,
+    PlanInput, Policy, Round, check_plan, verify_hall_certificate,
 };
 
 #[test]
@@ -219,4 +219,91 @@ fn round_default_is_empty() {
     let round = Round::default();
     assert_eq!(round.len, 0);
     assert_eq!(round.assignments[0], Assignment::default());
+}
+
+#[test]
+fn corpus_generation_is_bounded_for_small_counts() {
+    for plan_count in [200, 400, 1_000] {
+        let corpus = corpus::generate(plan_count, 600);
+        assert_eq!(corpus.plans.len(), plan_count + 3);
+        assert_eq!(corpus.certs.len(), 600);
+        for cert in &corpus.certs {
+            let plan = &corpus.plans[cert.plan_id].plan;
+            assert!(plan.active_people_len <= MAX_PEOPLE);
+            assert!(plan.active_tracks_len <= MAX_TRACKS);
+            assert!(plan.rounds_len <= MAX_ROUNDS);
+            assert!(cert.cert.tracks_len <= MAX_TRACKS);
+            assert!(cert.cert.neighbors_len <= MAX_PEOPLE);
+            for &track in &cert.cert.tracks[..cert.cert.tracks_len] {
+                assert!((track as usize) < MAX_TRACKS);
+            }
+        }
+    }
+}
+
+#[test]
+fn every_certificate_verdict_matches_the_independent_oracle() {
+    let corpus = corpus::generate(1_200, 600);
+    for cert in &corpus.certs {
+        let plan = &corpus.plans[cert.plan_id].plan;
+        assert_eq!(
+            verify_hall_certificate(plan, &cert.cert),
+            oracle_accepts_certificate(plan, &cert.cert),
+            "certificate {} disagrees with the oracle",
+            cert.id
+        );
+    }
+}
+
+fn oracle_accepts_certificate(input: &PlanInput, cert: &HallCertificate) -> bool {
+    if cert.tracks_len > MAX_TRACKS
+        || cert.neighbors_len > MAX_PEOPLE
+        || cert.round > input.rounds_len
+        || cert.tracks_len == 0
+        || cert.neighbors_len >= cert.tracks_len
+    {
+        return false;
+    }
+    let tracks = &cert.tracks[..cert.tracks_len];
+    let neighbors = &cert.neighbors[..cert.neighbors_len];
+    if tracks.len() != tracks.iter().copied().collect::<HashSet<_>>().len() {
+        return false;
+    }
+    if neighbors.len() != neighbors.iter().copied().collect::<HashSet<_>>().len() {
+        return false;
+    }
+    let active_people = &input.active_people[..input.active_people_len];
+    let active_tracks = &input.active_tracks[..input.active_tracks_len];
+    if tracks
+        .iter()
+        .any(|track| *track as usize >= MAX_TRACKS || !active_tracks.contains(track))
+    {
+        return false;
+    }
+    if neighbors
+        .iter()
+        .any(|person| *person as usize >= MAX_PEOPLE || !active_people.contains(person))
+    {
+        return false;
+    }
+    let neighbor_set: HashSet<u16> = neighbors.iter().copied().collect();
+    for &track in tracks {
+        for &participant in active_people {
+            if participant != input.owners[track as usize]
+                && !seen_before_round(input, cert.round, participant, track)
+                && !neighbor_set.contains(&participant)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn seen_before_round(input: &PlanInput, round: usize, participant: u16, track: u16) -> bool {
+    input.rounds[..round.min(MAX_ROUNDS)].iter().any(|round| {
+        round.assignments[..round.len]
+            .iter()
+            .any(|assignment| assignment.participant == participant && assignment.track == track)
+    })
 }

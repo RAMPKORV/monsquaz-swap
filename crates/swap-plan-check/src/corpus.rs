@@ -61,11 +61,14 @@ pub enum CaseKind {
     DuplicateActiveTrack,
     HallInfeasible,
     Capacity,
+    RoundLenOverflow,
+    ActivePeopleOverflow,
+    ActiveTracksOverflow,
 }
 
 impl CaseKind {
     /// Every kind, in a stable order.
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 22] = [
         Self::ValidStrict,
         Self::ValidFlexible,
         Self::RepeatedPair,
@@ -85,6 +88,9 @@ impl CaseKind {
         Self::DuplicateActiveTrack,
         Self::HallInfeasible,
         Self::Capacity,
+        Self::RoundLenOverflow,
+        Self::ActivePeopleOverflow,
+        Self::ActiveTracksOverflow,
     ];
 
     /// A short label for the report.
@@ -109,6 +115,9 @@ impl CaseKind {
             Self::DuplicateActiveTrack => "duplicate_active_track",
             Self::HallInfeasible => "hall_infeasible",
             Self::Capacity => "capacity",
+            Self::RoundLenOverflow => "round_len_overflow",
+            Self::ActivePeopleOverflow => "active_people_overflow",
+            Self::ActiveTracksOverflow => "active_tracks_overflow",
         }
     }
 }
@@ -185,108 +194,120 @@ pub fn generate(plan_count: usize, cert_count: usize) -> Corpus {
         kind: CaseKind::ValidStrict,
         plan: cyclic_plan(4, Policy::Strict),
     });
-    let fixture_zero_rounds = plans.len();
-    plans.push(GeneratedPlan {
-        id: fixture_zero_rounds,
-        kind: CaseKind::HallInfeasible,
-        plan: fixture_three_people_four_tracks(),
-    });
-    let fixture_two_three_alt = plans.len();
-    plans.push(GeneratedPlan {
-        id: fixture_two_three_alt,
-        kind: CaseKind::HallInfeasible,
-        plan: fixture_two_people_three_tracks(),
-    });
-
     let mut certs = Vec::with_capacity(cert_count);
     for index in 0..cert_count {
-        let cert = match index % 12 {
-            0 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2]),
-                tracks_len: 3,
-                neighbors: array_people(&[0, 1]),
-                neighbors_len: 2,
-            },
-            1 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2, 3]),
-                tracks_len: 4,
-                neighbors: array_people(&[0, 1, 2]),
-                neighbors_len: 3,
-            },
-            2 => HallCertificate {
-                round: 3,
-                tracks: array_tracks(&[0]),
-                tracks_len: 1,
-                neighbors: array_people(&[]),
-                neighbors_len: 0,
-            },
-            3 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2]),
-                tracks_len: 3,
-                neighbors: array_people(&[0]),
-                neighbors_len: 1,
-            },
-            4 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1]),
-                tracks_len: 2,
-                neighbors: array_people(&[0, 1]),
-                neighbors_len: 2,
-            },
-            5 => HallCertificate {
-                round: 1,
-                tracks: array_tracks(&[0]),
-                tracks_len: 1,
-                neighbors: array_people(&[]),
-                neighbors_len: 0,
-            },
-            6 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 0]),
-                tracks_len: 2,
-                neighbors: array_people(&[1]),
-                neighbors_len: 1,
-            },
-            7 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2]),
-                tracks_len: 3,
-                neighbors: array_people(&[0, 0]),
-                neighbors_len: 2,
-            },
-            8 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 13]),
-                tracks_len: 3,
-                neighbors: array_people(&[0, 1]),
-                neighbors_len: 2,
-            },
-            9 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2]),
-                tracks_len: 3,
-                neighbors: array_people(&[0, 7]),
-                neighbors_len: 2,
-            },
-            10 => HallCertificate {
-                round: 0,
-                tracks: array_tracks(&[0, 1, 2, 3]),
-                tracks_len: 4,
-                neighbors: array_people(&[0, 1]),
-                neighbors_len: 2,
-            },
+        let (cert, plan_id) = match index % 12 {
+            0 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2]),
+                    tracks_len: 3,
+                    neighbors: array_people(&[0, 1]),
+                    neighbors_len: 2,
+                },
+                fixture_two_three,
+            ),
+            1 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2, 3]),
+                    tracks_len: 4,
+                    neighbors: array_people(&[0, 1, 2]),
+                    neighbors_len: 3,
+                },
+                fixture_three_four,
+            ),
+            2 => (
+                HallCertificate {
+                    round: 3,
+                    tracks: array_tracks(&[0]),
+                    tracks_len: 1,
+                    neighbors: array_people(&[]),
+                    neighbors_len: 0,
+                },
+                fixture_full_four,
+            ),
+            3 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2]),
+                    tracks_len: 3,
+                    neighbors: array_people(&[0]),
+                    neighbors_len: 1,
+                },
+                fixture_two_three,
+            ),
+            4 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1]),
+                    tracks_len: 2,
+                    neighbors: array_people(&[0, 1]),
+                    neighbors_len: 2,
+                },
+                fixture_two_three,
+            ),
+            5 => (
+                HallCertificate {
+                    round: 1,
+                    tracks: array_tracks(&[0]),
+                    tracks_len: 1,
+                    neighbors: array_people(&[]),
+                    neighbors_len: 0,
+                },
+                fixture_two_three,
+            ),
+            6 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 0]),
+                    tracks_len: 2,
+                    neighbors: array_people(&[1]),
+                    neighbors_len: 1,
+                },
+                fixture_two_three,
+            ),
+            7 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2]),
+                    tracks_len: 3,
+                    neighbors: array_people(&[0, 0]),
+                    neighbors_len: 2,
+                },
+                fixture_two_three,
+            ),
+            8 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 13]),
+                    tracks_len: 3,
+                    neighbors: array_people(&[0, 1]),
+                    neighbors_len: 2,
+                },
+                fixture_three_four,
+            ),
+            9 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2]),
+                    tracks_len: 3,
+                    neighbors: array_people(&[0, 7]),
+                    neighbors_len: 2,
+                },
+                fixture_three_four,
+            ),
+            10 => (
+                HallCertificate {
+                    round: 0,
+                    tracks: array_tracks(&[0, 1, 2, 3]),
+                    tracks_len: 4,
+                    neighbors: array_people(&[0, 1]),
+                    neighbors_len: 2,
+                },
+                fixture_three_four,
+            ),
             _ => random_certificate(&plans, &mut rng),
-        };
-        let plan_id = match index % 12 {
-            0 | 3 => fixture_two_three,
-            1 | 10 => fixture_three_four,
-            2 => fixture_full_four,
-            4..=7 => fixture_two_three_alt,
-            8 | 9 => fixture_three_four,
-            _ => cert_plan_id(&plans, &cert),
         };
         certs.push(GeneratedCert {
             id: index,
@@ -295,40 +316,17 @@ pub fn generate(plan_count: usize, cert_count: usize) -> Corpus {
         });
     }
 
-    // The random certificates may use a plan that does not have enough
-    // rounds. Keep the certificate and the plan pair honest.
-    for cert in &mut certs {
-        let plan = &plans[cert.plan_id].plan;
-        if cert.cert.round > plan.rounds_len {
-            cert.cert.round = plan.rounds_len;
-        }
-    }
-
-    let _ = fixture_zero_rounds;
     Corpus { plans, certs }
 }
 
-fn cert_plan_id(plans: &[GeneratedPlan], cert: &HallCertificate) -> usize {
-    // The random certificate is built for the plan that has the needed active
-    // tracks. Search for the first plan that can host it.
-    for plan in plans {
-        if plan.plan.rounds_len >= cert.round {
-            let active = &plan.plan.active_tracks[..plan.plan.active_tracks_len];
-            if cert.tracks[..cert.tracks_len]
-                .iter()
-                .all(|track| active.contains(track))
-            {
-                return plan.id;
-            }
-        }
-    }
-    plans.len().saturating_sub(1)
-}
-
-fn random_certificate(plans: &[GeneratedPlan], rng: &mut Rng) -> HallCertificate {
+fn random_certificate(plans: &[GeneratedPlan], rng: &mut Rng) -> (HallCertificate, usize) {
     let candidates: Vec<&GeneratedPlan> = plans
         .iter()
-        .filter(|plan| plan.plan.active_tracks_len > 0 && plan.plan.active_people_len > 0)
+        .filter(|plan| {
+            check_plan(&plan.plan).is_ok()
+                && plan.plan.active_tracks_len > 0
+                && plan.plan.active_people_len > 0
+        })
         .collect();
     let plan = candidates[rng.below(candidates.len())];
     let round = rng.below(plan.plan.rounds_len.min(MAX_ROUNDS) + 1);
@@ -337,9 +335,25 @@ fn random_certificate(plans: &[GeneratedPlan], rng: &mut Rng) -> HallCertificate
     let mut tracks = [0u16; MAX_TRACKS];
     let mut tracks_len = 0;
     let mut chosen = BTreeSet::new();
-    while tracks_len < subset_len {
-        let track = active_tracks[rng.below(active_tracks.len())];
+    let mut attempts = 0usize;
+    let attempt_limit = subset_len * active_tracks.len() + MAX_TRACKS;
+    while tracks_len < subset_len && attempts < attempt_limit {
+        attempts += 1;
+        let index = rng.below(active_tracks.len());
+        let track = active_tracks[index];
+        if track as usize >= MAX_TRACKS {
+            continue;
+        }
         if chosen.insert(track) {
+            tracks[tracks_len] = track;
+            tracks_len += 1;
+        }
+    }
+    for &track in active_tracks {
+        if tracks_len >= subset_len {
+            break;
+        }
+        if (track as usize) < MAX_TRACKS && chosen.insert(track) {
             tracks[tracks_len] = track;
             tracks_len += 1;
         }
@@ -352,7 +366,7 @@ fn random_certificate(plans: &[GeneratedPlan], rng: &mut Rng) -> HallCertificate
             plan.plan.owners[track as usize] != *participant
                 && !seen_before(&plan.plan, round, *participant, track)
         });
-        if eligible {
+        if eligible && neighbors_len < MAX_PEOPLE {
             neighbors[neighbors_len] = *participant;
             neighbors_len += 1;
         }
@@ -361,13 +375,16 @@ fn random_certificate(plans: &[GeneratedPlan], rng: &mut Rng) -> HallCertificate
     if neighbors_len >= tracks_len && neighbors_len > 0 {
         neighbors_len -= 1;
     }
-    HallCertificate {
-        round,
-        tracks,
-        tracks_len,
-        neighbors,
-        neighbors_len,
-    }
+    (
+        HallCertificate {
+            round,
+            tracks,
+            tracks_len,
+            neighbors,
+            neighbors_len,
+        },
+        plan.id,
+    )
 }
 
 fn seen_before(input: &PlanInput, round: usize, participant: u16, track: u16) -> bool {
@@ -456,6 +473,15 @@ fn make_plan(kind: CaseKind, people: usize, rng: &mut Rng) -> PlanInput {
         }
         CaseKind::Capacity => {
             plan.rounds_len = MAX_ROUNDS + 1;
+        }
+        CaseKind::RoundLenOverflow => {
+            plan.rounds[0].len = MAX_ASSIGNMENTS + 1;
+        }
+        CaseKind::ActivePeopleOverflow => {
+            plan.active_people_len = MAX_PEOPLE + 1;
+        }
+        CaseKind::ActiveTracksOverflow => {
+            plan.active_tracks_len = MAX_TRACKS + 1;
         }
     }
     plan
@@ -556,11 +582,11 @@ pub fn write_corpus(corpus: &Corpus, corpus_path: &Path, expected_path: &Path) -
             input.active_people_len
         )
         .unwrap();
-        for value in &input.active_people[..input.active_people_len] {
+        for value in &input.active_people[..input.active_people_len.min(MAX_PEOPLE)] {
             write!(text, " {value}").unwrap();
         }
         write!(text, " {}", input.active_tracks_len).unwrap();
-        for value in &input.active_tracks[..input.active_tracks_len] {
+        for value in &input.active_tracks[..input.active_tracks_len.min(MAX_TRACKS)] {
             write!(text, " {value}").unwrap();
         }
         for value in &input.owners {

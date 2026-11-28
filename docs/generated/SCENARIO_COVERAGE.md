@@ -2,12 +2,12 @@
 
 > <!-- GENERATED FILE — run `node scripts/trace-scenarios.mjs`; do not edit by hand. -->
 
-Total: 171 scenarios. Mapped: 47. Pending: 116. Exempt: 8.
+Total: 171 scenarios. Mapped: 46. Pending: 117. Exempt: 8.
 
 | Feature | Scenarios | Mapped | Pending | Exempt |
 |---|---|---|---|---|
 | `anonymity.feature` | 14 | 4 | 10 | 0 |
-| `async_queue.feature` | 17 | 4 | 13 | 0 |
+| `async_queue.feature` | 17 | 3 | 14 | 0 |
 | `core_invariants.feature` (cucumber) | 3 | 3 | 0 | 0 |
 | `deadlines_and_extensions.feature` | 14 | 3 | 11 | 0 |
 | `delivery.feature` | 10 | 3 | 7 | 0 |
@@ -47,6 +47,7 @@ Total: 171 scenarios. Mapped: 47. Pending: 116. Exempt: 8.
 - The release time keeps its wall-clock time across a DST change (pending)
 - The second expiry pauses the participant and alerts the host (pending)
 - A resume resets the expiry strikes (pending)
+- Exposure completeness is reported, not forced (pending)
 - A small async event uses N-1 rounds (pending)
 - A large async event uses a capped length (pending)
 - An async claimed deadline miss counts as seen (pending)

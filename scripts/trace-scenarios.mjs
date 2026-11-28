@@ -241,8 +241,12 @@ function main(argv) {
   console.log(
     `scenarios: ${result.rows.length} total, ${count("mapped")} mapped, ${count("pending")} pending, ${count("exempt")} exempt`,
   );
-  if (check && existsSync(join(root, REPORT)) && readFileSync(join(root, REPORT), "utf8") !== report) {
-    errors.push(`${REPORT} is stale; run node scripts/trace-scenarios.mjs`);
+  if (check) {
+    if (!existsSync(join(root, REPORT))) {
+      errors.push(`${REPORT} is missing; run node scripts/trace-scenarios.mjs`);
+    } else if (readFileSync(join(root, REPORT), "utf8") !== report) {
+      errors.push(`${REPORT} is stale; run node scripts/trace-scenarios.mjs`);
+    }
   }
   for (const error of errors) console.error(`trace: ${error}`);
   return errors.length === 0 ? 0 : 1;

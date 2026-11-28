@@ -803,7 +803,6 @@ mod tests {
         assert!(!schedule.fallback);
     }
 
-    // scenario: The host chooses a schedule strategy
     #[test]
     fn every_strategy_is_valid() {
         for strategy in [
@@ -906,7 +905,6 @@ mod tests {
         assert_eq!(schedule.assignments.len(), 6);
     }
 
-    // scenario: The host chooses a schedule strategy
     #[test]
     fn the_same_seed_produces_the_same_schedule() {
         let people = people(8);
@@ -1031,7 +1029,6 @@ mod tests {
         }
     }
 
-    // scenario: The host chooses a schedule strategy
     #[test]
     fn balanced_keeps_repeated_handoffs_at_least_as_low_as_random() {
         let people = people(8);

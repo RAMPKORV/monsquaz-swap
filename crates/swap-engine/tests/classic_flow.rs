@@ -684,6 +684,85 @@ fn too_many_rounds_are_refused() {
     ));
 }
 
+// scenario: The host chooses a schedule strategy
+#[test]
+fn the_event_scheduler_setting_selects_each_strategy_and_keeps_the_plan_valid() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn repeated_handoffs(assignments: &[swap_db::PlanAssignmentRecord]) -> u32 {
+        let mut turns: BTreeMap<&str, Vec<(u32, &str)>> = BTreeMap::new();
+        for assignment in assignments {
+            turns
+                .entry(assignment.track_code.as_str())
+                .or_default()
+                .push((assignment.round, assignment.participant_id.as_str()));
+        }
+        let mut pairs: BTreeMap<(&str, &str), u32> = BTreeMap::new();
+        for track_turns in turns.values_mut() {
+            track_turns.sort_by_key(|(round, _)| *round);
+            for pair in track_turns.windows(2) {
+                let (left, right) = (pair[0].1, pair[1].1);
+                let key = if left <= right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                *pairs.entry(key).or_default() += 1;
+            }
+        }
+        pairs.values().map(|count| count.saturating_sub(1)).sum()
+    }
+
+    let mut plans = Vec::new();
+    for strategy in ["balanced", "random_matching", "cyclic"] {
+        let settings = EventSettings {
+            rounds: Some(7),
+            scheduler: Some(strategy.to_string()),
+            ..EventSettings::default()
+        };
+        let fixture = Fixture::with_settings(8, 0, settings.clone());
+        fixture.lock_roster_only();
+        let first = generate_schedule(&fixture.db, EVENT, T2).unwrap();
+        assert_eq!(first.rounds, 7);
+        let owners: BTreeMap<String, String> = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .into_iter()
+            .map(|track| (track.code, track.owner_id))
+            .collect();
+        let mut seen: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for round in 0..7 {
+            let mut people = BTreeSet::new();
+            let mut tracks = BTreeSet::new();
+            for assignment in first.assignments.iter().filter(|item| item.round == round) {
+                assert!(people.insert(assignment.participant_id.as_str()));
+                assert!(tracks.insert(assignment.track_code.as_str()));
+                assert_ne!(
+                    owners.get(assignment.track_code.as_str()),
+                    Some(&assignment.participant_id)
+                );
+                assert!(
+                    seen.entry(assignment.participant_id.as_str())
+                        .or_default()
+                        .insert(assignment.track_code.as_str())
+                );
+            }
+            assert_eq!(people.len(), 8);
+            assert_eq!(tracks.len(), 8);
+        }
+        let again_fixture = Fixture::with_settings(8, 0, settings);
+        again_fixture.lock_roster_only();
+        let again = generate_schedule(&again_fixture.db, EVENT, T2).unwrap();
+        assert_eq!(first.assignments, again.assignments);
+        plans.push(first.assignments);
+    }
+    let balanced = repeated_handoffs(&plans[0]);
+    let random = repeated_handoffs(&plans[1]);
+    assert!(
+        balanced <= random,
+        "balanced {balanced} vs random {random} repeated handoffs"
+    );
+}
+
 #[test]
 fn a_replacement_draft_uses_a_new_seed() {
     let fixture = Fixture::new(8, 0);
@@ -1986,7 +2065,6 @@ fn manual_edit_rejects_a_stale_plan_version_after_start_or_with_paused_people() 
     ));
 }
 
-// scenario: Locking the schedule publishes a commitment
 #[test]
 fn manual_edit_rejects_an_incomplete_plan_and_a_started_event() {
     use swap_engine::edit_plan_assignment;
@@ -2256,6 +2334,7 @@ fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
     }));
 }
 
+// scenario: Locking the schedule publishes a commitment
 // scenario: A commitment does not publish a file hash
 #[test]
 fn locking_the_schedule_publishes_the_latest_commitment() {
@@ -3601,7 +3680,6 @@ fn async_fixture(settings: EventSettings) -> Fixture {
     fixture
 }
 
-// scenario: Exposure completeness is reported, not forced
 #[test]
 fn async_coverage_reports_exposed_pairs_and_expired_gaps() {
     let fixture = async_fixture(EventSettings {

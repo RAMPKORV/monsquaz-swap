@@ -87,6 +87,7 @@ Feature: Async per-person queue
     When the participant resumes
     Then the participant has zero expiry strikes
 
+  @pending
   Scenario: Exposure completeness is reported, not forced
     Given an async event with a 6-round cap and 20 participants
     When the event ends

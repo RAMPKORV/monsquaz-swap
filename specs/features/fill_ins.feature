@@ -56,16 +56,16 @@ Feature: Skips and fill-ins
     When the slot needs a fill-in
     Then the bot offers the track to the fill-in with the fewest edits
     And each offer gets the fill-in claim window to claim
-    And the bot offers the track to the next fill-in after a decline or an expiry
+    And the bot offers the track to the next fill-in after a skip or an expiry
     And the first claim wins
     And the bot makes at most 3 offers before the host decides
 
   Scenario: The automatic chain moves from tier 1 to tier 2
     Given the fill-in flow is auto_chain
     And two dedicated fill-ins and one eligible extra turn
-    When both dedicated fill-ins decline the offer
+    When both dedicated fill-ins skip the offer
     Then the bot offers the track to the eligible extra turn
-    When the extra turn declines the offer
+    When the extra turn skips the offer
     Then the app opens a host decision
 
   Scenario: A chain offer has a separate claim and edit window

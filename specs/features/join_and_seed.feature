@@ -207,7 +207,7 @@ Feature: Joining and seeding
   Scenario: The host restore needs the consent of the person
     Given a participant who left the event
     When the host restores the participant and confirms two times
-    Then the bot sends one DM with Confirm and Decline buttons
+    Then the bot sends one DM with "Confirm" and "Decline" buttons
     And the participant stays left until the participant presses Confirm
 
   @leave
@@ -219,7 +219,7 @@ Feature: Joining and seeding
 
   @leave
   Scenario: A declined restore keeps the participant out
-    Given a participant who pressed Decline on the restore DM
+    Given a participant who pressed "Decline" on the restore DM
     Then the participant stays left
     And the bot sends no DMs unless the host asks again
 

@@ -218,9 +218,9 @@ Rules:
 
 Rules:
 
-- A slot needs a fill-in after a pre-claim skip, a skip after a claim, an
-  offer that is unclaimed at the deadline, or a turn that the host marks
-  missed.
+- A slot needs a fill-in after a pre-claim skip or a skip after a claim. It
+  also needs one after an unclaimed offer at the deadline, or after a turn
+  that the host marks missed.
 - Tier 1 is a dedicated fill-in: a volunteer, or a signup without a seed at
   roster lock. The handoff cap applies to a dedicated fill-in.
 - Tier 2 is a seeded participant who submitted their own turn in the current
@@ -235,8 +235,8 @@ Rules:
   handoff cap of the participant. The reveal marks the turn as a fill-in.
 - The app ranks the people in one tier by fewest edits, then by a stable
   hash of the event, the track, and the person.
-- `host_appoints`: the host picks one eligible person. A decline or an expiry
-  of that offer opens a host decision with the next eligible people.
+- `host_appoints`: the host selects one eligible person. A skip or an expiry
+  of that offer opens a host decision that lists the next eligible people.
 - `auto_chain`: the bot offers the slot to one ranked eligible person at a
   time. The chain walks every eligible tier in rank order. Tier 1 comes first
   and tier 2 comes next (D-064). The first claim wins. After 3 offers, the bot

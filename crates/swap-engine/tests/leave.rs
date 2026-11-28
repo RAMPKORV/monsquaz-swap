@@ -8,14 +8,15 @@ use swap_db::{
     PackRepo, ParticipantRepo, PlanAssignmentRecord, PlanRepo, SeenRepo, TrackRepo,
 };
 use swap_discord::{
-    Action, CustomId, DiscordUserId, FakeAttachmentFetcher, FakeDiscord, InboundEvent,
-    InteractionRef, SlashCommand,
+    Action, CustomId, DiscordChannelId, DiscordUserId, DmAttachment, FakeAttachmentFetcher,
+    FakeDiscord, InboundEvent, InteractionRef, MessageId, SlashCommand,
 };
 use swap_engine::{
     Effect, EngineError, EventSettings, FillInFlow, FixedClock, InboundService, JoinRequest,
     LEAVE_CONFIRM_SECS, LeaveActor, PassthroughPreparer, SubmitRequest, answer_restore, claim,
     create_event_with_secret, generate_schedule, join_with_seed, leave_event, lock_roster,
-    open_round, open_seed_round, request_restore, start_event, submit, tick_deadlines,
+    open_round, open_seed_round, request_restore, reveal_package, start_event, submit,
+    tick_deadlines,
 };
 use swap_files::BlobStore;
 
@@ -166,6 +167,7 @@ fn offers(effects: &[Effect]) -> Vec<(String, String, String)> {
         .collect()
 }
 
+// scenario: A participant leaves while holding a track
 #[test]
 fn a_leave_skips_a_claimed_track_as_seen_and_returns_it_unchanged() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -222,6 +224,7 @@ fn a_leave_skips_a_claimed_track_as_seen_and_returns_it_unchanged() {
     assert_eq!(fixture.membership(&leaver), Membership::Left);
 }
 
+// scenario: A leave before a claim does not count as seen
 #[test]
 fn a_leave_before_a_claim_is_not_seen() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -237,6 +240,7 @@ fn a_leave_before_a_claim_is_not_seen() {
     assert!(!SeenRepo::has(fixture.db.conn(), EVENT, &track, &leaver).unwrap());
 }
 
+// scenario: A leaver gets no more event DMs
 #[test]
 fn a_leave_cancels_every_queued_dm_and_writes_an_audit_entry() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -276,6 +280,7 @@ fn no_dm_is_queued_for_a_leaver_after_the_leave() {
     assert!(fixture.pending_for(&leaver).is_empty());
 }
 
+// scenario: A leave starts the fill-in flow
 #[test]
 fn a_leave_starts_the_fill_in_flow_and_alerts_the_host() {
     let settings = EventSettings {
@@ -311,6 +316,7 @@ fn a_leave_starts_the_fill_in_flow_and_alerts_the_host() {
     assert!(!alerts.is_empty(), "the host gets an alert");
 }
 
+// scenario: Future planned turns of a leaver become gaps
 #[test]
 fn a_round_open_skips_the_planned_turn_of_a_leaver_as_a_gap() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -352,6 +358,7 @@ fn a_second_leave_is_refused() {
 
 /// D-051 rule 4: a seed from a person who left before the roster lock keeps
 /// circulating. The plan has one track more than people.
+// scenario: A seed stays when the owner leaves before the roster lock
 #[test]
 fn a_seed_from_a_pre_lock_leaver_keeps_circulating() {
     let mut fixture = Fixture::seeded(5, EventSettings::default());
@@ -391,6 +398,8 @@ fn a_seed_from_a_pre_lock_leaver_keeps_circulating() {
     assert_eq!(round_zero.len(), 4);
 }
 
+// scenario: A declined restore keeps the participant out
+// scenario: The host restore needs the consent of the person
 #[test]
 fn a_restore_needs_the_persons_consent() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -435,6 +444,7 @@ fn a_restore_is_only_for_a_person_who_left() {
     ));
 }
 
+// scenario: A confirmed restore starts at the next round
 #[test]
 fn a_restored_person_gets_planned_turns_from_the_next_round() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -506,6 +516,7 @@ fn button(user_id: &str, custom_id: &str) -> InboundEvent {
     }
 }
 
+// scenario: The leave command shows a warning first
 #[tokio::test]
 async fn the_leave_command_shows_a_warning_and_changes_nothing() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -533,6 +544,7 @@ async fn the_leave_command_shows_a_warning_and_changes_nothing() {
     );
 }
 
+// scenario: The Leave button shows the same warning
 #[tokio::test]
 async fn the_leave_button_on_a_dm_shows_the_same_warning() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -594,6 +606,7 @@ async fn a_confirm_within_15_minutes_leaves_without_a_dm() {
     assert!(discord.sent_files().is_empty());
 }
 
+// scenario: An expired confirmation does nothing
 #[tokio::test]
 async fn an_expired_confirmation_does_nothing_and_says_so() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -624,6 +637,7 @@ async fn an_expired_confirmation_does_nothing_and_says_so() {
     assert!(replies[0].reply.content.contains("expired"));
 }
 
+// scenario: A leaver gets an ephemeral answer to a command
 #[tokio::test]
 async fn a_leaver_gets_an_ephemeral_answer_and_no_dm_for_other_commands() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -648,6 +662,7 @@ async fn a_leaver_gets_an_ephemeral_answer_and_no_dm_for_other_commands() {
     assert!(replies[0].reply.content.contains("left"));
 }
 
+// scenario: A DM with a file or a prompt carries a Leave button
 #[tokio::test]
 async fn an_offer_dm_and_a_track_file_carry_a_leave_button() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -759,6 +774,7 @@ fn a_restore_keeps_a_paused_person_paused() {
     );
 }
 
+// scenario: A restore in schedule review voids the draft plan
 #[test]
 fn a_restore_in_schedule_review_invalidates_the_draft_plan() {
     let mut fixture = Fixture::seeded(4, EventSettings::default());
@@ -797,6 +813,7 @@ fn a_restore_in_schedule_review_invalidates_the_draft_plan() {
     );
 }
 
+// scenario: A restore invitation expires after 7 days
 #[test]
 fn a_restore_invitation_expires_after_seven_days() {
     let fixture = Fixture::started(3, EventSettings::default());
@@ -840,4 +857,79 @@ fn a_new_restore_request_replaces_an_expired_pending_invitation() {
             .iter()
             .any(|(_, action)| action == "Restore expired")
     );
+}
+
+
+// scenario: The host marks a participant as left
+#[test]
+fn the_host_marks_a_participant_as_left() {
+    let fixture = Fixture::started(3, EventSettings::default());
+    leave_event(&fixture.db, EVENT, &user(0), LeaveActor::Host, T4).unwrap();
+    assert_eq!(fixture.membership(&user(0)), Membership::Left);
+    assert!(fixture
+        .audit_actions()
+        .contains(&("Host".to_string(), "Participant left".to_string())));
+}
+
+// scenario: A leaver keeps past credits
+#[test]
+fn a_leaver_keeps_past_credits() {
+    let fixture = Fixture::started(4, EventSettings::default());
+    let round_zero = offers(&open_round(&fixture.db, EVENT, 0, T4).unwrap().effects);
+    let (leaver, assignment_id, track) = round_zero[0].clone();
+    for (user_id, assignment_id, _) in &round_zero {
+        fixture.claim_and_submit(user_id, assignment_id, T4 + 1);
+    }
+    assert_eq!(assignment_id, round_zero[0].1);
+    leave_event(&fixture.db, EVENT, &leaver, LeaveActor::Host, T4 + 2).unwrap();
+    let package = reveal_package(&fixture.db, EVENT).unwrap();
+    let credits = &package
+        .album
+        .iter()
+        .find(|entry| entry.track_code == track)
+        .unwrap()
+        .credits;
+    assert!(credits
+        .iter()
+        .any(|credit| credit.participant_id == leaver));
+}
+
+// scenario: A leaver who sends a file gets one direct answer
+#[tokio::test]
+async fn a_leaver_who_sends_a_file_gets_one_direct_answer() {
+    let fixture = Fixture::started(3, EventSettings::default());
+    leave_event(
+        &fixture.db,
+        EVENT,
+        &user(0),
+        LeaveActor::Participant,
+        T4,
+    )
+    .unwrap();
+    let discord = Arc::new(FakeDiscord::new());
+    let (service, _db) = service(fixture.db, fixture.store, discord.clone(), T4 + 1);
+    service
+        .process(InboundEvent::DmAttachment {
+            user_id: DiscordUserId::new(user(0)),
+            channel_id: DiscordChannelId::new("dm-1"),
+            message_id: MessageId::new("m-leaver"),
+            author_name: None,
+            attachment: DmAttachment {
+                id: "a-leaver".to_string(),
+                filename: "late.it".to_string(),
+                size: 8,
+                url: "https://cdn.discordapp.com/attachments/1/2/late.it".to_string(),
+            },
+        })
+        .await
+        .unwrap();
+    service.drain_pending().await.unwrap();
+    let dms: Vec<_> = discord
+        .sent_dms()
+        .into_iter()
+        .filter(|dm| dm.user_id == DiscordUserId::new(user(0)))
+        .collect();
+    assert_eq!(dms.len(), 1);
+    assert!(dms[0].message.content.contains("left this event"));
+    assert!(discord.sent_files().is_empty());
 }

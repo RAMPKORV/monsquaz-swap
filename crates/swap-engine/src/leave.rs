@@ -375,6 +375,7 @@ mod tests {
         assert!(leave_confirm_expired(None, 1000));
     }
 
+    // scenario: The warning states every consequence
     #[test]
     fn the_warning_states_every_consequence() {
         for phrase in [

@@ -139,8 +139,8 @@ def repo_config() -> dict:
         "project": {"name": name, "slug": name.lower(), "prefix": prefix,
                     "kind": "generic", "description": ""},
         "paths": {
-            "prd": "docs/PRD.md", "decisions": "docs/DECISIONS.md",
-            "status": "docs/STATUS.md", "features": "tests/features",
+            "prd": "docs/PRD.md", "status": "docs/STATUS.md",
+            "features": "tests/features",
             "dump": "project/ledger/current.jsonl",
         },
         "workflow": {"review_bar": 8, "ceremony_default": "standard",
@@ -876,35 +876,6 @@ def render_prd(con) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def render_decisions(con) -> str:
-    rows = all_rows(con, "SELECT * FROM decision ORDER BY code")
-    out = [f"# Decision log — {project_name()}", "", f"> {GENERATED_MARKER}", ""]
-    if not rows:
-        out.append("_No decisions recorded yet._")
-        return "\n".join(out).rstrip() + "\n"
-    out += ["| Code | Title | Status | Date |", "|---|---|---|---|"]
-    for d in rows:
-        out.append(f"| `{d['code']}` | {d['title']} | {d['status']} | {(d['decided_at'] or '')[:10]} |")
-    out.append("")
-    for d in rows:
-        out += [f"## `{d['code']}` — {d['title']}", "",
-                f"- **Status:** {d['status']}",
-                f"- **Decided by:** {d['decided_by'] or 'unknown'} · **Date:** {(d['decided_at'] or '')[:10]}"]
-        if d.get("prd_section_key"):
-            out.append(f"- **PRD section:** `{d['prd_section_key']}`")
-        if d.get("supersedes_id"):
-            old = one(con, "SELECT code FROM decision WHERE id=?", (d["supersedes_id"],))
-            if old:
-                out.append(f"- **Supersedes:** `{old['code']}`")
-        if d.get("revisit_trigger"):
-            out.append(f"- **Revisit trigger:** {d['revisit_trigger']}")
-        for label, field in (("Context", "context_md"), ("Decision", "decision_md"), ("Consequences", "consequences_md")):
-            if d.get(field):
-                out += ["", f"### {label}", "", d[field]]
-        out.append("")
-    return "\n".join(out).rstrip() + "\n"
-
-
 def render_features(con) -> dict[str, str]:
     reqs = all_rows(con, "SELECT * FROM requirement WHERE status IN ('active','proposed') ORDER BY key")
     out = {}
@@ -1045,7 +1016,6 @@ def generated_files(paths: list[Path], manifest: Path):
 def do_export(write_status: bool = True) -> dict:
     paths_cfg = repo_config().get("paths", {})
     prd_path = repo_path(paths_cfg.get("prd", "docs/PRD.md"))
-    dec_path = repo_path(paths_cfg.get("decisions", "docs/DECISIONS.md"))
     status_path = repo_path(paths_cfg.get("status", "docs/STATUS.md"))
     feat_dir = repo_path(paths_cfg.get("features", "tests/features"))
     dump_path = repo_path(paths_cfg.get("dump", "project/ledger/current.jsonl"))
@@ -1059,11 +1029,9 @@ def do_export(write_status: bool = True) -> dict:
     try:
         con.execute("BEGIN")
         prd = render_prd(con)
-        decisions = render_decisions(con)
         features = render_features(con)
         status = render_status(con)
         atomic_write(prd_path, prd, read_only=True)
-        atomic_write(dec_path, decisions, read_only=True)
         if write_status:
             atomic_write(status_path, status, read_only=True)
         feat_dir.mkdir(parents=True, exist_ok=True)
@@ -1095,7 +1063,7 @@ def do_export(write_status: bool = True) -> dict:
         atomic_write(dump_path, dump_text, read_only=True)
         atomic_write(dump_path.with_suffix(dump_path.suffix + ".sha256"), dump_hash + "\n", read_only=True)
         con.rollback()
-        return {"prd": str(prd_path), "decisions": str(dec_path), "status": str(status_path),
+        return {"prd": str(prd_path), "status": str(status_path),
                 "features": new_rel, "dump": str(dump_path), "dump_sha256": dump_hash}
     finally:
         con.close()
@@ -1108,7 +1076,6 @@ def check_export() -> list[str]:
     try:
         expected = {
             repo_path(cfg.get("prd", "docs/PRD.md")): render_prd(con),
-            repo_path(cfg.get("decisions", "docs/DECISIONS.md")): render_decisions(con),
             repo_path(cfg.get("status", "docs/STATUS.md")): render_status(con),
         }
         for p, text in expected.items():

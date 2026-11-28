@@ -38,7 +38,7 @@ def worktrees_dir() -> core.Path:
     return core.workspace_root() / "worktrees"
 
 
-GENERATED_PREFIXES = ("docs/PRD.md", "docs/DECISIONS.md", "docs/STATUS.md",
+GENERATED_PREFIXES = ("docs/PRD.md", "docs/STATUS.md",
                       "tests/features/", "project/ledger/")
 
 

@@ -63,5 +63,11 @@ class ReviewGateTest(unittest.TestCase):
         )
 
 
+class ExportConfigTest(unittest.TestCase):
+    def test_the_decision_dump_is_not_exported(self):
+        self.assertNotIn("decisions", core.repo_config().get("paths", {}))
+        self.assertFalse(hasattr(core, "render_decisions"))
+
+
 if __name__ == "__main__":
     unittest.main()

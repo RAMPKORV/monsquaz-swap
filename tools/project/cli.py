@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--no-export", dest="no_export", action="store_true")
     x.set_defaults(func=cmd_misc.cmd_doctor)
 
-    x = sub.add_parser("export", help="write PRD, decisions, features, status and ledger dump")
+    x = sub.add_parser("export", help="write PRD, features, status and ledger dump")
     x.add_argument("--check", action="store_true")
     x.set_defaults(func=cmd_misc.cmd_export)
 

@@ -39,6 +39,7 @@ async fn the_gateway_and_http_round_trip() {
     port.send_dm(
         &mira,
         OutboundMessage {
+            buttons: Vec::new(),
             content: "Welcome to the swap.".to_string(),
         },
     )
@@ -54,6 +55,7 @@ async fn the_gateway_and_http_round_trip() {
     port.send_file(
         &mira,
         OutboundFile {
+            buttons: Vec::new(),
             filename: "seed.mod".to_string(),
             caption: "Your pack.".to_string(),
             bytes: module.clone(),
@@ -86,6 +88,7 @@ async fn a_participant_upload_arrives_as_a_dm_attachment() {
     port.send_dm(
         &mira,
         OutboundMessage {
+            buttons: Vec::new(),
             content: "Send a seed.".to_string(),
         },
     )
@@ -213,6 +216,7 @@ async fn channels_threads_and_files_work() {
     port.send_file_to_channel(
         &thread,
         OutboundFile {
+            buttons: Vec::new(),
             filename: "thread.mod".to_string(),
             caption: "Fallback file.".to_string(),
             bytes: module.clone(),
@@ -273,5 +277,69 @@ async fn the_setup_directory_reads_the_simulator() {
         sim.last_bot_message(mira)
             .unwrap()
             .contains("Your bot can reach you.")
+    );
+}
+
+/// D-051: DMs carry a Leave button, and the app answers an interaction with
+/// an ephemeral reply. The simulator accepts and records both shapes.
+#[tokio::test(flavor = "multi_thread")]
+async fn buttons_and_ephemeral_replies_are_recorded() {
+    let sim = DiscordSim::start().await.unwrap();
+    let port = HttpDiscordPort::with_proxy(sim.token(), sim.http_host()).unwrap();
+    let mira = DiscordUserId::new(sim.participant("mira").unwrap());
+    let leave = swap_discord::Button {
+        custom_id: "swap:evt-1:leave:".to_string(),
+        label: "Leave event".to_string(),
+        style: swap_discord::ButtonStyle::Secondary,
+    };
+    port.send_dm(
+        &mira,
+        OutboundMessage {
+            content: "Track S7F3A is available.".to_string(),
+            buttons: vec![leave.clone()],
+        },
+    )
+    .await
+    .unwrap();
+    port.send_file(
+        &mira,
+        OutboundFile {
+            filename: "S7F3A.mod".to_string(),
+            caption: "Your turn.".to_string(),
+            bytes: mod_track("Button seed", 1, 0),
+            buttons: vec![leave],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        sim.bot_button_ids_for(&mira.0),
+        vec![
+            "swap:evt-1:leave:".to_string(),
+            "swap:evt-1:leave:".to_string()
+        ]
+    );
+
+    port.reply_ephemeral(
+        &swap_discord::InteractionRef::new("700", "token-700"),
+        swap_discord::InteractionReply {
+            content: "Leave this swap?".to_string(),
+            buttons: vec![swap_discord::Button {
+                custom_id: "swap:evt-1:leave_ok:1700000000".to_string(),
+                label: "Confirm".to_string(),
+                style: swap_discord::ButtonStyle::Danger,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let replies = sim.ephemeral_replies();
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].interaction_id, "700");
+    assert_eq!(replies[0].content, "Leave this swap?");
+    assert!(replies[0].ephemeral);
+    assert_eq!(
+        replies[0].button_ids,
+        vec!["swap:evt-1:leave_ok:1700000000".to_string()]
     );
 }

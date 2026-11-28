@@ -305,7 +305,7 @@ pub fn run(config: &SimulationConfig) -> Result<SimulationReport, SimError> {
     let mut summary = EffectSummary::default();
     for effect in &effects {
         match effect {
-            Effect::Dm { .. } => summary.dms += 1,
+            Effect::Dm { .. } | Effect::Prompt { .. } => summary.dms += 1,
             Effect::Offer { .. } => summary.offers += 1,
             Effect::TrackFile { .. } => summary.files += 1,
             Effect::Channel { .. } => summary.channels += 1,
@@ -548,6 +548,7 @@ fn audit_outbound(
                 }
             }
             Effect::Dm { content, .. }
+            | Effect::Prompt { content, .. }
             | Effect::Channel { content, .. }
             | Effect::HostAlert { content, .. } => {
                 if contains_name(content, display_names) {

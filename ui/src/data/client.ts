@@ -395,6 +395,24 @@ export async function setParticipantPaused(
   return invoke<PeopleData>("host_set_participant_paused", { userId, paused });
 }
 
+/** D-051: the host marks a participant as left. The UI confirms twice. */
+export async function markParticipantLeft(userId: string): Promise<PeopleData> {
+  if (isDemoMode()) {
+    await pause(220);
+    return demoPeople("default");
+  }
+  return invoke<PeopleData>("host_mark_participant_left", { userId });
+}
+
+/** D-051: the bot asks a participant who left to come back. */
+export async function restoreParticipant(userId: string): Promise<PeopleData> {
+  if (isDemoMode()) {
+    await pause(220);
+    return demoPeople("default");
+  }
+  return invoke<PeopleData>("host_restore_participant", { userId });
+}
+
 export async function addAvailability(
   participantId: string,
   startsAt: number,
@@ -824,8 +842,22 @@ export async function loadFillInCandidates(
   if (isDemoMode()) {
     await pause(200);
     return [
-      { participantId: "user-04", displayName: "Jules", seen: 3, cap: 8 },
-      { participantId: "user-08", displayName: "Tove", seen: 2, cap: 8 },
+      {
+        participantId: "user-08",
+        displayName: "Tove",
+        seen: 2,
+        cap: 8,
+        tier: "volunteer",
+        edits: 1,
+      },
+      {
+        participantId: "user-04",
+        displayName: "Jules",
+        seen: 3,
+        cap: 8,
+        tier: "volunteer",
+        edits: 3,
+      },
     ];
   }
   return invoke<FillInCandidate[]>("host_fill_in_candidates", {
@@ -834,10 +866,12 @@ export async function loadFillInCandidates(
   });
 }
 
+/** `dueAt` is UTC seconds. Without it, the app uses the default due time. */
 export async function assignFillIn(
   trackCode: string,
   roundNo: number,
   participantId: string,
+  dueAt?: number,
 ): Promise<void> {
   if (isDemoMode()) {
     await pause(220);
@@ -847,6 +881,34 @@ export async function assignFillIn(
     trackCode,
     roundNo,
     participantId,
+    dueAt: dueAt ?? null,
+  });
+}
+
+export type FillInListResult = {
+  offeredTo: string | null;
+  status: string;
+  decisionOpened: boolean;
+};
+
+/** The bot offers the track down the ordered list, one person at a time. */
+export async function startFillInList(
+  trackCode: string,
+  roundNo: number,
+  participantIds: string[],
+): Promise<FillInListResult> {
+  if (isDemoMode()) {
+    await pause(220);
+    return {
+      offeredTo: participantIds[0] ?? null,
+      status: "active",
+      decisionOpened: false,
+    };
+  }
+  return invoke<FillInListResult>("host_start_fill_in_list", {
+    trackCode,
+    roundNo,
+    participantIds,
   });
 }
 
@@ -901,6 +963,9 @@ export async function createEvent(draft: EventDraft): Promise<EventSummary> {
       packId: null,
       openSchedule: false,
       handoffPolicy: "Strict",
+      fillInFlow: draft.fillInFlow,
+      fillInWindowHours: draft.fillInWindowHours,
+      fillInClaimWindowHours: draft.fillInClaimWindowHours,
     };
   }
   return invoke<EventSummary>("host_create_event", { draft });
@@ -1019,6 +1084,9 @@ function demoEventSummary(
     packId: "pack-demo",
     openSchedule: false,
     handoffPolicy: "Strict",
+    fillInFlow: "host_appoints",
+    fillInWindowHours: 24,
+    fillInClaimWindowHours: 6,
     ...overrides,
   };
 }

@@ -17,8 +17,9 @@ use swap_db::{
     RoundRepo,
 };
 use swap_discord::{
-    Action, AttachmentFetcher, DiscordChannelId, DiscordError, DiscordPort, DiscordUserId,
-    DmAttachment, InboundEvent, InboundHandler, MessageId,
+    Action, AttachmentFetcher, Button, ButtonStyle, CustomId, DiscordChannelId, DiscordError,
+    DiscordPort, DiscordUserId, DmAttachment, InboundEvent, InboundHandler, InteractionRef,
+    InteractionReply, MessageId,
 };
 use swap_files::BlobStore;
 
@@ -27,6 +28,10 @@ use crate::delivery::{DeliveryReport, DeliveryWorker, PendingDelivery, enqueue_p
 use crate::engine::{
     EngineError, JoinRequest, SubmissionSource, SubmitRequest, claim, join_with_seed,
     participant_schedule, set_participant_ready, signup, skip, submit_attachment,
+};
+use crate::leave::{
+    LEAVE_WARNING, LeaveActor, RestoreAnswer, answer_restore, leave_confirm_expired,
+    leave_confirm_token, leave_event,
 };
 use crate::prepare::DeliveryPreparer;
 use crate::settings::EventSettings;
@@ -286,6 +291,11 @@ impl InboundService {
         let mut failure_event: Option<String> = None;
         for cursor in cursors {
             if only.is_some_and(|only| !only.contains(&cursor.user_id)) {
+                continue;
+            }
+            if self.left_event(&cursor.user_id)?.is_some() {
+                // D-051: a person who left gets no backfill and no answer.
+                self.finish_backfill_user(&cursor.user_id);
                 continue;
             }
             let user = DiscordUserId::new(cursor.user_id.clone());
@@ -580,6 +590,18 @@ impl InboundService {
             }
         }
 
+        if self.left_event(user_id)?.is_some() {
+            // D-051: one direct answer to the person's own message, nothing
+            // else. A DM attachment cannot get an ephemeral answer.
+            self.notify(
+                user_id,
+                "You left this event. Only the host can restore you.",
+            )
+            .await;
+            self.mark_processed(user_id, message_id, &attachment.id)?;
+            self.update_cursor(user_id, channel_id, message_id)?;
+            return Ok(());
+        }
         let event = {
             let active = {
                 let db = self.lock();
@@ -664,7 +686,7 @@ impl InboundService {
                         Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
                             self.notify(
                                 user_id,
-                                "You left this event. Ask the host to return as a fill-in.",
+                                "You left this event. Only the host can restore you.",
                             )
                             .await;
                             self.mark_processed(user_id, message_id, &attachment.id)?;
@@ -848,7 +870,7 @@ impl InboundService {
             Some(swap_core::Membership::Left | swap_core::Membership::Removed) => {
                 self.notify(
                     user_id,
-                    "You left this event. Ask the host to return as a fill-in.",
+                    "You left this event. Only the host can restore you.",
                 )
                 .await;
                 return Ok(());
@@ -911,7 +933,10 @@ impl InboundService {
             .discord
             .send_dm(
                 &DiscordUserId::new(user_id),
-                swap_discord::OutboundMessage { content },
+                swap_discord::OutboundMessage {
+                    content,
+                    buttons: Vec::new(),
+                },
             )
             .await
         {
@@ -1112,12 +1137,200 @@ impl InboundService {
         Ok(())
     }
 
+    /// The event that a person left, when they are in no other open event
+    /// and no other signup is open. The bot sends such a person no DM
+    /// (D-051).
+    fn left_event(&self, user_id: &str) -> Result<Option<swap_db::EventRecord>, String> {
+        let db = self.lock();
+        let Some(left) =
+            EventRepo::left_for_user(db.conn(), user_id).map_err(|error| error.to_string())?
+        else {
+            return Ok(None);
+        };
+        if EventRepo::open_for_user(db.conn(), user_id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Ok(None);
+        }
+        let other_signup = EventRepo::signup_event(db.conn())
+            .map_err(|error| error.to_string())?
+            .is_some_and(|signup| signup.id != left.id);
+        Ok((!other_signup).then_some(left))
+    }
+
+    /// Answer a person who left with an ephemeral message, not a DM.
+    /// Returns true when the person left and the event is handled.
+    async fn left_gate(&self, interaction: &InteractionRef, user_id: &str) -> Result<bool, String> {
+        if self.left_event(user_id)?.is_none() {
+            return Ok(false);
+        }
+        self.reply(
+            interaction,
+            "You left this event. Only the host can restore you.",
+            Vec::new(),
+        )
+        .await;
+        Ok(true)
+    }
+
+    /// Show the leave warning with a Confirm button. Nothing changes yet.
+    async fn leave_prompt(
+        &self,
+        interaction: &InteractionRef,
+        user_id: &str,
+        event_hint: Option<&str>,
+    ) -> Result<(), String> {
+        let event = {
+            let db = self.lock();
+            match event_hint {
+                Some(event_id) => {
+                    let member = swap_db::ParticipantRepo::get(db.conn(), event_id, user_id)
+                        .map_err(|error| error.to_string())?
+                        .is_some_and(|participant| {
+                            matches!(
+                                participant.membership,
+                                swap_core::Membership::SignedUp
+                                    | swap_core::Membership::Seeded
+                                    | swap_core::Membership::Active
+                            )
+                        });
+                    EventRepo::get(db.conn(), event_id)
+                        .map_err(|error| error.to_string())?
+                        .filter(|event| {
+                            member
+                                && !matches!(
+                                    event.state,
+                                    swap_core::EventState::Reveal | swap_core::EventState::Archived
+                                )
+                        })
+                }
+                None => EventRepo::open_for_user(db.conn(), user_id)
+                    .map_err(|error| error.to_string())?,
+            }
+        };
+        let Some(event) = event else {
+            let content = if self.left_event(user_id)?.is_some() {
+                "You already left this event. Only the host can restore you."
+            } else {
+                "You are not in an open swap event."
+            };
+            self.reply(interaction, content, Vec::new()).await;
+            return Ok(());
+        };
+        let confirm = CustomId::new(
+            event.id.as_str(),
+            Action::ConfirmLeave,
+            Some(leave_confirm_token(self.now())),
+        )
+        .map_err(|error| error.to_string())?;
+        self.reply(
+            interaction,
+            LEAVE_WARNING,
+            vec![Button {
+                custom_id: confirm.to_string(),
+                label: "Confirm: leave the event".to_string(),
+                style: ButtonStyle::Danger,
+            }],
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn confirm_leave(
+        &self,
+        interaction: &InteractionRef,
+        user_id: &str,
+        event_id: &str,
+        token: Option<&str>,
+    ) -> Result<(), String> {
+        let now = self.now();
+        if leave_confirm_expired(token, now) {
+            self.reply(
+                interaction,
+                "This confirmation expired after 15 minutes. Nothing changed. Use /swap leave to start again.",
+                Vec::new(),
+            )
+            .await;
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let event = event_id.to_string();
+        let user = user_id.to_string();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let db = db.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            leave_event(&db, &event, &user, LeaveActor::Participant, now)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+        let content = match outcome {
+            Ok(_) => {
+                "You left the event. A seed that you own stays, and your past credits keep your name. The bot sends you no DMs unless the host asks you to return. Only the host can restore you."
+            }
+            Err(EngineError::ParticipantLeft) => {
+                "You already left this event. Only the host can restore you."
+            }
+            Err(EngineError::ParticipantNotFound(_)) => "You are not in this swap event.",
+            Err(error) => {
+                eprintln!("leave failed: {error}");
+                "The leave failed. Nothing changed. Try again or ask the host."
+            }
+        };
+        self.reply(interaction, content, Vec::new()).await;
+        Ok(())
+    }
+
+    async fn restore_answer(
+        &self,
+        interaction: &InteractionRef,
+        user_id: &str,
+        event_id: &str,
+        accept: bool,
+    ) -> Result<(), String> {
+        let outcome = {
+            let db = self.lock();
+            answer_restore(&db, event_id, user_id, accept, self.now())
+        };
+        let content = match outcome {
+            Ok(RestoreAnswer::Restored) => {
+                "Welcome back. You get your planned turns again from the next round that opens."
+            }
+            Ok(RestoreAnswer::Declined) => {
+                "You stay out of the event. The bot sends you no DMs unless the host asks you again."
+            }
+            Err(EngineError::NoPendingRestore) => "This restore request is closed.",
+            Err(error) => {
+                eprintln!("restore answer failed: {error}");
+                "The answer was not saved. Ask the host."
+            }
+        };
+        self.reply(interaction, content, Vec::new()).await;
+        Ok(())
+    }
+
+    async fn reply(&self, interaction: &InteractionRef, content: &str, buttons: Vec<Button>) {
+        if let Err(error) = self
+            .discord
+            .reply_ephemeral(
+                interaction,
+                InteractionReply {
+                    content: content.to_string(),
+                    buttons,
+                },
+            )
+            .await
+        {
+            eprintln!("ephemeral reply failed: {error}");
+        }
+    }
+
     async fn notify(&self, user_id: &str, content: &str) {
         let _ = self
             .discord
             .send_dm(
                 &DiscordUserId::new(user_id),
                 swap_discord::OutboundMessage {
+                    buttons: Vec::new(),
                     content: content.to_string(),
                 },
             )
@@ -1177,8 +1390,34 @@ impl InboundService {
                 .await
             }
             InboundEvent::Button {
-                user_id, custom_id, ..
+                interaction,
+                user_id,
+                custom_id,
+                ..
             } => match custom_id.action() {
+                Action::Leave => {
+                    self.leave_prompt(&interaction, &user_id.0, Some(custom_id.event_id()))
+                        .await
+                }
+                Action::ConfirmLeave => {
+                    self.confirm_leave(
+                        &interaction,
+                        &user_id.0,
+                        custom_id.event_id(),
+                        custom_id.token(),
+                    )
+                    .await
+                }
+                Action::ConfirmRestore | Action::DeclineRestore => {
+                    self.restore_answer(
+                        &interaction,
+                        &user_id.0,
+                        custom_id.event_id(),
+                        custom_id.action() == Action::ConfirmRestore,
+                    )
+                    .await
+                }
+                _ if self.left_gate(&interaction, &user_id.0).await? => Ok(()),
                 Action::Claim => {
                     self.handle_claim(custom_id.event_id(), &user_id.0, custom_id.token())
                         .await
@@ -1191,11 +1430,16 @@ impl InboundService {
                 _ => Ok(()),
             },
             InboundEvent::SlashCommand {
+                interaction,
                 user_id,
                 command,
                 options,
                 ..
             } => match command {
+                swap_discord::SlashCommand::Leave => {
+                    self.leave_prompt(&interaction, &user_id.0, None).await
+                }
+                _ if self.left_gate(&interaction, &user_id.0).await? => Ok(()),
                 swap_discord::SlashCommand::Claim => {
                     let Some(event_id) = self.active_event(&user_id.0).await? else {
                         self.notify(&user_id.0, "There is no active swap event for you.")
@@ -1351,7 +1595,9 @@ fn terminal_join(error: &EngineError) -> bool {
 fn join_message(error: &EngineError) -> String {
     match error {
         EngineError::AlreadySeeded => "You already sent a seed.".to_string(),
-        EngineError::ParticipantLeft => "You left this event. Ask the host to return.".to_string(),
+        EngineError::ParticipantLeft => {
+            "You left this event. Only the host can restore you.".to_string()
+        }
         EngineError::WrongEventState { .. } => {
             "Seed intake is closed. Ask the host about the fill-in path.".to_string()
         }

@@ -87,6 +87,7 @@ impl Membership {
                 | (Self::Seeded, Self::Removed)
                 | (Self::Active, Self::Left)
                 | (Self::Active, Self::Removed)
+                | (Self::Left, Self::Active)
         )
     }
 
@@ -435,6 +436,21 @@ mod tests {
         membership = membership.transition_to(Membership::Seeded).unwrap();
         membership = membership.transition_to(Membership::Active).unwrap();
         assert_eq!(membership, Membership::Active);
+    }
+
+    /// D-051: only a host restore with the person's consent returns a leaver.
+    #[test]
+    fn a_leaver_can_return_to_active_but_not_to_seeded() {
+        assert_eq!(
+            Membership::Left.transition_to(Membership::Active),
+            Ok(Membership::Active)
+        );
+        assert!(Membership::Left.transition_to(Membership::Seeded).is_err());
+        assert!(
+            Membership::Removed
+                .transition_to(Membership::Active)
+                .is_err()
+        );
     }
 
     #[test]

@@ -167,6 +167,9 @@ function baseMission(): MissionControl {
       packId: "pack-demo",
       openSchedule: false,
       handoffPolicy: "Strict",
+      fillInFlow: "auto_chain",
+      fillInWindowHours: 24,
+      fillInClaimWindowHours: 6,
     },
     bot: {
       status: "Online",
@@ -610,6 +613,9 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
       packId: "pack-demo",
       openSchedule: false,
       handoffPolicy: "Strict",
+      fillInFlow: "auto_chain",
+      fillInWindowHours: 24,
+      fillInClaimWindowHours: 6,
     };
     mission.bot = {
       status: "Online",
@@ -989,6 +995,9 @@ function eventSummary(
     packId: "pack-demo",
     openSchedule: false,
     handoffPolicy: "Strict",
+    fillInFlow: "auto_chain",
+    fillInWindowHours: 24,
+    fillInClaimWindowHours: 6,
   };
 }
 
@@ -1015,6 +1024,9 @@ function defaultDraft(): EventDraft {
     asyncClaimsPerParticipant: null,
     asyncReleaseTime: "18:00",
     asyncLateSeeds: false,
+    fillInWindowHours: 24,
+    fillInClaimWindowHours: 6,
+    fillInFlow: "host_appoints",
   };
 }
 

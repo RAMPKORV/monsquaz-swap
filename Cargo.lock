@@ -5146,6 +5146,7 @@ name = "swap-db"
 version = "0.1.1"
 dependencies = [
  "hex",
+ "proptest",
  "rusqlite",
  "serde",
  "serde_json",

@@ -96,6 +96,8 @@ pub enum ScheduleError {
     DuplicateTrack(TrackCode),
     #[error("track owner is not in the roster: {0:?}")]
     MissingOwner(TrackCode),
+    #[error("free track owner is in the roster: {0:?}")]
+    FreeTrackOwnerInRoster(TrackCode),
     #[error("requested {requested} rounds, but the maximum is {max}")]
     TooManyRounds { requested: u32, max: u32 },
     #[error("no perfect matching exists in round {round}")]
@@ -133,6 +135,33 @@ impl Schedule {
         seed: u64,
         strategy: ScheduleStrategy,
     ) -> Result<Self, ScheduleError> {
+        Self::generate_with_free_tracks(participants, tracks, &[], rounds, seed, strategy)
+    }
+
+    /// Generate a schedule that also carries free tracks. A free track is a
+    /// seed whose owner left before the roster lock (D-051). The owner is not
+    /// in the roster, so no own-track rule applies to a free track. When the
+    /// tracks outnumber the people, every person still gets one track in each
+    /// round, and the tracks that rest change from round to round.
+    pub fn generate_with_free_tracks(
+        participants: &[ParticipantId],
+        tracks: &[TrackSpec],
+        free_tracks: &[TrackCode],
+        rounds: u32,
+        seed: u64,
+        strategy: ScheduleStrategy,
+    ) -> Result<Self, ScheduleError> {
+        for code in free_tracks {
+            let Some(spec) = tracks.iter().find(|spec| &spec.code == code) else {
+                return Err(ScheduleError::MissingOwner(code.clone()));
+            };
+            if participants.contains(&spec.owner) {
+                // A free track belongs to a person who left before the roster
+                // lock. A caller cannot use the free list to bypass the
+                // own-track rule for a person in the roster.
+                return Err(ScheduleError::FreeTrackOwnerInRoster(code.clone()));
+            }
+        }
         if participants.is_empty() || tracks.is_empty() {
             return Err(ScheduleError::EmptyRoster);
         }
@@ -155,7 +184,11 @@ impl Schedule {
             }
         }
 
-        if specs.len() > people.len() {
+        let owned_tracks = specs
+            .iter()
+            .filter(|spec| !free_tracks.contains(&spec.code))
+            .count();
+        if owned_tracks > people.len() {
             return Err(ScheduleError::NotEnoughParticipants {
                 tracks: specs.len(),
                 participants: people.len(),
@@ -180,6 +213,9 @@ impl Schedule {
         let owners: Vec<usize> = specs
             .iter()
             .map(|spec| {
+                if free_tracks.contains(&spec.code) {
+                    return Ok(NO_OWNER);
+                }
                 person_index
                     .get(&spec.owner)
                     .copied()
@@ -282,6 +318,11 @@ impl Schedule {
     }
 }
 
+/// The owner index of a free track. No person has this index.
+const NO_OWNER: usize = usize::MAX;
+/// The base cost that lets a rested track win the next round.
+const REST_BASE_COST: i64 = 900;
+
 /// A randomized cyclic Latin square. It is valid when every participant owns
 /// exactly one track. The row, column, and symbol permutations make the square
 /// look varied while preserving the Latin property.
@@ -298,7 +339,7 @@ fn cyclic_schedule(
     let count = people.len();
     let mut track_for_owner = vec![None; count];
     for (track, owner) in owners.iter().copied().enumerate() {
-        if track_for_owner[owner].replace(track).is_some() {
+        if owner == NO_OWNER || track_for_owner[owner].replace(track).is_some() {
             return None;
         }
     }
@@ -412,10 +453,15 @@ fn attempt_random(
         rng.shuffle(&mut order);
 
         let mut match_person: Vec<Option<usize>> = vec![None; people.len()];
+        let mut unmatched = 0;
         for &track_index in &order {
             let mut visited = vec![false; people.len()];
             if !try_kuhn(track_index, &adjacency, &mut visited, &mut match_person) {
-                return Err(round);
+                unmatched += 1;
+                // A track can rest only when the tracks outnumber the people.
+                if specs.len() - unmatched < specs.len().min(people.len()) {
+                    return Err(round);
+                }
             }
         }
 
@@ -447,6 +493,7 @@ fn attempt_balanced(
 ) -> Result<Vec<ScheduledAssignment>, u32> {
     let mut history: Vec<HashSet<usize>> = vec![HashSet::new(); specs.len()];
     let mut last_holder = owners.to_vec();
+    let mut rests = vec![0u32; specs.len()];
     let mut met: HashMap<(usize, usize), u32> = HashMap::new();
     let mut recent: HashMap<(usize, usize), u32> = HashMap::new();
     let mut rng = SplitMix64::new(seed ^ 0xBADA_55ED_1234_5678);
@@ -468,6 +515,10 @@ fn attempt_balanced(
             flow.add_edge(person_node(person), sink, 1, 0);
         }
 
+        // With more tracks than people, one or more tracks rest in a round.
+        // A track that rested more often gets a lower cost, so the rest
+        // rotates. Without extra tracks the costs stay as before.
+        let extra_tracks = track_count > person_count;
         let mut candidates: Vec<Vec<(usize, usize)>> = vec![Vec::new(); track_count];
         for track in 0..track_count {
             for person in 0..person_count {
@@ -481,13 +532,19 @@ fn attempt_balanced(
                     _ => 0,
                 };
                 let jitter = rng.next_bounded(8) as i64;
-                let cost = meetings * 100 + recent_penalty + jitter;
+                let mut cost = meetings * 100 + recent_penalty + jitter;
+                if extra_tracks {
+                    cost += REST_BASE_COST - (i64::from(rests[track]) * 300).min(REST_BASE_COST);
+                }
                 let edge = flow.add_edge(track_node(track), person_node(person), 1, cost);
                 candidates[track].push((person, edge));
             }
         }
 
-        if flow.min_cost_flow(source, sink, track_count).is_none() {
+        if flow
+            .min_cost_flow(source, sink, track_count.min(person_count))
+            .is_none()
+        {
             return Err(round);
         }
 
@@ -502,6 +559,10 @@ fn attempt_balanced(
         }
         for (track, person) in person_of_track.into_iter().enumerate() {
             if person == usize::MAX {
+                if extra_tracks {
+                    rests[track] += 1;
+                    continue;
+                }
                 return Err(round);
             }
             if round > 0 {
@@ -1143,6 +1204,98 @@ mod tests {
                 tracks: 3,
                 participants: 2
             })
+        );
+    }
+
+    /// D-051: a seed whose owner left before the roster lock keeps
+    /// circulating. The roster has one track more than people, so one track
+    /// rests in each round. Every person still gets one track per round.
+    #[test]
+    fn a_seed_without_its_owner_circulates() {
+        for strategy in [
+            ScheduleStrategy::Balanced,
+            ScheduleStrategy::Cyclic,
+            ScheduleStrategy::RandomMatching,
+        ] {
+            for seed in 0..20u64 {
+                let roster = people(5);
+                let mut specs = tracks(&roster);
+                let orphan = TrackSpec {
+                    code: TrackCode::new("T99"),
+                    owner: ParticipantId::new("left"),
+                };
+                specs.push(orphan.clone());
+                let schedule = Schedule::generate_with_free_tracks(
+                    &roster,
+                    &specs,
+                    std::slice::from_ref(&orphan.code),
+                    4,
+                    seed,
+                    strategy,
+                )
+                .unwrap();
+                let mut pairs = HashSet::new();
+                for round in 0..4 {
+                    let rows: Vec<_> = schedule
+                        .assignments
+                        .iter()
+                        .filter(|assignment| assignment.round == round)
+                        .collect();
+                    assert_eq!(rows.len(), 5, "every person works in round {round}");
+                    let people_in_round: HashSet<_> =
+                        rows.iter().map(|row| row.participant.clone()).collect();
+                    assert_eq!(people_in_round.len(), 5);
+                    let tracks_in_round: HashSet<_> =
+                        rows.iter().map(|row| row.track.clone()).collect();
+                    assert_eq!(tracks_in_round.len(), 5);
+                    for row in rows {
+                        let spec = specs.iter().find(|spec| spec.code == row.track).unwrap();
+                        assert_ne!(spec.owner, row.participant, "own track");
+                        assert!(pairs.insert((row.track.clone(), row.participant.clone())));
+                    }
+                }
+                assert!(
+                    schedule
+                        .assignments
+                        .iter()
+                        .any(|assignment| assignment.track == orphan.code),
+                    "the seed without its owner circulates"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_free_track_must_name_a_known_track() {
+        let roster = people(3);
+        let specs = tracks(&roster);
+        assert_eq!(
+            Schedule::generate_with_free_tracks(
+                &roster,
+                &specs,
+                &[TrackCode::new("nope")],
+                2,
+                1,
+                ScheduleStrategy::Balanced,
+            ),
+            Err(ScheduleError::MissingOwner(TrackCode::new("nope")))
+        );
+    }
+
+    #[test]
+    fn a_free_track_owner_in_the_roster_is_refused() {
+        let roster = people(3);
+        let specs = tracks(&roster);
+        assert_eq!(
+            Schedule::generate_with_free_tracks(
+                &roster,
+                &specs,
+                &[specs[0].code.clone()],
+                2,
+                1,
+                ScheduleStrategy::Balanced,
+            ),
+            Err(ScheduleError::FreeTrackOwnerInRoster(specs[0].code.clone()))
         );
     }
 

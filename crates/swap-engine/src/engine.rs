@@ -10,9 +10,9 @@ use swap_core::{
 use swap_db::{
     AssignmentRecord, AssignmentRepo, AuditRepo, AvailabilityRecord, AvailabilityRepo, Connection,
     Db, DbError, DeadlineRepo, EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo,
-    HostDecisionRecord, HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord,
-    PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord, PlanRepo,
-    ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
+    FillInChainRepo, HostDecisionRecord, HostDecisionRepo, LateSeedRecord, LateSeedRepo, MetaRepo,
+    PackRecord, PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord, PlanRecord,
+    PlanRepo, ProcessedAttachmentRepo, RoundRepo, SeedOwnerRepo, SeenRepo, TrackCommentRecord,
     TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord, TrackTitleRepo, Transaction,
     TransactionBehavior,
 };
@@ -21,6 +21,7 @@ use thiserror::Error;
 
 use crate::delivery::{DeliveryError, PendingDelivery, enqueue_effect, enqueue_pending};
 use crate::effects::Effect;
+use crate::fill_in::is_fill_in_turn;
 use crate::ids::{
     CommitmentInputs, assignment_id, plan_commitment, plan_commitment_v2, random_hex_128,
     track_code, track_code_from_secret,
@@ -104,6 +105,18 @@ pub enum EngineError {
     LateSeedNotPending,
     #[error("the availability range is invalid")]
     InvalidAvailability,
+    #[error("participant {participant} has already seen track {track}; the offer is refused")]
+    SeenPairOffer { track: String, participant: String },
+    #[error("participant {participant} owns track {track}; the offer is refused")]
+    OwnTrackOffer { track: String, participant: String },
+    #[error("a fill-in list needs at least one person")]
+    FillInListEmpty,
+    #[error("a fill-in list cannot name the same person twice")]
+    FillInListDuplicate,
+    #[error("the fill-in due time must be in the future")]
+    FillInDueInPast,
+    #[error("the fill-in due time is more than 14 days away")]
+    FillInDueTooFar,
     #[error("the participant cannot take this fill-in: {0}")]
     FillInNotEligible(String),
     #[error("strict participation cannot honor {count} away ranges; use flexible participation")]
@@ -214,6 +227,12 @@ pub enum EngineError {
     PlanChanged,
     #[error("the plan is not valid: {0}")]
     PlanInvalid(String),
+    #[error("the participant has not left the event")]
+    ParticipantNotLeft,
+    #[error("a restore request is already pending for this participant")]
+    RestorePending,
+    #[error("there is no pending restore request for this participant")]
+    NoPendingRestore,
 }
 
 #[derive(Debug, Clone)]
@@ -453,6 +472,8 @@ pub struct EventStatus {
     pub committed: bool,
     pub active_assignments: usize,
     pub submitted_assignments: usize,
+    /// The fill-in turns that the next classic round waits on.
+    pub waiting_fill_ins: Vec<crate::fill_in::WaitingFillIn>,
 }
 
 pub fn create_event(
@@ -1525,11 +1546,28 @@ fn generate_schedule_internal(
         .iter()
         .map(|participant| participant.user_id.as_str())
         .collect();
+    // D-051: the seed of a person who left before the roster lock keeps
+    // circulating. That track has no owner in the roster.
+    let departed_ids: Vec<&str> = participants
+        .iter()
+        .filter(|participant| {
+            participant.membership == Membership::Left && participant.role == Role::Participant
+        })
+        .map(|participant| participant.user_id.as_str())
+        .collect();
     let tracks: Vec<TrackRecord> = TrackRepo::list_for_event(db.conn(), event_id)?
         .into_iter()
-        .filter(|track| active_ids.contains(&track.owner_id.as_str()))
+        .filter(|track| {
+            active_ids.contains(&track.owner_id.as_str())
+                || departed_ids.contains(&track.owner_id.as_str())
+        })
         .collect();
-    if tracks.len() != active.len() {
+    let free_tracks: Vec<TrackCode> = tracks
+        .iter()
+        .filter(|track| departed_ids.contains(&track.owner_id.as_str()))
+        .map(|track| TrackCode::new(track.code.clone()))
+        .collect();
+    if tracks.len() - free_tracks.len() != active.len() {
         return Err(EngineError::NoSeededTracks);
     }
     let max_rounds = active.len().saturating_sub(1) as u32;
@@ -1630,8 +1668,7 @@ fn generate_schedule_internal(
         Some(value) => swap_core::ScheduleStrategy::parse(value).ok_or(SettingsError::Scheduler)?,
         None => swap_core::ScheduleStrategy::default(),
     };
-    let previous = PlanRepo::latest(db.conn(), event_id)?;
-    let version = previous.map(|plan| plan.version + 1).unwrap_or(1);
+    let version = PlanRepo::next_version(db.conn(), event_id)?;
     let round_model = EventRepo::round_model(db.conn(), event_id)?;
     let secret_hex = EventRepo::secret_hex(db.conn(), event_id)?;
     let plan_seed = if round_model == 1 {
@@ -1639,50 +1676,62 @@ fn generate_schedule_internal(
     } else {
         event.seed.wrapping_add(u64::from(version - 1))
     };
-    let (mut assignments, fallback) =
-        if settings.mode == Mode::Classic && settings.group_count.unwrap_or(1) > 1 {
-            let mut grouped: Vec<&ParticipantRecord> = active.clone();
-            grouped.sort_by(|left, right| {
-                left.display_name
-                    .cmp(&right.display_name)
-                    .then_with(|| left.user_id.cmp(&right.user_id))
-            });
-            let group_people: Vec<ParticipantId> = grouped
-                .iter()
-                .map(|participant| ParticipantId::new(participant.user_id.clone()))
-                .collect();
-            let group_specs: Vec<TrackSpec> = tracks
-                .iter()
-                .map(|track| TrackSpec {
-                    code: TrackCode::new(track.code.clone()),
-                    owner: ParticipantId::new(track.owner_id.clone()),
-                })
-                .collect();
-            let group_sizes = swap_core::group_sizes(
-                grouped.len(),
-                settings.group_count.unwrap_or(1),
-                settings.group_size.unwrap_or(0),
-            );
-            let cadence = if settings.swap_cadence.as_deref() == Some("Exhausted") {
-                let largest = group_sizes.iter().copied().max().unwrap_or(1);
-                largest.saturating_sub(1).max(1)
-            } else {
-                swap_core::default_cadence(rounds)
-            };
-            let group_plan = swap_core::group_schedule(
-                &group_people,
-                &group_specs,
-                &group_sizes,
-                rounds,
-                cadence,
-                plan_seed,
-            )?;
-            let fallback = group_plan.phases.iter().any(|phase| phase.global_pool);
-            (group_plan.assignments, fallback)
+    let grouped_plan = settings.mode == Mode::Classic && settings.group_count.unwrap_or(1) > 1;
+    if grouped_plan && !free_tracks.is_empty() {
+        return Err(EngineError::PlanInvalid(
+            "a group plan cannot carry a seed whose owner left; use a single group".to_string(),
+        ));
+    }
+    let (mut assignments, fallback) = if grouped_plan {
+        let mut grouped: Vec<&ParticipantRecord> = active.clone();
+        grouped.sort_by(|left, right| {
+            left.display_name
+                .cmp(&right.display_name)
+                .then_with(|| left.user_id.cmp(&right.user_id))
+        });
+        let group_people: Vec<ParticipantId> = grouped
+            .iter()
+            .map(|participant| ParticipantId::new(participant.user_id.clone()))
+            .collect();
+        let group_specs: Vec<TrackSpec> = tracks
+            .iter()
+            .map(|track| TrackSpec {
+                code: TrackCode::new(track.code.clone()),
+                owner: ParticipantId::new(track.owner_id.clone()),
+            })
+            .collect();
+        let group_sizes = swap_core::group_sizes(
+            grouped.len(),
+            settings.group_count.unwrap_or(1),
+            settings.group_size.unwrap_or(0),
+        );
+        let cadence = if settings.swap_cadence.as_deref() == Some("Exhausted") {
+            let largest = group_sizes.iter().copied().max().unwrap_or(1);
+            largest.saturating_sub(1).max(1)
         } else {
-            let schedule = Schedule::generate_with(&people, &specs, rounds, plan_seed, strategy)?;
-            (schedule.assignments, schedule.fallback)
+            swap_core::default_cadence(rounds)
         };
+        let group_plan = swap_core::group_schedule(
+            &group_people,
+            &group_specs,
+            &group_sizes,
+            rounds,
+            cadence,
+            plan_seed,
+        )?;
+        let fallback = group_plan.phases.iter().any(|phase| phase.global_pool);
+        (group_plan.assignments, fallback)
+    } else {
+        let schedule = Schedule::generate_with_free_tracks(
+            &people,
+            &specs,
+            &free_tracks,
+            rounds,
+            plan_seed,
+            strategy,
+        )?;
+        (schedule.assignments, schedule.fallback)
+    };
 
     let mut gaps = 0u32;
     if flexible {
@@ -1826,6 +1875,7 @@ type PlanRoster = (
     std::collections::BTreeSet<String>,
     std::collections::BTreeMap<String, String>,
     std::collections::BTreeMap<String, String>,
+    std::collections::BTreeSet<String>,
 );
 
 fn plan_roster(conn: &Connection, event_id: &str) -> Result<PlanRoster, EngineError> {
@@ -1840,14 +1890,26 @@ fn plan_roster(conn: &Connection, event_id: &str) -> Result<PlanRoster, EngineEr
         .map(|participant| participant.user_id.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let names = participants
-        .into_iter()
-        .map(|participant| (participant.user_id, participant.display_name))
+        .iter()
+        .map(|participant| {
+            (
+                participant.user_id.clone(),
+                participant.display_name.clone(),
+            )
+        })
         .collect::<std::collections::BTreeMap<_, _>>();
+    // D-051: a person who left keeps their planned rows as gaps, and their
+    // seed keeps circulating. The plan can still name them.
+    let departed = participants
+        .iter()
+        .filter(|participant| participant.membership == Membership::Left)
+        .map(|participant| participant.user_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
     let owners = TrackRepo::list_for_event(conn, event_id)?
         .into_iter()
         .map(|track| (track.code, track.owner_id))
         .collect::<std::collections::BTreeMap<_, _>>();
-    Ok((active, owners, names))
+    Ok((active, owners, names, departed))
 }
 
 fn swapped_assignments(
@@ -1895,8 +1957,10 @@ fn validate_plan_assignments(
     rounds: u32,
     active: &std::collections::BTreeSet<String>,
     owners: &std::collections::BTreeMap<String, String>,
+    departed: &std::collections::BTreeSet<String>,
     allow_gaps: bool,
 ) -> Result<(), EngineError> {
+    let known = |user_id: &String| active.contains(user_id) || departed.contains(user_id);
     let active_tracks = owners
         .iter()
         .filter(|(_, owner)| active.contains(*owner))
@@ -1910,13 +1974,13 @@ fn validate_plan_assignments(
         let owner = owners
             .get(&assignment.track_code)
             .ok_or_else(|| EngineError::TrackNotFound(assignment.track_code.clone()))?;
-        if !active.contains(&assignment.participant_id) {
+        if !known(&assignment.participant_id) {
             return Err(EngineError::PlanInvalid(format!(
                 "{} is not active and ready",
                 assignment.participant_id
             )));
         }
-        if !active.contains(owner) {
+        if !known(owner) {
             return Err(EngineError::PlanInvalid(format!(
                 "track {} belongs to an inactive participant",
                 assignment.track_code
@@ -1938,7 +2002,34 @@ fn validate_plan_assignments(
             });
         }
     }
-    if !allow_gaps {
+    if !allow_gaps && !departed.is_empty() {
+        // A leave (D-051) leaves gaps and can leave one track more than
+        // people. Every active person still works once in each round.
+        for round in 0..rounds {
+            let people = assignments
+                .iter()
+                .filter(|assignment| assignment.round == round)
+                .map(|assignment| assignment.participant_id.as_str())
+                .collect::<Vec<_>>();
+            let distinct = people
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            if distinct.len() != people.len() {
+                return Err(EngineError::PlanInvalid(format!(
+                    "round {round} gives one person two tracks"
+                )));
+            }
+            if !active
+                .iter()
+                .all(|person| distinct.contains(person.as_str()))
+            {
+                return Err(EngineError::PlanInvalid(format!(
+                    "round {round} is missing an active person"
+                )));
+            }
+        }
+    } else if !allow_gaps {
         for round in 0..rounds {
             let people = assignments
                 .iter()
@@ -1996,9 +2087,16 @@ pub fn plan_edit_candidates(
         });
     }
     let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
-    let (active, owners, names) = plan_roster(db.conn(), event_id)?;
+    let (active, owners, names, departed) = plan_roster(db.conn(), event_id)?;
     let allow_gaps = parse_settings(&event)?.handoff_policy.as_deref() == Some("Flexible");
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
+    validate_plan_assignments(
+        &assignments,
+        plan.rounds,
+        &active,
+        &owners,
+        &departed,
+        allow_gaps,
+    )?;
     let target = assignments
         .iter()
         .find(|assignment| assignment.round == round && assignment.track_code == track_code)
@@ -2012,7 +2110,16 @@ pub fn plan_edit_candidates(
     }) {
         let swapped =
             swapped_assignments(&assignments, round, track_code, &assignment.participant_id)?;
-        if validate_plan_assignments(&swapped, plan.rounds, &active, &owners, allow_gaps).is_ok() {
+        if validate_plan_assignments(
+            &swapped,
+            plan.rounds,
+            &active,
+            &owners,
+            &departed,
+            allow_gaps,
+        )
+        .is_ok()
+        {
             candidates.push(PlanEditCandidate {
                 participant_id: assignment.participant_id.clone(),
                 participant_name: names
@@ -2059,9 +2166,16 @@ pub fn edit_plan_assignment(
         });
     }
     let assignments = PlanRepo::list_assignments(db.conn(), event_id, plan.version)?;
-    let (active, owners, _) = plan_roster(db.conn(), event_id)?;
+    let (active, owners, _, departed) = plan_roster(db.conn(), event_id)?;
     let allow_gaps = parse_settings(&event)?.handoff_policy.as_deref() == Some("Flexible");
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
+    validate_plan_assignments(
+        &assignments,
+        plan.rounds,
+        &active,
+        &owners,
+        &departed,
+        allow_gaps,
+    )?;
     let target = assignments
         .iter()
         .find(|assignment| assignment.round == round && assignment.track_code == track_code)
@@ -2072,7 +2186,14 @@ pub fn edit_plan_assignment(
         })?;
     let displaced = target.participant_id.clone();
     let mut assignments = swapped_assignments(&assignments, round, track_code, participant_id)?;
-    validate_plan_assignments(&assignments, plan.rounds, &active, &owners, allow_gaps)?;
+    validate_plan_assignments(
+        &assignments,
+        plan.rounds,
+        &active,
+        &owners,
+        &departed,
+        allow_gaps,
+    )?;
 
     let version = plan.version + 1;
     for assignment in &mut assignments {
@@ -2279,13 +2400,14 @@ pub fn start_event_with_channel(
         }
     }
     let assignments = PlanRepo::list_assignments(&transaction, event_id, plan.version)?;
-    let (active, owners, _) = plan_roster(&transaction, event_id)?;
+    let (active, owners, _, departed) = plan_roster(&transaction, event_id)?;
     let settings = parse_settings(&event)?;
     validate_plan_assignments(
         &assignments,
         plan.rounds,
         &active,
         &owners,
+        &departed,
         settings.handoff_policy.as_deref() == Some("Flexible"),
     )?;
     verify_plan_commitment(&transaction, event_id, &plan, &assignments)?;
@@ -2800,7 +2922,7 @@ pub fn dispatch_async_wave(
     for choice in &choices {
         let id = assignment_id(event_id, round, &choice.track.0);
         let due_at = now + settings.claim_window_secs;
-        AssignmentRepo::insert(
+        if let Err(error) = insert_offer(
             &transaction,
             &AssignmentRecord {
                 id: id.clone(),
@@ -2816,8 +2938,29 @@ pub fn dispatch_async_wave(
                 created_at: now,
                 updated_at: now,
                 extension_secs: 0,
+                claim_deadline_at: Some(due_at),
             },
-        )?;
+        ) {
+            if matches!(error, EngineError::SeenPairOffer { .. }) {
+                AuditRepo::insert(
+                    &transaction,
+                    event_id,
+                    now,
+                    "worker",
+                    "Async gap skipped",
+                    Some(&choice.track.0),
+                    &serde_json::json!({
+                        "round": round,
+                        "trackCode": choice.track.0,
+                        "participantId": choice.participant.0,
+                        "reason": "the seen ledger already has this pair",
+                    })
+                    .to_string(),
+                )?;
+                continue;
+            }
+            return Err(error);
+        }
         move_track(&transaction, event_id, &choice.track.0, TrackState::Offered)?;
         let effect = Effect::Offer {
             user_id: choice.participant.0.clone(),
@@ -2837,7 +2980,7 @@ pub fn dispatch_async_wave(
         "worker",
         "Async wave dispatched",
         None,
-        &serde_json::json!({ "offers": choices.len(), "round": round }).to_string(),
+        &serde_json::json!({ "offers": effects.len(), "round": round }).to_string(),
     )?;
     commit(transaction)?;
     Ok(AsyncWaveOutcome {
@@ -2873,13 +3016,20 @@ pub fn open_round(
     if assignments
         .iter()
         .any(|assignment| assignment.round == round)
+        || RoundRepo::get(db.conn(), event_id, round + 2)?
+            .is_some_and(|row| row.opened_at.is_some())
     {
         return Err(EngineError::RoundAlreadyOpened { round });
     }
     for previous in 0..round {
-        if !assignments
-            .iter()
-            .any(|assignment| assignment.round == previous)
+        // A round can open with only gaps after a leave (D-051). The round
+        // row then shows that the round opened.
+        let opened = RoundRepo::get(db.conn(), event_id, previous + 2)?
+            .is_some_and(|row| row.opened_at.is_some());
+        if !opened
+            && !assignments
+                .iter()
+                .any(|assignment| assignment.round == previous)
         {
             return Err(EngineError::RoundOutOfOrder {
                 expected: previous,
@@ -2939,6 +3089,7 @@ pub fn open_round(
         }
     }
     RoundRepo::close_open_rounds(&transaction, event_id, now)?;
+    crate::fill_in_chain::on_round_open(&transaction, event_id, now)?;
     if !RoundRepo::plan_to_open(&transaction, event_id, round_no, now, deadline_at)? {
         RoundRepo::insert(
             &transaction,
@@ -2964,14 +3115,69 @@ pub fn open_round(
             .ok_or_else(|| {
                 EngineError::ParticipantNotFound(planned_assignment.participant_id.clone())
             })?;
+        if participant.membership == Membership::Left {
+            // D-051: the planned turn of a person who left is a gap. The
+            // track passes unchanged; nobody gets an offer for this cell.
+            AuditRepo::insert(
+                &transaction,
+                event_id,
+                now,
+                "Host",
+                "Planned turn skipped",
+                Some(&format!("R{round_no}")),
+                &serde_json::json!({
+                    "round": round_no,
+                    "trackCode": planned_assignment.track_code,
+                    "reason": "the participant left",
+                })
+                .to_string(),
+            )?;
+            continue;
+        }
         if participant.membership != Membership::Active || participant.readiness != Readiness::Ready
         {
             return Err(EngineError::ParticipantNotReady(
                 planned_assignment.participant_id.clone(),
             ));
         }
+        if SeenRepo::has(
+            &transaction,
+            event_id,
+            &planned_assignment.track_code,
+            &planned_assignment.participant_id,
+        )? {
+            // D-051/MSW-080: an upgraded event can already have this pair in
+            // the seen ledger. The cell becomes a gap; the round still opens.
+            AuditRepo::insert(
+                &transaction,
+                event_id,
+                now,
+                "Host",
+                "Planned turn skipped",
+                Some(&format!("R{round_no}")),
+                &serde_json::json!({
+                    "round": round_no,
+                    "trackCode": planned_assignment.track_code,
+                    "reason": "the seen ledger already has this pair",
+                })
+                .to_string(),
+            )?;
+            enqueue_effect(
+                &transaction,
+                event_id,
+                &Effect::HostAlert {
+                    key: format!(
+                        "notice:plan-gap:{}:{}:{}",
+                        event_id, round_no, planned_assignment.track_code
+                    ),
+                    content: "A planned turn is a gap because the person already saw the track. Open the host app to fill the slot.".to_string(),
+                },
+                now,
+            )?;
+            continue;
+        }
         let id = assignment_id(event_id, round, &planned_assignment.track_code);
-        AssignmentRepo::insert(
+        insert_offer(
             &transaction,
             &AssignmentRecord {
                 id: id.clone(),
@@ -2987,6 +3193,7 @@ pub fn open_round(
                 created_at: now,
                 updated_at: now,
                 extension_secs: 0,
+                claim_deadline_at: Some(deadline_at),
             },
         )?;
         move_track(
@@ -3039,9 +3246,11 @@ pub struct MoveDeadlineOutcome {
 }
 
 /// Move the whole deadline of the open classic round. Every offered, claimed,
-/// and overdue assignment gets the new deadline plus its own extension. Overdue
-/// work returns to claimed. Submitted work keeps its final status. One audit
-/// entry records the move.
+/// and overdue planned assignment gets the new deadline plus its own extension,
+/// and its claim deadline moves to the new round deadline. A fill-in assignment
+/// keeps its own claim and edit deadlines (D-069). Overdue work returns to
+/// claimed. Submitted work keeps its final status. One audit entry records the
+/// move.
 pub fn move_round_deadline(
     db: &Db,
     event_id: &str,
@@ -3090,12 +3299,18 @@ pub fn move_round_deadline(
         ) {
             continue;
         }
-        let due_at = new_deadline + assignment.extension_secs;
-        AssignmentRepo::set_due(
+        // A fill-in has its own claim and edit deadlines (D-069). A round
+        // move never shortens or extends them.
+        if is_fill_in_turn(event_id, assignment) {
+            continue;
+        }
+        let due_at = (new_deadline + assignment.extension_secs).max(assignment.due_at.unwrap_or(0));
+        AssignmentRepo::set_due_and_claim(
             &transaction,
             &assignment.id,
             due_at,
             assignment.extension_secs,
+            new_deadline,
             now,
         )?;
         if assignment.status == AssignmentStatus::Overdue {
@@ -3112,7 +3327,7 @@ pub fn move_round_deadline(
         effects.push(Effect::Dm {
             user_id: assignment.participant_id.clone(),
             content: format!(
-                "The host moved the deadline for Round {round_no} to {new_deadline} UTC. Your track {} follows the new round deadline.",
+                "The host moved the deadline for Round {round_no} to {new_deadline} UTC. Your track {} is due at {due_at} UTC.",
                 assignment.track_code
             ),
         });
@@ -3145,197 +3360,6 @@ pub fn move_round_deadline(
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FillInCandidate {
-    pub participant_id: String,
-    pub display_name: String,
-    pub seen: usize,
-    pub cap: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FillInOutcome {
-    pub assignment_id: String,
-    pub track_code: String,
-}
-
-/// List the active people who can take a stranded track in an open round.
-pub fn fill_in_candidates(
-    db: &Db,
-    event_id: &str,
-    track_code: &str,
-    round_no: u32,
-) -> Result<Vec<FillInCandidate>, EngineError> {
-    let event = load_event(db, event_id)?;
-    require_open_event(&event, "fill-in candidates")?;
-    let round = RoundRepo::get(db.conn(), event_id, round_no)?
-        .ok_or(EngineError::RoundNotOpen { round: round_no })?;
-    if round.status != RoundStatus::Open {
-        return Err(EngineError::RoundNotOpen { round: round_no });
-    }
-    let track = TrackRepo::get(db.conn(), event_id, track_code)?
-        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
-    let participants = ParticipantRepo::list_for_event(db.conn(), event_id)?;
-    let seen = SeenRepo::list_for_event(db.conn(), event_id)?;
-    let active_people: HashSet<String> = AssignmentRepo::list_active(db.conn(), event_id)?
-        .iter()
-        .map(|assignment| assignment.participant_id.clone())
-        .collect();
-    let mut candidates = Vec::new();
-    for participant in participants {
-        if participant.membership != Membership::Active
-            || participant.readiness != Readiness::Ready
-            || participant.user_id == track.owner_id
-            || active_people.contains(&participant.user_id)
-        {
-            continue;
-        }
-        if seen
-            .iter()
-            .any(|pair| pair.track_code == track_code && pair.participant_id == participant.user_id)
-        {
-            continue;
-        }
-        let seen_count = seen
-            .iter()
-            .filter(|pair| pair.participant_id == participant.user_id)
-            .count();
-        if participant.max_handoffs > 0 && seen_count as u32 >= participant.max_handoffs {
-            continue;
-        }
-        candidates.push(FillInCandidate {
-            participant_id: participant.user_id.clone(),
-            display_name: participant.display_name,
-            seen: seen_count,
-            cap: participant.max_handoffs,
-        });
-    }
-    candidates.sort_by(|left, right| left.display_name.cmp(&right.display_name));
-    Ok(candidates)
-}
-
-/// Assign a stranded track to one eligible person in an open round. The person
-/// must not own the track and must not have seen it. The handoff cap applies.
-pub fn assign_fill_in(
-    db: &Db,
-    event_id: &str,
-    track_code: &str,
-    round_no: u32,
-    user_id: &str,
-    now: i64,
-) -> Result<FillInOutcome, EngineError> {
-    let event = load_event(db, event_id)?;
-    require_open_event(&event, "fill-in assignment")?;
-    if round_no < 2 {
-        return Err(EngineError::RoundNotOpen { round: round_no });
-    }
-    let transaction = begin(db)?;
-    let round = RoundRepo::get(&transaction, event_id, round_no)?
-        .ok_or(EngineError::RoundNotOpen { round: round_no })?;
-    if round.status != RoundStatus::Open {
-        return Err(EngineError::RoundNotOpen { round: round_no });
-    }
-    let deadline = round
-        .deadline_at
-        .ok_or(EngineError::RoundDeadlineMissing { round: round_no })?;
-    let track = TrackRepo::get(&transaction, event_id, track_code)?
-        .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
-    if AssignmentRepo::list_active(&transaction, event_id)?
-        .iter()
-        .any(|assignment| assignment.track_code == track_code)
-    {
-        return Err(EngineError::FillInNotEligible(
-            "the track has an active holder".to_string(),
-        ));
-    }
-    let mut participant = ParticipantRepo::get(&transaction, event_id, user_id)?
-        .ok_or_else(|| EngineError::ParticipantNotFound(user_id.to_string()))?;
-    if participant.membership != Membership::Active {
-        return Err(EngineError::FillInNotEligible(
-            "the person is not active".to_string(),
-        ));
-    }
-    if AssignmentRepo::list_active(&transaction, event_id)?
-        .iter()
-        .any(|assignment| assignment.participant_id == user_id)
-    {
-        return Err(EngineError::FillInNotEligible(
-            "the person already holds a track".to_string(),
-        ));
-    }
-    if track.owner_id == user_id {
-        return Err(EngineError::FillInNotEligible(
-            "the person owns the track".to_string(),
-        ));
-    }
-    if SeenRepo::has(&transaction, event_id, track_code, user_id)? {
-        return Err(EngineError::FillInNotEligible(
-            "the person has seen the track".to_string(),
-        ));
-    }
-    let seen_count = SeenRepo::list_for_participant(&transaction, event_id, user_id)?.len();
-    if participant.max_handoffs > 0 && seen_count as u32 >= participant.max_handoffs {
-        return Err(EngineError::FillInNotEligible(
-            "the person reached the handoff cap".to_string(),
-        ));
-    }
-    participant.readiness = Readiness::Ready;
-    participant.updated_at = now;
-    ParticipantRepo::upsert(&transaction, &participant)?;
-    let index = round_no - 2;
-    let id = format!(
-        "{}-{}",
-        assignment_id(event_id, index, track_code),
-        &swap_files::sha256_hex(format!("fill-in:{event_id}:{user_id}").as_bytes())[..8]
-    );
-    AssignmentRepo::insert(
-        &transaction,
-        &AssignmentRecord {
-            id: id.clone(),
-            event_id: event_id.to_string(),
-            track_code: track_code.to_string(),
-            participant_id: user_id.to_string(),
-            round: index,
-            status: AssignmentStatus::Offered,
-            offered_at: now,
-            claimed_at: None,
-            due_at: Some(deadline),
-            submitted_at: None,
-            created_at: now,
-            updated_at: now,
-            extension_secs: 0,
-        },
-    )?;
-    move_track(&transaction, event_id, track_code, TrackState::Offered)?;
-    let effect = Effect::Offer {
-        user_id: user_id.to_string(),
-        event_id: event_id.to_string(),
-        assignment_id: id.clone(),
-        track_code: track_code.to_string(),
-        due_at: deadline,
-        claim_window_secs: (deadline - now).max(1),
-    };
-    enqueue_effect(&transaction, event_id, &effect, now)?;
-    AuditRepo::insert(
-        &transaction,
-        event_id,
-        now,
-        "Host",
-        "Fill-in assigned",
-        Some(track_code),
-        &serde_json::json!({
-            "round": round_no,
-            "participantId": user_id,
-        })
-        .to_string(),
-    )?;
-    commit(transaction)?;
-    Ok(FillInOutcome {
-        assignment_id: id,
-        track_code: track_code.to_string(),
-    })
-}
-
 pub fn claim(
     db: &Db,
     store: &BlobStore,
@@ -3356,13 +3380,29 @@ pub fn claim(
         return Err(EngineError::WrongAssignmentState(assignment.status));
     }
     let due_at = assignment.due_at.ok_or(EngineError::OfferExpired)?;
-    if now > due_at {
+    let claim_deadline_at = assignment.claim_deadline_at.unwrap_or(due_at);
+    if now > claim_deadline_at {
         return Err(EngineError::OfferExpired);
     }
+    let chained = FillInChainRepo::active_for_assignment(db.conn(), &assignment.id)?.is_some();
     let next_due = if EventRepo::round_model(db.conn(), event_id)? == 1 {
-        RoundRepo::get(db.conn(), event_id, assignment.round + 2)?
-            .and_then(|round| round.deadline_at)
-            .unwrap_or(now + settings.round_window_secs)
+        if is_fill_in_turn(event_id, &assignment) {
+            if chained {
+                // D-069: the edit window of a chain or host-list offer starts
+                // at the claim.
+                now + settings.fill_in_window_secs
+            } else {
+                // The host set this due time. A claim keeps it, even when it
+                // is before the round deadline (MSW-080).
+                due_at
+            }
+        } else {
+            // A planned offer has the shared round deadline.
+            RoundRepo::get(db.conn(), event_id, assignment.round + 2)?
+                .and_then(|round| round.deadline_at)
+                .unwrap_or(now + settings.round_window_secs)
+                .max(due_at)
+        }
     } else {
         now + settings.round_window_secs
     };
@@ -3386,11 +3426,13 @@ pub fn claim(
     if !AssignmentRepo::claim(&transaction, assignment.id.as_str(), now, next_due, now)? {
         return Err(EngineError::WrongAssignmentState(assignment.status));
     }
+    crate::fill_in_chain::on_claimed(&transaction, &assignment, now)?;
     SeenRepo::record(
         &transaction,
         event_id,
         &assignment.track_code,
         user_id,
+        &assignment.id,
         "claim",
         now,
     )?;
@@ -3523,6 +3565,7 @@ fn submit_inner(
         request.event_id,
         &assignment.track_code,
         request.user_id,
+        &assignment.id,
         "submit",
         now,
     )?;
@@ -3637,14 +3680,12 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
     require_open_event(&event, "skip")?;
     let assignment = AssignmentRepo::latest_for_participant(db.conn(), event_id, user_id)?
         .ok_or(EngineError::NoActiveAssignment)?;
-    let (status, seen_reason) = match assignment.status {
-        AssignmentStatus::Offered => (AssignmentStatus::SkippedBeforeClaim, None),
-        AssignmentStatus::Claimed | AssignmentStatus::Overdue => (
-            AssignmentStatus::SkippedAfterClaim,
-            Some("skip_after_claim"),
-        ),
-        other => return Err(EngineError::WrongAssignmentState(other)),
-    };
+    if !matches!(
+        assignment.status,
+        AssignmentStatus::Offered | AssignmentStatus::Claimed | AssignmentStatus::Overdue
+    ) {
+        return Err(EngineError::WrongAssignmentState(assignment.status));
+    }
 
     let receipt = Effect::Dm {
         user_id: user_id.to_string(),
@@ -3655,41 +3696,53 @@ pub fn skip(db: &Db, event_id: &str, user_id: &str, now: i64) -> Result<SkipOutc
     };
     let transaction = begin(db)?;
     open_event_in(&transaction, event_id, "skip")?;
-    for kind in ["extension", "overdue"] {
-        if let Some(open) =
-            HostDecisionRepo::open_for_assignment(&transaction, &assignment.id, kind)?
-        {
-            HostDecisionRepo::close(
-                &transaction,
-                &open.id,
-                "addressed",
-                now,
-                "the participant skipped",
-            )?;
-        }
-    }
-    AssignmentRepo::update_status(&transaction, &assignment.id, status, now)?;
-    if let Some(reason) = seen_reason {
-        SeenRepo::record(
-            &transaction,
-            event_id,
-            &assignment.track_code,
-            user_id,
-            reason,
-            now,
-        )?;
-    }
-    move_track(
-        &transaction,
-        event_id,
-        &assignment.track_code,
-        TrackState::Pool,
-    )?;
     enqueue_effect(&transaction, event_id, &receipt, now)?;
+    let status = skip_in(&transaction, &assignment, "the participant skipped", now)?;
     commit(transaction)?;
 
     let effects = vec![receipt];
     Ok(SkipOutcome { status, effects })
+}
+
+/// Skip one active assignment inside the caller's transaction. An offer that
+/// is not claimed is not seen. A claimed or overdue track is seen, with the
+/// assignment id. The track returns to the pool unchanged, and the fill-in
+/// flow starts for the stranded slot. A skip and a leave (D-051) share this.
+pub(crate) fn skip_in(
+    conn: &Connection,
+    assignment: &AssignmentRecord,
+    reason: &str,
+    now: i64,
+) -> Result<AssignmentStatus, EngineError> {
+    let (status, seen_reason) = match assignment.status {
+        AssignmentStatus::Offered => (AssignmentStatus::SkippedBeforeClaim, None),
+        AssignmentStatus::Claimed | AssignmentStatus::Overdue => (
+            AssignmentStatus::SkippedAfterClaim,
+            Some("skip_after_claim"),
+        ),
+        other => return Err(EngineError::WrongAssignmentState(other)),
+    };
+    let event_id = assignment.event_id.as_str();
+    for kind in ["extension", "overdue"] {
+        if let Some(open) = HostDecisionRepo::open_for_assignment(conn, &assignment.id, kind)? {
+            HostDecisionRepo::close(conn, &open.id, "addressed", now, reason)?;
+        }
+    }
+    AssignmentRepo::update_status(conn, &assignment.id, status, now)?;
+    if let Some(seen_reason) = seen_reason {
+        SeenRepo::record(
+            conn,
+            event_id,
+            &assignment.track_code,
+            &assignment.participant_id,
+            &assignment.id,
+            seen_reason,
+            now,
+        )?;
+    }
+    move_track(conn, event_id, &assignment.track_code, TrackState::Pool)?;
+    crate::fill_in_chain::on_slot_stranded(conn, assignment, now)?;
+    Ok(status)
 }
 
 pub fn expire_offer(
@@ -3705,7 +3758,11 @@ pub fn expire_offer(
     if assignment.status != AssignmentStatus::Offered {
         return Err(EngineError::WrongAssignmentState(assignment.status));
     }
-    if assignment.due_at.is_some_and(|due_at| now < due_at) {
+    let claim_deadline_at = assignment
+        .claim_deadline_at
+        .or(assignment.due_at)
+        .ok_or(EngineError::OfferExpired)?;
+    if now < claim_deadline_at {
         return Err(EngineError::OfferNotDue);
     }
 
@@ -3718,6 +3775,7 @@ pub fn expire_offer(
         &assignment.track_code,
         TrackState::Pool,
     )?;
+    crate::fill_in_chain::on_slot_stranded(&transaction, &assignment, now)?;
     commit(transaction)?;
 
     Ok(ExpireOutcome {
@@ -3768,9 +3826,12 @@ pub fn reveal_with_channel(
     let assignments = AssignmentRepo::list_for_event(&transaction, event_id)?;
     if let Some(plan) = PlanRepo::latest(&transaction, event_id)? {
         for round in 0..plan.rounds {
-            if !assignments
-                .iter()
-                .any(|assignment| assignment.round == round)
+            let opened = RoundRepo::get(&transaction, event_id, round + 2)?
+                .is_some_and(|row| row.opened_at.is_some());
+            if !opened
+                && !assignments
+                    .iter()
+                    .any(|assignment| assignment.round == round)
             {
                 return Err(EngineError::PlanNotFinished { round });
             }
@@ -3805,10 +3866,11 @@ pub fn reveal_with_channel(
                 participant_id: assignment.participant_id.clone(),
                 display_name: participant_name(&assignment.participant_id),
                 status: assignment.status,
-                fill_in: participants
-                    .iter()
-                    .find(|participant| participant.user_id == assignment.participant_id)
-                    .is_some_and(|participant| participant.role == Role::FillIn),
+                fill_in: crate::fill_in::is_fill_in_turn(event_id, assignment)
+                    || participants
+                        .iter()
+                        .find(|participant| participant.user_id == assignment.participant_id)
+                        .is_some_and(|participant| participant.role == Role::FillIn),
             })
             .collect();
         tracks.push(TrackCredits {
@@ -3990,10 +4052,11 @@ pub fn reveal_package(db: &Db, event_id: &str) -> Result<RevealPackage, EngineEr
         {
             match assignment.status {
                 AssignmentStatus::Submitted => {
-                    let fill_in = participants
-                        .iter()
-                        .find(|participant| participant.user_id == assignment.participant_id)
-                        .is_some_and(|participant| participant.role == Role::FillIn);
+                    let fill_in = crate::fill_in::is_fill_in_turn(event_id, assignment)
+                        || participants
+                            .iter()
+                            .find(|participant| participant.user_id == assignment.participant_id)
+                            .is_some_and(|participant| participant.role == Role::FillIn);
                     credits.push(CreditEntry {
                         round: assignment.round,
                         participant_id: assignment.participant_id.clone(),
@@ -4756,10 +4819,11 @@ pub fn decide_deadline(
             let round_model = EventRepo::round_model(&transaction, &assignment.event_id)?;
             let extra = hours * 3_600;
             let extension_secs = assignment.extension_secs + extra;
-            let new_due = if round_model == 1 {
+            let new_due = if round_model == 1 && !is_fill_in_turn(&assignment.event_id, &assignment)
+            {
                 RoundRepo::get(&transaction, &assignment.event_id, assignment.round + 2)?
                     .and_then(|round| round.deadline_at)
-                    .map(|deadline_at| deadline_at + extension_secs)
+                    .map(|deadline_at| (deadline_at + extension_secs).max(due_at + extra))
                     .unwrap_or(due_at.max(now) + extra)
             } else {
                 due_at.max(now) + extra
@@ -4805,6 +4869,7 @@ pub fn decide_deadline(
                 &assignment.event_id,
                 &assignment.track_code,
                 &assignment.participant_id,
+                &assignment.id,
                 "deadline_missed",
                 now,
             )?;
@@ -4820,6 +4885,7 @@ pub fn decide_deadline(
                 &assignment.track_code,
                 TrackState::Pool,
             )?;
+            crate::fill_in_chain::on_slot_stranded(&transaction, &assignment, now)?;
             if let Some(decision) = decision {
                 HostDecisionRepo::close(&transaction, &decision.id, "addressed", now, reason)?;
             }
@@ -4896,10 +4962,11 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                 .iter()
                 .filter(|assignment| assignment.status == AssignmentStatus::Offered)
             {
-                let Some(due_at) = assignment.due_at else {
+                let Some(claim_deadline_at) = assignment.claim_deadline_at.or(assignment.due_at)
+                else {
                     continue;
                 };
-                if now >= due_at {
+                if now >= claim_deadline_at {
                     AssignmentRepo::update_status(
                         &transaction,
                         &assignment.id,
@@ -4928,6 +4995,7 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                         .to_string(),
                     )?;
                     report.expired_offers += 1;
+                    crate::fill_in_chain::on_slot_stranded(&transaction, assignment, now)?;
                 }
             }
         }
@@ -4936,10 +5004,11 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                 .iter()
                 .filter(|assignment| assignment.status == AssignmentStatus::Offered)
             {
-                let Some(due_at) = assignment.due_at else {
+                let Some(claim_deadline_at) = assignment.claim_deadline_at.or(assignment.due_at)
+                else {
                     continue;
                 };
-                if now >= due_at {
+                if now >= claim_deadline_at {
                     AssignmentRepo::update_status(
                         &transaction,
                         &assignment.id,
@@ -5011,14 +5080,15 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                         .to_string(),
                     )?;
                     report.expired_offers += 1;
-                } else if due_at - now <= 12 * 60 * 60 {
+                } else if claim_deadline_at - now <= 12 * 60 * 60 {
                     let key = format!("async-claim-reminded:{}", assignment.id);
                     if MetaRepo::get(&transaction, &key)?.is_none() {
                         enqueue_effect(
                             &transaction,
                             &event.id,
-                            &Effect::Dm {
+                            &Effect::Prompt {
                                 user_id: assignment.participant_id.clone(),
+                                event_id: event.id.clone(),
                                 content: format!(
                                     "Track {} expires in 12 hours. Claim it in the server.",
                                     assignment.track_code
@@ -5100,8 +5170,9 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                     enqueue_effect(
                         &transaction,
                         &event.id,
-                        &Effect::Dm {
+                        &Effect::Prompt {
                             user_id: assignment.participant_id.clone(),
+                            event_id: event.id.clone(),
                             content: format!(
                                 "The edit deadline for track {} has passed. The host decides the next step.",
                                 assignment.track_code
@@ -5149,8 +5220,9 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                 enqueue_effect(
                     &transaction,
                     &event.id,
-                    &Effect::Dm {
+                    &Effect::Prompt {
                         user_id: assignment.participant_id.clone(),
+                        event_id: event.id.clone(),
                         content: format!(
                             "Track {}: {step} percent of the edit window has passed. Send your edit before the deadline.",
                             assignment.track_code
@@ -5161,19 +5233,25 @@ pub fn tick_deadlines(db: &Db, now: i64) -> Result<DeadlineReport, EngineError> 
                 report.reminders += 1;
             }
         }
+        if settings.mode == Mode::Classic && round_model == 1 {
+            crate::fill_in_chain::resume_waiting(&transaction, &event.id, now)?;
+        }
         commit(transaction)?;
     }
     Ok(report)
 }
 
-fn participant_timezone(participants: &[ParticipantRecord], user_id: &str) -> Option<Tz> {
+pub(crate) fn participant_timezone(
+    participants: &[ParticipantRecord],
+    user_id: &str,
+) -> Option<Tz> {
     participants
         .iter()
         .find(|participant| participant.user_id == user_id)
         .and_then(|participant| participant.timezone.parse().ok())
 }
 
-fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {
+pub(crate) fn quiet_hours(now: i64, timezone: Tz, start: u8, end: u8) -> bool {
     if start == end {
         return false;
     }
@@ -5323,6 +5401,7 @@ pub fn participant_schedule(
 
 pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError> {
     let event = load_event(db, event_id)?;
+    let classic = parse_settings(&event)?.mode == Mode::Classic;
     let plan = PlanRepo::latest(db.conn(), event_id)?;
     let assignments = AssignmentRepo::list_for_event(db.conn(), event_id)?;
     let seed_round = RoundRepo::get(db.conn(), event_id, 1)?;
@@ -5351,27 +5430,32 @@ pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError>
             .iter()
             .filter(|assignment| assignment.status == AssignmentStatus::Submitted)
             .count(),
+        waiting_fill_ins: if classic {
+            crate::fill_in::waiting_fill_ins(db.conn(), event_id)?
+        } else {
+            Vec::new()
+        },
     })
 }
 
-fn begin(db: &Db) -> Result<Transaction<'_>, EngineError> {
+pub(crate) fn begin(db: &Db) -> Result<Transaction<'_>, EngineError> {
     Ok(
         Transaction::new_unchecked(db.conn(), TransactionBehavior::Immediate)
             .map_err(DbError::from)?,
     )
 }
 
-fn commit(transaction: Transaction<'_>) -> Result<(), EngineError> {
+pub(crate) fn commit(transaction: Transaction<'_>) -> Result<(), EngineError> {
     transaction.commit().map_err(DbError::from)?;
     Ok(())
 }
 
-fn load_event(db: &Db, event_id: &str) -> Result<EventRecord, EngineError> {
+pub(crate) fn load_event(db: &Db, event_id: &str) -> Result<EventRecord, EngineError> {
     EventRepo::get(db.conn(), event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))
 }
 
-fn parse_settings(event: &EventRecord) -> Result<EventSettings, EngineError> {
+pub(crate) fn parse_settings(event: &EventRecord) -> Result<EventSettings, EngineError> {
     Ok(serde_json::from_str(&event.settings_json)?)
 }
 
@@ -5421,7 +5505,10 @@ fn open_event_in(
     Ok(event)
 }
 
-fn require_open_event(event: &EventRecord, action: &'static str) -> Result<(), EngineError> {
+pub(crate) fn require_open_event(
+    event: &EventRecord,
+    action: &'static str,
+) -> Result<(), EngineError> {
     match event.state {
         EventState::Active | EventState::Paused => Ok(()),
         state => Err(EngineError::WrongEventState {
@@ -5491,7 +5578,33 @@ fn latest_file(db: &Db, event_id: &str, track_code: &str) -> Result<FileRecord, 
         .ok_or_else(|| EngineError::NoFile(track_code.to_string()))
 }
 
-fn move_track(
+/// Insert one offer. Every offer path uses this guard: a seen pair or an own
+/// track is refused with a typed error before the database sees the row.
+pub(crate) fn insert_offer(conn: &Connection, offer: &AssignmentRecord) -> Result<(), EngineError> {
+    if SeenRepo::has(
+        conn,
+        &offer.event_id,
+        &offer.track_code,
+        &offer.participant_id,
+    )? {
+        return Err(EngineError::SeenPairOffer {
+            track: offer.track_code.clone(),
+            participant: offer.participant_id.clone(),
+        });
+    }
+    if TrackRepo::get(conn, &offer.event_id, &offer.track_code)?
+        .is_some_and(|track| track.owner_id == offer.participant_id)
+    {
+        return Err(EngineError::OwnTrackOffer {
+            track: offer.track_code.clone(),
+            participant: offer.participant_id.clone(),
+        });
+    }
+    AssignmentRepo::insert(conn, offer)?;
+    Ok(())
+}
+
+pub(crate) fn move_track(
     connection: &Connection,
     event_id: &str,
     track_code: &str,

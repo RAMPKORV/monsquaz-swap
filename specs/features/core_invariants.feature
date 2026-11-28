@@ -30,3 +30,27 @@ Feature: Core scheduling invariants
     And the skip-after-claim pair is seen
     And the skip-before-claim pair is not seen
     And the expired-offer pair is not seen
+
+  Scenario: An offer is refused for a seen pair
+    Given a participant who claimed track S7F3A
+    When any offer path tries to offer S7F3A to that participant again
+    Then the app refuses the offer with a typed error
+    And the app sends no offer
+
+  Scenario: A second seen record for one pair fails
+    Given a seen pair from one assignment
+    When a second assignment records the same pair as seen
+    Then the store refuses the record
+    And a retry of the first assignment changes nothing
+
+  Scenario Outline: The database refuses a scheduling invariant violation
+    Given a direct write to the database
+    When the write <breaks>
+    Then the database refuses the write
+
+    Examples:
+      | breaks                                   |
+      | gives a participant their own track      |
+      | gives a track a second active holder     |
+      | gives a participant a second active track |
+      | records the same seen pair twice         |

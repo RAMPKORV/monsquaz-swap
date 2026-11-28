@@ -186,6 +186,8 @@ music. The host can hide it.
 
 ## D-014 — Fill-ins: pool + converts + host picks; sequential offers
 
+> Superseded by D-063, D-064, D-069, and D-070.
+
 **Decision:** dedicated volunteers and auto-converted non-seeders; host can
 appoint a specific eligible person; sequential first-accept, 12h, max 3; shared
 handoff budget; marked in credits; can name if final.

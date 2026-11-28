@@ -401,6 +401,7 @@ async fn test_dm(port: &dyn DiscordPort, user_id: &str) -> Result<String, String
         );
     }
     let message = swap_discord::OutboundMessage {
+        buttons: Vec::new(),
         content: "Monsquaz Swap test message. Your bot can reach you.".to_string(),
     };
     let message_id = port

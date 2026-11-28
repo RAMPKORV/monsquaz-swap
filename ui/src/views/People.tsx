@@ -7,6 +7,7 @@ export function PeopleView({
   data,
   onAction,
   onSetPaused,
+  onLeaveChange,
   onAddAvailability,
   onRemoveAvailability,
   timezone,
@@ -14,6 +15,8 @@ export function PeopleView({
   data: PeopleData;
   onAction: (label: string) => void;
   onSetPaused: (userId: string, paused: boolean) => void;
+  /** D-051: true marks the person as left; false asks them back. */
+  onLeaveChange?: (userId: string, leave: boolean) => void;
   onAddAvailability: (
     participantId: string,
     startsAt: number,
@@ -43,6 +46,29 @@ export function PeopleView({
     return new Date(date.getTime() - offset).toISOString().slice(0, 16);
   });
   const [awayNote, setAwayNote] = useState("");
+  const [leaveFor, setLeaveFor] = useState<{
+    row: PersonRow;
+    leave: boolean;
+    step: 1 | 2;
+  } | null>(() => {
+    const dialog = new URLSearchParams(window.location.search).get("dialog");
+    if (dialog !== "leave" && dialog !== "restore") {
+      return null;
+    }
+    const rows = data.rows;
+    const person = new URLSearchParams(window.location.search).get("person");
+    let row =
+      dialog === "restore"
+        ? (rows.find((entry) => entry.status === "Left") ?? rows[0])
+        : (rows.find((entry) => entry.status !== "Left") ?? rows[0]);
+    if (dialog === "leave" && person === "fillin") {
+      row =
+        rows.find(
+          (entry) => entry.role === "Fill-in" && entry.status !== "Left",
+        ) ?? row;
+    }
+    return row ? { row, leave: dialog === "leave", step: 1 } : null;
+  });
   const [awayError, setAwayError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -364,7 +390,17 @@ export function PeopleView({
                   <td>
                     <span className="cell-label">Action</span>
                     {row.status === "Left" ? (
-                      <span className="muted">No action</span>
+                      row.restorePending ? (
+                        <span className="muted">Restore asked</span>
+                      ) : (
+                        <Button
+                          variant="quiet"
+                          ariaLabel={`Restore ${row.displayName}`}
+                          onClick={() => setLeaveFor({ row, leave: false, step: 1 })}
+                        >
+                          Restore
+                        </Button>
+                      )
                     ) : (
                       <div className="header-actions">
                         <Button
@@ -420,6 +456,13 @@ export function PeopleView({
                         >
                           {row.status === "Paused" ? "Resume" : "Pause"}
                         </Button>
+                        <Button
+                          variant="quiet"
+                          ariaLabel={`Mark ${row.displayName} as left`}
+                          onClick={() => setLeaveFor({ row, leave: true, step: 1 })}
+                        >
+                          Mark as left
+                        </Button>
                       </div>
                     )}
                   </td>
@@ -430,6 +473,78 @@ export function PeopleView({
         </div>
         </>
       )}
+
+      {leaveFor ? (
+        <Dialog
+          title={
+            leaveFor.leave
+              ? `Mark ${leaveFor.row.displayName} as left`
+              : `Restore ${leaveFor.row.displayName}`
+          }
+          labelledBy="leave-dialog-title"
+          onClose={() => setLeaveFor(null)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setLeaveFor(null)}>
+                Cancel
+              </Button>
+              {leaveFor.step === 1 ? (
+                <Button
+                  variant="primary"
+                  onClick={() => setLeaveFor({ ...leaveFor, step: 2 })}
+                >
+                  Continue
+                </Button>
+              ) : (
+                <Button
+                  variant={leaveFor.leave ? "danger" : "primary"}
+                  onClick={() => {
+                    onLeaveChange?.(leaveFor.row.id, leaveFor.leave);
+                    setLeaveFor(null);
+                  }}
+                >
+                  {leaveFor.leave ? "Mark as left now" : "Send the restore DM"}
+                </Button>
+              )}
+            </>
+          }
+        >
+          {leaveFor.step === 1 ? (
+            leaveFor.leave ? (
+              <ul className="dialog-list">
+                <li>A held track is skipped now and returns unchanged.</li>
+                {leaveFor.row.role === "Seed" ? (
+                  <li>
+                    This person&apos;s seed track stays in the event and keeps
+                    circulating.
+                  </li>
+                ) : (
+                  <li>This person has no personal seed track.</li>
+                )}
+                <li>Past credits keep the name.</li>
+                <li>
+                  The bot sends this person no DMs unless you ask them to
+                  return.
+                </li>
+                <li>Only you can undo this, and the person must confirm.</li>
+              </ul>
+            ) : (
+              <p>
+                The bot sends one DM with Confirm and Decline. Only a confirm
+                returns the person, with planned turns from the next round that
+                opens. A skipped turn stays skipped. The invitation expires
+                after 7 days.
+              </p>
+            )
+          ) : (
+            <p>
+              {leaveFor.leave
+                ? `Mark ${leaveFor.row.displayName} as left now? The audit log records this.`
+                : `Send the restore DM to ${leaveFor.row.displayName} now? The audit log records this.`}
+            </p>
+          )}
+        </Dialog>
+      ) : null}
 
       {awayFor ? (
         <Dialog

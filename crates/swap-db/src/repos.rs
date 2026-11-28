@@ -142,6 +142,26 @@ impl EventRepo {
         raw.map(TryInto::try_into).transpose()
     }
 
+    /// The newest event that is not revealed or archived and that the person
+    /// left (D-051).
+    pub fn left_for_user(conn: &Connection, user_id: &str) -> Result<Option<EventRecord>, DbError> {
+        let raw = conn
+            .query_row(
+                "SELECT e.id, e.name, e.state, e.seed, e.settings_json, e.created_at,
+                        e.updated_at
+                 FROM events e
+                 JOIN participants p ON p.event_id = e.id
+                 WHERE p.user_id = ?1
+                   AND p.membership = 'left'
+                   AND e.state NOT IN ('reveal', 'archived')
+                 ORDER BY e.updated_at DESC LIMIT 1",
+                params![user_id],
+                row_to_raw_event,
+            )
+            .optional()?;
+        raw.map(TryInto::try_into).transpose()
+    }
+
     pub fn get(conn: &Connection, id: &str) -> Result<Option<EventRecord>, DbError> {
         let raw = conn
             .query_row(
@@ -487,22 +507,50 @@ impl TrackRepo {
 pub struct SeenRepo;
 
 impl SeenRepo {
-    /// Insert a seen pair. Returns true when the pair is new.
+    /// Insert a seen pair for one assignment. Returns true when the pair is
+    /// new. A retry for the same assignment returns false. A pair that another
+    /// assignment already made seen returns `SeenPairRepeat`: that is a
+    /// no-repeat violation, never a silent no-op.
     pub fn record(
         conn: &Connection,
         event_id: &str,
         track_code: &str,
         participant_id: &str,
+        assignment_id: &str,
         reason: &str,
         at: i64,
     ) -> Result<bool, DbError> {
-        let changed = conn.execute(
-            "INSERT OR IGNORE INTO seen_pairs
-                (event_id, track_code, participant_id, reason, first_seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![event_id, track_code, participant_id, reason, at],
-        )?;
-        Ok(changed > 0)
+        let existing: Option<Option<String>> = conn
+            .query_row(
+                "SELECT assignment_id FROM seen_pairs
+                 WHERE event_id = ?1 AND track_code = ?2 AND participant_id = ?3",
+                params![event_id, track_code, participant_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match existing {
+            Some(Some(owner)) if owner == assignment_id => Ok(false),
+            Some(_) => Err(DbError::SeenPairRepeat {
+                track: track_code.to_string(),
+                participant: participant_id.to_string(),
+            }),
+            None => {
+                conn.execute(
+                    "INSERT INTO seen_pairs
+                        (event_id, track_code, participant_id, reason, first_seen_at, assignment_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        event_id,
+                        track_code,
+                        participant_id,
+                        reason,
+                        at,
+                        assignment_id
+                    ],
+                )?;
+                Ok(true)
+            }
+        }
     }
 
     pub fn list_for_participant(
@@ -588,6 +636,9 @@ pub struct AssignmentRecord {
     pub created_at: i64,
     pub updated_at: i64,
     pub extension_secs: i64,
+    /// The last instant when the person can claim the offer. It is separate
+    /// from the edit due time for a chain or host-list fill-in offer (D-069).
+    pub claim_deadline_at: Option<i64>,
 }
 
 struct RawAssignment {
@@ -604,6 +655,7 @@ struct RawAssignment {
     created_at: i64,
     updated_at: i64,
     extension_secs: i64,
+    claim_deadline_at: Option<i64>,
 }
 
 impl TryFrom<RawAssignment> for AssignmentRecord {
@@ -624,6 +676,7 @@ impl TryFrom<RawAssignment> for AssignmentRecord {
             created_at: raw.created_at,
             updated_at: raw.updated_at,
             extension_secs: raw.extension_secs,
+            claim_deadline_at: raw.claim_deadline_at,
         })
     }
 }
@@ -643,6 +696,7 @@ fn row_to_raw_assignment(row: &Row<'_>) -> rusqlite::Result<RawAssignment> {
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
         extension_secs: row.get(12)?,
+        claim_deadline_at: row.get(13)?,
     })
 }
 
@@ -653,8 +707,9 @@ impl AssignmentRepo {
         conn.execute(
             "INSERT INTO assignments
                 (id, event_id, track_code, participant_id, round, status,
-                 offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs,
+                        claim_deadline_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 &assignment.id,
                 &assignment.event_id,
@@ -668,7 +723,8 @@ impl AssignmentRepo {
                 assignment.submitted_at,
                 assignment.created_at,
                 assignment.updated_at,
-                assignment.extension_secs
+                assignment.extension_secs,
+                assignment.claim_deadline_at
             ],
         )?;
         Ok(())
@@ -678,7 +734,8 @@ impl AssignmentRepo {
         let raw = conn
             .query_row(
                 "SELECT id, event_id, track_code, participant_id, round, status,
-                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
+                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs,
+                        claim_deadline_at
                  FROM assignments WHERE id = ?1",
                 params![id],
                 row_to_raw_assignment,
@@ -693,7 +750,8 @@ impl AssignmentRepo {
     ) -> Result<Vec<AssignmentRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT id, event_id, track_code, participant_id, round, status,
-                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
+                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs,
+                        claim_deadline_at
              FROM assignments WHERE event_id = ?1 ORDER BY round, track_code",
         )?;
         let rows = statement
@@ -764,6 +822,26 @@ impl AssignmentRepo {
         Ok(changed > 0)
     }
 
+    /// Move a planned assignment to a new round deadline. The claim cutoff and
+    /// the edit due time both follow the round. Fill-in assignments use this
+    /// only through their own deadline paths.
+    pub fn set_due_and_claim(
+        conn: &Connection,
+        id: &str,
+        due_at: i64,
+        extension_secs: i64,
+        claim_deadline_at: i64,
+        updated_at: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE assignments
+             SET due_at = ?1, extension_secs = ?2, claim_deadline_at = ?3, updated_at = ?4
+             WHERE id = ?5 AND status IN ('offered', 'claimed', 'overdue')",
+            params![due_at, extension_secs, claim_deadline_at, updated_at, id],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn revert_overdue(conn: &Connection, id: &str, updated_at: i64) -> Result<bool, DbError> {
         let changed = conn.execute(
             "UPDATE assignments SET status = 'claimed', updated_at = ?1
@@ -796,7 +874,8 @@ impl AssignmentRepo {
         let raw = conn
             .query_row(
                 "SELECT id, event_id, track_code, participant_id, round, status,
-                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
+                        offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs,
+                        claim_deadline_at
                  FROM assignments
                  WHERE event_id = ?1 AND participant_id = ?2
                  ORDER BY round DESC, created_at DESC LIMIT 1",
@@ -813,7 +892,8 @@ impl AssignmentRepo {
     ) -> Result<Vec<AssignmentRecord>, DbError> {
         let mut statement = conn.prepare(
             "SELECT id, event_id, track_code, participant_id, round, status,
-                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs
+                    offered_at, claimed_at, due_at, submitted_at, created_at, updated_at, extension_secs,
+                        claim_deadline_at
              FROM assignments
              WHERE event_id = ?1 AND status IN ('offered', 'claimed', 'overdue')
              ORDER BY round, track_code",
@@ -949,6 +1029,16 @@ impl PlanRepo {
             ],
         )?;
         Ok(())
+    }
+
+    /// The next free plan version, including a voided prior version.
+    pub fn next_version(conn: &Connection, event_id: &str) -> Result<u32, DbError> {
+        let version: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM plan_versions WHERE event_id = ?1",
+            params![event_id],
+            |row| row.get(0),
+        )?;
+        Ok(version as u32)
     }
 
     pub fn latest(conn: &Connection, event_id: &str) -> Result<Option<PlanRecord>, DbError> {
@@ -1602,6 +1692,21 @@ impl PrivacyRepo {
              WHERE event_id = ?2 AND set_by = ?3",
             params![new_id, event_id, old_id],
         )?;
+        // A restore request is personal data. The deleted person needs none.
+        conn.execute(
+            "DELETE FROM restore_requests WHERE event_id = ?1 AND user_id = ?2",
+            params![event_id, old_id],
+        )?;
+        // Chain lists hold JSON strings; replace the quoted id exactly.
+        let old_json = serde_json::to_string(old_id)?;
+        let new_json = serde_json::to_string(new_id)?;
+        conn.execute(
+            "UPDATE fill_in_chains
+             SET host_list_json = REPLACE(host_list_json, ?1, ?2),
+                 tried_json = REPLACE(tried_json, ?1, ?2)
+             WHERE event_id = ?3",
+            params![old_json, new_json, event_id],
+        )?;
         Ok(IdentityCounts {
             tracks,
             assignments,
@@ -1743,6 +1848,41 @@ impl DeliveryRepo {
         Ok(changed > 0)
     }
 
+    /// Cancel every unsent row for one recipient in one event. The reason is
+    /// kept in `last_error`. Returns the ids of the cancelled rows.
+    pub fn cancel_pending_for_recipient(
+        conn: &Connection,
+        event_id: &str,
+        recipient_id: &str,
+        now: i64,
+        reason: &str,
+    ) -> Result<Vec<String>, DbError> {
+        let mut statement = conn.prepare(
+            "UPDATE deliveries
+             SET status = 'cancelled', updated_at = ?3, last_error = ?4
+             WHERE event_id = ?1 AND recipient_id = ?2 AND status = 'pending'
+             RETURNING id",
+        )?;
+        let mut ids = statement
+            .query_map(params![event_id, recipient_id, now, reason], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.sort();
+        Ok(ids)
+    }
+
+    /// Cancel one unsent row. Returns true when the row was pending.
+    pub fn cancel(conn: &Connection, id: &str, now: i64, reason: &str) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE deliveries
+             SET status = 'cancelled', updated_at = ?2, last_error = ?3
+             WHERE id = ?1 AND status = 'pending'",
+            params![id, now, reason],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn mark_failed(
         conn: &Connection,
         id: &str,
@@ -1838,6 +1978,160 @@ mod delivery_tests {
         let row = DeliveryRepo::get(db.conn(), "key-2").unwrap().unwrap();
         assert_eq!(row.status, "failed");
         assert_eq!(row.attempts, 1);
+    }
+
+    /// D-051: a leave cancels every unsent delivery to the leaver, and only
+    /// in that event.
+    #[test]
+    fn a_leave_cancels_only_the_pending_rows_of_one_recipient() {
+        let db = Db::open_in_memory().unwrap();
+        EventRepo::insert(db.conn(), &event()).unwrap();
+        let mut other = event();
+        other.id = "evt-2".to_string();
+        EventRepo::insert(db.conn(), &other).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "a", "evt-1", Some("u1"), "dm", b"x", 10).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "b", "evt-1", Some("u1"), "offer", b"x", 10).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "c", "evt-1", Some("u2"), "dm", b"x", 10).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "d", "evt-2", Some("u1"), "dm", b"x", 10).unwrap();
+        DeliveryRepo::enqueue(db.conn(), "e", "evt-1", Some("u1"), "dm", b"x", 10).unwrap();
+        DeliveryRepo::mark_sent(db.conn(), "e", 11).unwrap();
+
+        let cancelled =
+            DeliveryRepo::cancel_pending_for_recipient(db.conn(), "evt-1", "u1", 20, "left")
+                .unwrap();
+        assert_eq!(cancelled, vec!["a".to_string(), "b".to_string()]);
+        let row = DeliveryRepo::get(db.conn(), "a").unwrap().unwrap();
+        assert_eq!(row.status, "cancelled");
+        assert_eq!(row.last_error.as_deref(), Some("left"));
+        assert_eq!(
+            DeliveryRepo::get(db.conn(), "c").unwrap().unwrap().status,
+            "pending"
+        );
+        assert_eq!(
+            DeliveryRepo::get(db.conn(), "d").unwrap().unwrap().status,
+            "pending"
+        );
+        assert_eq!(
+            DeliveryRepo::get(db.conn(), "e").unwrap().unwrap().status,
+            "sent"
+        );
+        assert!(!DeliveryRepo::mark_sent(db.conn(), "a", 30).unwrap());
+    }
+
+    #[test]
+    fn a_restore_request_is_pending_until_the_answer() {
+        let db = Db::open_in_memory().unwrap();
+        EventRepo::insert(db.conn(), &event()).unwrap();
+        assert!(
+            RestoreRepo::pending(db.conn(), "evt-1", "u1")
+                .unwrap()
+                .is_none()
+        );
+        RestoreRepo::insert(db.conn(), "evt-1", "u1", 10).unwrap();
+        assert!(RestoreRepo::insert(db.conn(), "evt-1", "u1", 11).is_err());
+        let pending = RestoreRepo::pending(db.conn(), "evt-1", "u1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.requested_at, 10);
+        assert_eq!(pending.status, "pending");
+        assert!(RestoreRepo::answer(db.conn(), "evt-1", "u1", "accepted", 20).unwrap());
+        assert!(!RestoreRepo::answer(db.conn(), "evt-1", "u1", "declined", 21).unwrap());
+        assert!(
+            RestoreRepo::pending(db.conn(), "evt-1", "u1")
+                .unwrap()
+                .is_none()
+        );
+        RestoreRepo::insert(db.conn(), "evt-1", "u1", 30).unwrap();
+        assert_eq!(
+            RestoreRepo::list_pending(db.conn(), "evt-1").unwrap().len(),
+            1
+        );
+    }
+}
+
+/// A host request to return a person who left (D-051).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreRecord {
+    pub event_id: String,
+    pub user_id: String,
+    pub requested_at: i64,
+    pub status: String,
+    pub answered_at: Option<i64>,
+}
+
+fn row_to_restore(row: &Row<'_>) -> rusqlite::Result<RestoreRecord> {
+    Ok(RestoreRecord {
+        event_id: row.get(0)?,
+        user_id: row.get(1)?,
+        requested_at: row.get(2)?,
+        status: row.get(3)?,
+        answered_at: row.get(4)?,
+    })
+}
+
+pub struct RestoreRepo;
+
+impl RestoreRepo {
+    /// Insert a pending request. A second pending request for the same
+    /// person fails on the unique index.
+    pub fn insert(
+        conn: &Connection,
+        event_id: &str,
+        user_id: &str,
+        now: i64,
+    ) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO restore_requests (event_id, user_id, requested_at, status)
+             VALUES (?1, ?2, ?3, 'pending')",
+            params![event_id, user_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn pending(
+        conn: &Connection,
+        event_id: &str,
+        user_id: &str,
+    ) -> Result<Option<RestoreRecord>, DbError> {
+        Ok(conn
+            .query_row(
+                "SELECT event_id, user_id, requested_at, status, answered_at
+                 FROM restore_requests
+                 WHERE event_id = ?1 AND user_id = ?2 AND status = 'pending'",
+                params![event_id, user_id],
+                row_to_restore,
+            )
+            .optional()?)
+    }
+
+    pub fn list_pending(conn: &Connection, event_id: &str) -> Result<Vec<RestoreRecord>, DbError> {
+        let mut statement = conn.prepare(
+            "SELECT event_id, user_id, requested_at, status, answered_at
+             FROM restore_requests
+             WHERE event_id = ?1 AND status = 'pending'
+             ORDER BY requested_at, user_id",
+        )?;
+        let rows = statement
+            .query_map(params![event_id], row_to_restore)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Close the pending request with `accepted`, `declined`, or `cancelled`.
+    /// Returns false when no request was pending.
+    pub fn answer(
+        conn: &Connection,
+        event_id: &str,
+        user_id: &str,
+        status: &str,
+        now: i64,
+    ) -> Result<bool, DbError> {
+        let changed = conn.execute(
+            "UPDATE restore_requests SET status = ?3, answered_at = ?4
+             WHERE event_id = ?1 AND user_id = ?2 AND status = 'pending'",
+            params![event_id, user_id, status, now],
+        )?;
+        Ok(changed > 0)
     }
 }
 
@@ -2778,5 +3072,146 @@ impl AvailabilityRepo {
             "DELETE FROM participant_availability WHERE event_id = ?1 AND id = ?2",
             params![event_id, id],
         )? > 0)
+    }
+}
+
+/// One fill-in chain for a stranded classic slot. `tried` lists every person
+/// who received an offer or was skipped as ineligible, in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FillInChainRecord {
+    pub id: String,
+    pub event_id: String,
+    pub track_code: String,
+    pub round: u32,
+    pub flow: String,
+    pub host_list: Vec<String>,
+    pub tried: Vec<String>,
+    pub offers: u32,
+    pub current_assignment_id: Option<String>,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub struct FillInChainRepo;
+
+const CHAIN_COLUMNS: &str = "id, event_id, track_code, round, flow, host_list_json, tried_json,
+    offers, current_assignment_id, status, created_at, updated_at";
+
+fn row_to_chain(row: &Row<'_>) -> rusqlite::Result<(FillInChainRecord, String, String)> {
+    Ok((
+        FillInChainRecord {
+            id: row.get(0)?,
+            event_id: row.get(1)?,
+            track_code: row.get(2)?,
+            round: row.get(3)?,
+            flow: row.get(4)?,
+            host_list: Vec::new(),
+            tried: Vec::new(),
+            offers: row.get(7)?,
+            current_assignment_id: row.get(8)?,
+            status: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+        },
+        row.get(5)?,
+        row.get(6)?,
+    ))
+}
+
+fn decode_chain(raw: (FillInChainRecord, String, String)) -> Result<FillInChainRecord, DbError> {
+    let (mut chain, host_list, tried) = raw;
+    chain.host_list = serde_json::from_str(&host_list)?;
+    chain.tried = serde_json::from_str(&tried)?;
+    Ok(chain)
+}
+
+impl FillInChainRepo {
+    /// Insert or replace the whole chain row.
+    pub fn save(conn: &Connection, chain: &FillInChainRecord) -> Result<(), DbError> {
+        conn.execute(
+            "INSERT INTO fill_in_chains
+                (id, event_id, track_code, round, flow, host_list_json, tried_json, offers,
+                 current_assignment_id, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(id) DO UPDATE SET
+                host_list_json = excluded.host_list_json,
+                tried_json = excluded.tried_json,
+                offers = excluded.offers,
+                current_assignment_id = excluded.current_assignment_id,
+                status = excluded.status,
+                updated_at = excluded.updated_at",
+            params![
+                &chain.id,
+                &chain.event_id,
+                &chain.track_code,
+                chain.round,
+                &chain.flow,
+                serde_json::to_string(&chain.host_list)?,
+                serde_json::to_string(&chain.tried)?,
+                chain.offers,
+                &chain.current_assignment_id,
+                &chain.status,
+                chain.created_at,
+                chain.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn query(
+        conn: &Connection,
+        filter: &str,
+        values: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<FillInChainRecord>, DbError> {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {CHAIN_COLUMNS} FROM fill_in_chains WHERE {filter} ORDER BY created_at, id"
+        ))?;
+        let rows = statement
+            .query_map(values, row_to_chain)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(decode_chain).collect()
+    }
+
+    pub fn list_active(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<FillInChainRecord>, DbError> {
+        Self::query(conn, "event_id = ?1 AND status = 'active'", &[&event_id])
+    }
+
+    pub fn list_for_event(
+        conn: &Connection,
+        event_id: &str,
+    ) -> Result<Vec<FillInChainRecord>, DbError> {
+        Self::query(conn, "event_id = ?1", &[&event_id])
+    }
+
+    pub fn active_for_assignment(
+        conn: &Connection,
+        assignment_id: &str,
+    ) -> Result<Option<FillInChainRecord>, DbError> {
+        Ok(Self::query(
+            conn,
+            "current_assignment_id = ?1 AND status = 'active'",
+            &[&assignment_id],
+        )?
+        .into_iter()
+        .next())
+    }
+
+    pub fn active_for_slot(
+        conn: &Connection,
+        event_id: &str,
+        track_code: &str,
+        round: u32,
+    ) -> Result<Option<FillInChainRecord>, DbError> {
+        Ok(Self::query(
+            conn,
+            "event_id = ?1 AND track_code = ?2 AND round = ?3 AND status = 'active'",
+            &[&event_id, &track_code, &round],
+        )?
+        .into_iter()
+        .next())
     }
 }

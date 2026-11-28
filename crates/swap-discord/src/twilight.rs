@@ -187,9 +187,7 @@ impl SetupDirectory for TwilightSetup {
             }
         }
         .map_err(|error| SetupError::Discord(error.to_string()))?;
-        let message = OutboundMessage {
-            content: "Monsquaz Swap test message. Your bot can reach you.".to_string(),
-        };
+        let message = OutboundMessage::text("Monsquaz Swap test message. Your bot can reach you.");
         let message_id = port
             .send_dm(&DiscordUserId::new(user_id), message)
             .await

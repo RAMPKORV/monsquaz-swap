@@ -28,8 +28,9 @@ pub use http::{HttpAttachmentFetcher, HttpDiscordPort};
 pub use ids::{DiscordChannelId, DiscordGuildId, DiscordUserId, MessageId};
 pub use inbound::{DmAttachment, InboundEvent, InteractionRef};
 pub use port::{
-    AttachmentError, AttachmentFetcher, DiscordError, DiscordPort, FakeAttachmentFetcher,
-    FakeDiscord, InboundDm, OutboundFile, OutboundMessage, SentDm, SentFile,
+    AttachmentError, AttachmentFetcher, Button, ButtonStyle, DiscordError, DiscordPort,
+    EphemeralReply, FakeAttachmentFetcher, FakeDiscord, InboundDm, InteractionReply, OutboundFile,
+    OutboundMessage, SentDm, SentFile,
 };
 pub use setup::{
     BotIdentity, ChannelSummary, GuildSummary, RECOMMENDED_PERMISSIONS, SetupDirectory, SetupError,

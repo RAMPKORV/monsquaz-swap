@@ -3204,6 +3204,14 @@ select.input {
   color: var(--muted);
 }
 
+.dialog-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
 .dialog__body {
   display: flex;
   min-height: 0;

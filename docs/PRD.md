@@ -2,7 +2,7 @@
 
 Status: **v0.1 draft, pending adversarial review**
 Owner: Patrik Weibull
-Last updated: 2026-11-24
+Last updated: 2026-11-28
 Language: requirements, constraints, risks, and open questions follow
 ASD-STE100 Simplified Technical English (`ai-rules/STE.md`). Narrative sections
 are explanatory. If a narrative sentence conflicts with a requirement, the
@@ -36,7 +36,7 @@ schedule and files, and makes the host's decisions one click.
 |---|---|---|
 | **Host** (primary) | Run a complete anonymous swap without a server, with control over deadlines, skips, and the reveal. | Non-technical; Windows or Linux; will tolerate a 5-minute bot setup, not a terminal. |
 | **Participant** | Join by submitting a seed, receive a track they have never touched, edit it, submit before the deadline, and see the album at the end. | Desktop or mobile Discord; may skip, pause, or leave; may not know the schedule. |
-| **Fill-in** | Cover a skipped slot without ever receiving the same track twice. | May be a dedicated volunteer or someone who signed up but never seeded. |
+| **Fill-in** | Cover a skipped slot without ever receiving the same track twice. | May be a dedicated volunteer, someone who signed up but never seeded, or a seeded participant who takes one extra turn in a round. |
 | **Co-host** | Help with nudges, extensions, pauses, and decisions; may see the mapping. Decided, building in MSW-117 (D-059). | Trusted helper; actions audited. |
 | **Server member** | Watch the reveal and celebrate. | No assignments; no spectator role needed. |
 
@@ -140,8 +140,8 @@ named command. IDs are stable.
 | REQ-JOIN-002 | must | Joining SHALL include a DM handshake; if DMs are blocked, the bot SHALL offer a host-approved private-thread fallback. | `join_and_seed.feature` |
 | REQ-JOIN-003 | must | The signup SHALL collect timezone, max handoffs, optional away dates, and notification preferences. | `join_and_seed.feature` |
 | REQ-JOIN-004 | must | When the host locks the roster, signed-up people without a valid seed SHALL become fill-ins by default (configurable). | `join_and_seed.feature` |
-| REQ-JOIN-005 | must | A participant SHALL leave at any time; if holding a claimed track they SHALL submit or skip it first; past credits are preserved and future assignments removed. | `deadlines_and_extensions.feature` |
-| REQ-JOIN-006 | should | A leaver SHALL rejoin as a fill-in by default; rejoin-with-replan is an opt-in event setting that creates a new plan version and re-seal. | `join_and_seed.feature` |
+| REQ-JOIN-005 | must | A participant SHALL leave at any time after one confirmation. A claimed or overdue track SHALL become skipped_after_claim and count as seen. An unclaimed offer SHALL become skipped_before_claim and SHALL NOT count as seen. The track SHALL return unchanged. The seed SHALL stay in the event. Past credits SHALL keep the name. Future planned turns SHALL become gaps and SHALL NOT be removed. | `join_and_seed.feature` |
+| REQ-JOIN-006 | must | Only the host SHALL start a return. The person SHALL confirm it. A confirmed return SHALL make the person active with their previous readiness and role, and SHALL give planned turns from the next round that opens. A skipped turn SHALL stay skipped. The invitation SHALL expire after 7 days. In schedule review, a confirmed return SHALL void the draft plan and the host SHALL generate the schedule again. | `join_and_seed.feature` |
 | REQ-JOIN-007 | must | A seed after the seed deadline SHALL be held for host approval while Round 1 is open. A seed after the host closes Round 1 SHALL be refused until the host reopens Round 1. | `join_and_seed.feature` |
 
 ### Scheduling (classic)
@@ -151,7 +151,7 @@ named command. IDs are stable.
 | REQ-SCHED-001 | must | The scheduler SHALL never assign a participant their own track and never assign the same track to the same participant twice. | `scheduling.feature` |
 | REQ-SCHED-002 | must | A full classic event SHALL run N total rounds for N seeded participants: R1 is the seed round and R2..RN are exchange rounds. The planner SHALL warn about overcrowding above 12 participants and allow a cap. | `scheduling.feature` |
 | REQ-SCHED-010 | must | The host SHALL open Round 1 with the pack and a seed deadline. The host SHALL close seed intake softly and lock the roster in one action. At least two seeds are required. | `join_and_seed.feature` |
-| REQ-SCHED-011 | must | One classic round SHALL have one shared deadline. An offer expires at that deadline and a claim uses the same deadline. The default is 24 hours for a normal exchange round and 48 hours for the final exchange round. | `deadlines_and_extensions.feature` |
+| REQ-SCHED-011 | must | One classic round SHALL have one shared deadline. A planned offer SHALL expire at that deadline, and a claim SHALL use the same deadline. The default is 24 hours for a normal exchange round and 48 hours for the final exchange round. A fill-in offer SHALL use its own claim and edit deadlines (REQ-FILL-003). | `deadlines_and_extensions.feature` |
 | REQ-SCHED-012 | must | The host SHALL choose strict full exposure or flexible participation. Strict SHALL refuse a plan when an active handoff cap is below the exchange count. Flexible SHALL give the earliest exchange rounds up to the cap and report coverage gaps. | `participation.feature` |
 | REQ-SCHED-013 | must | The host CAN record an away range for a participant. The planner SHALL skip overlapping projected rounds and report the gaps. History SHALL stay in UTC. | `participation.feature` |
 | REQ-SCHED-003 | must | Each round SHALL assign at most one track per participant and at most one participant per track. | `scheduling.feature` |
@@ -187,7 +187,7 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-DELIVERY-001 | must | The bot SHALL offer a track with its opaque code and deadline; the file SHALL be sent only after the participant claims. | `delivery.feature` |
-| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 24h) without marking the pair seen. The expiry preset (D-041) SHALL decide the next step; all presets are decided, building in MSW-084. The default preset starts a 24h cooldown at the first expiry and pauses the participant at the second expiry. The auto-pause host alert is part of MSW-084. | `delivery.feature` |
+| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 24h) without marking the pair seen. The default preset starts a 24h cooldown at the first expiry and pauses the participant at the second expiry. The host alert is part of the default preset. The other presets are decided, building in MSW-084. | `delivery.feature` |
 | REQ-DELIVERY-003 | must | A claimed submission SHALL be downloaded immediately, hashed, validated, and stored; a receipt SHALL confirm what happens next. | `files.feature` |
 | REQ-DELIVERY-004 | must | A participant SHALL resubmit before the deadline; the latest valid version wins and all versions are retained. | `delivery.feature` |
 | REQ-DELIVERY-005 | must | If a DM is blocked, the bot SHALL use a host-approved private thread and alert the host; it SHALL never silently drop a delivery. | `delivery.feature` |
@@ -208,11 +208,11 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-FILL-001 | must | A skip SHALL return the track unchanged and never count as an edit; a claim-then-skip SHALL count as seen. | `fill_ins.feature` |
-| REQ-FILL-002 | must | Fill-ins SHALL be dedicated volunteers, converted non-seeders, or host-appointed eligible people; they SHALL never receive a track twice. | `fill_ins.feature` |
-| REQ-FILL-003 | must | Fill-in offers SHALL be sequential first-accept. The claim window SHALL be 6h by default (D-069). An auto-chain SHALL make at most three offers, then the host decides. A host-ordered list SHALL have no size limit (D-070). Decided, building in MSW-083. | `fill_ins.feature` |
-| REQ-FILL-004 | must | Regular edits SHALL count toward one shared handoff budget. A tier-2 fill-in rescue SHALL be an extra turn and SHALL NOT count toward the budget (D-050). Decided, building in MSW-080..MSW-083. | `fill_ins.feature` |
+| REQ-FILL-002 | must | A fill-in SHALL be a dedicated volunteer, a converted non-seeder, or an eligible seeded participant. A seeded participant SHALL take at most one extra turn in a round. A seeded participant SHALL be eligible only after they submit their own turn and only when the plan never gives them the stranded track. A fill-in SHALL never receive a track twice. | `fill_ins.feature` |
+| REQ-FILL-003 | must | Fill-in offers SHALL be sequential first-accept. The flow SHALL be host appointment, automatic chain, or an ordered host list. The automatic chain SHALL make at most three offers across both tiers. It SHALL move from tier 1 to tier 2 before it stops. A host decision SHALL open after the 3-offer budget or both tiers are exhausted, whichever comes first. Each chain or list offer SHALL have a claim window (default 6h) and an edit due time that starts at the claim (default 24h). A host appointment SHALL keep the due time that the host sets. The host list SHALL have no size limit. After the offers end, a host decision SHALL open. | `fill_ins.feature` |
+| REQ-FILL-004 | must | A dedicated fill-in edit SHALL count toward the handoff budget. A seeded participant's extra turn SHALL NOT count toward the handoff budget. | `fill_ins.feature` |
 | REQ-FILL-005 | must | If no eligible fill-in exists, classic SHALL pass the track unchanged; async SHALL return it to the pool. | `fill_ins.feature` |
-| REQ-FILL-006 | should | Credits SHALL mark a rescued turn with a fill-in badge, whoever did it (D-065). A fill-in SHALL be able to name the track if they are the final editor. Decided, building in MSW-080..MSW-083. | `fill_ins.feature` |
+| REQ-FILL-006 | should | Credits SHALL mark a rescued turn with a fill-in badge, whoever did it (D-065). A fill-in SHALL be able to name the track if they are the final editor.  | `fill_ins.feature` |
 
 ### Files, pack, scrub
 

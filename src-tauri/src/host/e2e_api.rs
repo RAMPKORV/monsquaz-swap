@@ -190,6 +190,14 @@ impl E2eHost {
                 let paused = bool_arg(args, "paused")?;
                 to_value(set_participant_paused(db, &user_id, paused)?)
             }
+            "host_mark_participant_left" => {
+                let user_id = string(args, "userId")?;
+                to_value(mark_participant_left(db, &user_id)?)
+            }
+            "host_restore_participant" => {
+                let user_id = string(args, "userId")?;
+                to_value(restore_participant(db, &user_id)?)
+            }
             "host_add_availability" => {
                 let participant_id = string(args, "participantId")?;
                 let starts_at = i64_arg(args, "startsAt")?;
@@ -457,12 +465,7 @@ impl E2eHost {
                 to_value(
                     candidates
                         .into_iter()
-                        .map(|candidate| FillInCandidateDto {
-                            participant_id: candidate.participant_id,
-                            display_name: candidate.display_name,
-                            seen: candidate.seen,
-                            cap: candidate.cap,
-                        })
+                        .map(FillInCandidateDto::from)
                         .collect::<Vec<_>>(),
                 )
             }
@@ -470,6 +473,7 @@ impl E2eHost {
                 let track_code = string(args, "trackCode")?;
                 let round_no = u32_arg(args, "roundNo")?;
                 let participant_id = string(args, "participantId")?;
+                let due_at = args.get("dueAt").and_then(Value::as_i64);
                 let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
                 assign_fill_in(
                     db,
@@ -477,10 +481,36 @@ impl E2eHost {
                     &track_code,
                     round_no,
                     &participant_id,
+                    due_at,
                     now_secs(),
                 )
                 .map_err(|error| error.to_string())?;
                 Ok(Value::Null)
+            }
+            "host_start_fill_in_list" => {
+                let track_code = string(args, "trackCode")?;
+                let round_no = u32_arg(args, "roundNo")?;
+                let people: Vec<String> = args
+                    .get("participantIds")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+                let outcome = swap_engine::start_fill_in_list(
+                    db,
+                    &event.id,
+                    &track_code,
+                    round_no,
+                    &people,
+                    now_secs(),
+                )
+                .map_err(|error| error.to_string())?;
+                Ok(json!({ "offeredTo": outcome.offered_to, "status": outcome.status }))
             }
             "host_export_reveal_zip" => {
                 let path = string(args, "path")?;

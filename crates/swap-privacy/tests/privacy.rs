@@ -1,8 +1,9 @@
 use std::io::{Cursor, Read};
 
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeliveryRepo, DmCursorRepo, FileRepo, PackRecord, PackRepo,
-    ParticipantRepo, PlanRepo, ProcessedAttachmentRepo, SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Connection, Db, DeliveryRepo, DmCursorRepo, FileRepo, PackRecord,
+    PackRepo, ParticipantRepo, PlanRepo, ProcessedAttachmentRepo, RestoreRepo, SeenRepo, TrackRepo,
+    migrations,
 };
 use swap_engine::{
     Effect, EventSettings, JoinRequest, PassthroughPreparer, SubmitRequest, claim,
@@ -424,5 +425,86 @@ fn deletion_removes_delivery_state_and_inbound_cursors() {
     );
     assert!(
         !ProcessedAttachmentRepo::is_processed(fixture.db.conn(), &target, "m-1", "a-1").unwrap()
+    );
+}
+
+#[test]
+fn deletion_removes_both_pending_and_answered_restore_requests() {
+    let fixture = Fixture::new(2);
+    RestoreRepo::insert(fixture.db.conn(), EVENT, &user(0), T4).unwrap();
+    assert!(RestoreRepo::answer(fixture.db.conn(), EVENT, &user(0), "declined", T5).unwrap());
+    RestoreRepo::insert(fixture.db.conn(), EVENT, &user(0), T6).unwrap();
+    assert_eq!(
+        count(
+            &fixture.db,
+            "SELECT COUNT(*) FROM restore_requests WHERE user_id = ?1",
+            &user(0)
+        ),
+        2
+    );
+
+    delete_participant(&fixture.db, EVENT, &user(0), T7).unwrap();
+    assert_eq!(
+        count(
+            &fixture.db,
+            "SELECT COUNT(*) FROM restore_requests WHERE user_id = ?1",
+            &user(0)
+        ),
+        0
+    );
+}
+
+#[test]
+fn deletion_on_a_pre_013_database_accepts_a_pre_claim_skip_and_a_later_submit() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("legacy.db");
+    {
+        let connection = Connection::open(&path).unwrap();
+        for (index, sql) in migrations::MIGRATIONS.iter().take(12).enumerate() {
+            connection.execute_batch(sql).unwrap();
+            connection
+                .pragma_update(None, "user_version", index as i64 + 1)
+                .unwrap();
+        }
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO events (id, name, state, seed, settings_json, created_at, updated_at)
+                   VALUES ('{EVENT}', 'Legacy', 'reveal', 42, '{{}}', 1, 1);
+                 INSERT INTO participants (event_id, user_id, display_name, role, membership,
+                   readiness, timezone, created_at, updated_at)
+                   VALUES ('{EVENT}', 'alice', 'Alice', 'participant', 'active', 'ready', 'UTC', 1, 1),
+                          ('{EVENT}', 'bob', 'Bob', 'participant', 'active', 'ready', 'UTC', 1, 1);
+                 INSERT INTO tracks (event_id, code, owner_id, state, created_at)
+                   VALUES ('{EVENT}', 'T01', 'alice', 'final', 1);
+                 INSERT INTO assignments (id, event_id, track_code, participant_id, round,
+                   status, offered_at, submitted_at, created_at, updated_at)
+                   VALUES ('a-old', '{EVENT}', 'T01', 'bob', 0, 'skipped_before_claim', 1, NULL, 1, 2),
+                          ('a-new', '{EVENT}', 'T01', 'bob', 0, 'submitted', 2, 3, 2, 3);
+                 INSERT INTO seen_pairs (event_id, track_code, participant_id, reason,
+                   first_seen_at, assignment_id)
+                   VALUES ('{EVENT}', 'T01', 'bob', 'claim', 3, 'a-new');"
+            ))
+            .unwrap();
+    }
+
+    let db = Db::open(&path).unwrap();
+    let report = delete_participant(&db, EVENT, "bob", T4)
+        .expect("legal pre-013 history must not block deletion");
+    assert!(report.tombstone_id.starts_with("deleted-"));
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM assignments WHERE participant_id = ?1",
+            "bob"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT COUNT(*) FROM seen_pairs WHERE participant_id = ?1",
+            "bob"
+        ),
+        0
     );
 }

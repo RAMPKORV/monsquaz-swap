@@ -566,6 +566,53 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("marks a participant as left only after two confirmations", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Participants" }));
+    await screen.findByRole("heading", { level: 1, name: "Participants" });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Noor as left" }));
+    expect(
+      screen.getByText(/held track is skipped now and returns unchanged/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/only you can undo this/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Mark as left now" }));
+    expect(
+      await screen.findByText(/the participant left the event/i),
+    ).toBeInTheDocument();
+  });
+
+  it("cancels a leave without a change", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Participants" }));
+    await screen.findByRole("heading", { level: 1, name: "Participants" });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Noor as left" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.queryByText(/held track is skipped now/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/the participant left the event/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("asks a left participant back only after two confirmations", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Participants" }));
+    await screen.findByRole("heading", { level: 1, name: "Participants" });
+    const [restore] = screen.getAllByRole("button", { name: /^Restore / });
+    fireEvent.click(restore);
+    expect(screen.getByText(/the bot sends one DM/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send the restore DM" }));
+    expect(
+      await screen.findByText(/the bot asks the participant/i),
+    ).toBeInTheDocument();
+  });
+
   it("hides host-only planner data in participant view", async () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
@@ -924,3 +971,78 @@ describe("async queue", () => {
     ).toBeInTheDocument();
   });
 });
+
+
+  it("sets the fill-in flow and both fill-in windows", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Event setup" }));
+    await screen.findByRole("heading", { level: 1, name: "Event setup" });
+    const flow = screen.getByLabelText("Fill-in flow");
+    expect(flow).toHaveValue("host_appoints");
+    fireEvent.change(flow, { target: { value: "auto_chain" } });
+    fireEvent.change(screen.getByLabelText("Fill-in edit window"), {
+      target: { value: "48" },
+    });
+    fireEvent.change(screen.getByLabelText("Fill-in claim window"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByText(/Automatic chain · 12 h to claim, 48 h to edit/),
+    ).toBeInTheDocument();
+  });
+
+  it("reorders and removes people from the fill-in offer list", async () => {
+    setUrl("?demo=1&dialog=fillin");
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    const dialog = await screen.findByRole("dialog", { name: "Assign a fill-in" });
+    fireEvent.change(within(dialog).getByLabelText("Track code"), {
+      target: { value: "S7F3A" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Find people" }));
+    const person = await within(dialog).findByLabelText("Person");
+    await within(dialog).findByRole("option", { name: /Tove/ });
+    fireEvent.change(person, { target: { value: "user-08" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add to offer list" }),
+    );
+    fireEvent.change(person, { target: { value: "user-04" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add to offer list" }),
+    );
+    expect(
+      within(dialog).getByText(/6-hour claim window/),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Move Tove down" }),
+    );
+    const list = within(dialog).getByRole("list");
+    expect(within(list).getAllByRole("listitem")[0]).toHaveTextContent("Jules");
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Remove Jules from the offer list",
+      }),
+    );
+    expect(within(list).queryByText(/Jules/)).not.toBeInTheDocument();
+  });
+
+
+  it("shows the fill-in branch of the leave dialog", async () => {
+    setUrl("?demo=1&view=people&dialog=leave&person=fillin");
+    render(<App />);
+    const dialog = await screen.findByRole("dialog", {
+      name: /Mark Jules as left/,
+    });
+    expect(
+      within(dialog).getByText(
+        "This person has no personal seed track.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText(/seed track stays in the event/),
+    ).not.toBeInTheDocument();
+  });

@@ -16,6 +16,8 @@ pub enum DbError {
     SchemaTooNew { found: i64, supported: i64 },
     #[error("invalid enum value: {0}")]
     InvalidEnum(String),
+    #[error("participant {participant} has already seen track {track}")]
+    SeenPairRepeat { track: String, participant: String },
 }
 
 /// A single SQLite connection with the project pragmas and migrations applied.

@@ -104,6 +104,7 @@ fn every_state_transition_runs_the_hook_before_the_change() {
     );
 }
 
+// scenario: A failed backup stops the transition
 #[test]
 fn a_failed_backup_refuses_the_transition() {
     let dir = tempfile::tempdir().unwrap();
@@ -141,6 +142,7 @@ fn hook(root: &Path, blob_root: &Path) -> swap_db::TransitionHook {
     })
 }
 
+// scenario: The app makes a backup before an event state transition
 #[test]
 fn the_backup_before_a_transition_holds_the_state_before_the_change() {
     let dir = tempfile::tempdir().unwrap();

@@ -89,7 +89,7 @@ Use these exact terms. The full definitions are in `ai-rules/DOMAIN.md`.
 | skip | pass, decline (use "skip" for the recorded turn) |
 | reveal | launch, release (use "release stream" for the external show) |
 | computer | machine |
-| backup record, backup folder | snapshot, manifest, dump |
+| backup record, backup folder | snapshot, dump |
 | bot lock | writer lock, heartbeat lock |
 | seen ledger | history, touch log |
 

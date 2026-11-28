@@ -2,7 +2,7 @@
 
 > <!-- GENERATED FILE — run `node scripts/trace-scenarios.mjs`; do not edit by hand. -->
 
-Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
+Total: 229 scenarios. Mapped: 114. Pending: 115. Exempt: 0.
 
 | Feature | Scenarios | Mapped | Pending | Exempt |
 |---|---|---|---|---|
@@ -15,7 +15,7 @@ Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 | `fill_ins.feature` | 22 | 21 | 1 | 0 |
 | `groups.feature` | 12 | 5 | 7 | 0 |
 | `join_and_seed.feature` | 33 | 21 | 12 | 0 |
-| `ops.feature` | 16 | 4 | 12 | 0 |
+| `ops.feature` | 39 | 28 | 11 | 0 |
 | `participation.feature` | 7 | 3 | 4 | 0 |
 | `privacy.feature` | 8 | 2 | 6 | 0 |
 | `reveal.feature` | 17 | 6 | 11 | 0 |
@@ -127,7 +127,6 @@ Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 - A crash after a send repeats that send (pending)
 - The host restarts during an active event (pending)
 - A failed command does not change state (pending)
-- A backup can be restored (pending)
 - The audit log records an override (pending)
 - A bot outage is visible (pending)
 - A DM sent during an outage is recovered (pending)

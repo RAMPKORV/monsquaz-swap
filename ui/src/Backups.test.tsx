@@ -156,6 +156,7 @@ beforeEach(() => {
 
 describe("BackupCard", () => {
   // scenario: The host makes a backup on request
+  // scenario: The app shows the backup history
   it("writes a backup, announces it, and restores focus", async () => {
     renderCard();
     expect(await screen.findByText("Swap backups")).toBeInTheDocument();
@@ -251,6 +252,8 @@ describe("BackupCard", () => {
     expect(screen.queryByText("On")).not.toBeInTheDocument();
   });
 
+  // scenario: The restore wizard checks the backup
+  // scenario: The restore wizard warns about an old backup
   it("walks the restore wizard from choice to done", async () => {
     const onRestored = vi.fn();
     const onEnterToken = vi.fn();
@@ -380,6 +383,7 @@ describe("BackupCard", () => {
     ).toBeInTheDocument();
   });
 
+  // scenario: The restore wizard refuses a damaged backup
   it("keeps the wizard open when the backup is damaged", async () => {
     vi.mocked(previewRestore).mockRejectedValue({
       code: "MSW-BACKUP-002",
@@ -503,6 +507,7 @@ describe("BackupCard", () => {
     await waitFor(() => expect(choose).toHaveFocus());
   });
 
+  // scenario: The host deletes every backup
   it("shows the empty restore state and purge scope", async () => {
     vi.mocked(loadRestoreSource).mockResolvedValue({
       folderName: "Swap backups",

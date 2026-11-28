@@ -155,6 +155,7 @@ fn a_backup_has_a_snapshot_a_manifest_and_the_referenced_blobs() {
     assert_eq!(names.len(), 2, "{names:?}");
 }
 
+// scenario: A backup copies each file one time
 #[test]
 fn a_second_backup_does_not_copy_a_blob_again() {
     let fixture = Fixture::new();
@@ -197,6 +198,7 @@ fn a_missing_source_blob_fails_the_backup_without_a_visible_snapshot() {
     assert_eq!(leftovers, 0);
 }
 
+// scenario: A partial backup never looks complete
 #[test]
 fn a_partial_backup_is_not_listed_and_the_next_backup_removes_it() {
     let fixture = Fixture::new();
@@ -229,6 +231,7 @@ fn a_partial_backup_is_not_listed_and_the_next_backup_removes_it() {
     assert!(incomplete.exists());
 }
 
+// scenario: Retention removes old backups
 #[test]
 fn retention_keeps_the_newest_backups_of_each_kind_and_sweeps_blobs() {
     let fixture = Fixture::new();
@@ -264,6 +267,7 @@ fn retention_keeps_the_newest_backups_of_each_kind_and_sweeps_blobs() {
     assert!(!fixture.backup_blob(&old_hash).exists());
 }
 
+// scenario: Retention keeps the newest complete backup
 #[test]
 fn retention_never_removes_the_newest_complete_backup() {
     let fixture = Fixture::new();
@@ -340,6 +344,7 @@ fn verification_refuses_a_traversal_id() {
     }
 }
 
+// scenario: The host must type a confirmation to restore
 #[test]
 fn a_restore_needs_the_typed_confirmation_and_keeps_the_current_data() {
     let fixture = Fixture::new();
@@ -386,6 +391,7 @@ fn a_restore_of_a_damaged_backup_keeps_the_current_data() {
     assert!(!fixture.data.join("pre-restore").exists());
 }
 
+// scenario: A restore keeps the replaced event data
 #[test]
 fn a_restore_moves_the_replaced_database_aside_and_records_an_audit_entry() {
     let fixture = Fixture::new();
@@ -419,6 +425,7 @@ fn a_restore_moves_the_replaced_database_aside_and_records_an_audit_entry() {
     assert!(EventRepo::get(previous.conn(), "evt-2").unwrap().is_some());
 }
 
+// scenario: The host deletes every backup
 #[test]
 fn purge_needs_the_typed_confirmation_and_removes_only_backup_data() {
     let fixture = Fixture::new();
@@ -484,6 +491,8 @@ fn a_backup_holds_no_planted_secret_from_outside_the_database() {
     }
 }
 
+// scenario: A second computer refuses to start the bot
+// scenario: The host takes over the bot lock
 #[test]
 fn a_restored_copy_with_a_fresh_foreign_heartbeat_refuses_until_takeover() {
     let fixture = Fixture::new();
@@ -557,6 +566,7 @@ fn a_restored_copy_with_a_fresh_foreign_heartbeat_refuses_until_takeover() {
     ));
 }
 
+// scenario: A stale bot lock does not block the bot
 #[test]
 fn a_stale_foreign_heartbeat_does_not_block() {
     let fixture = Fixture::new();

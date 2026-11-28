@@ -87,15 +87,6 @@ Feature: Host operations and recovery
     Then the assignment keeps its previous state
     And the outbox contains no effect for the failed command
 
-  @pending
-  Scenario: A backup can be restored
-    Given an automatic backup from before a transition
-    When the host restores the backup
-    Then the app checks the backup integrity
-    And the app refuses a backup that is older than the current ledger
-    And the host confirms the restore
-    And the app records the restore
-
   Scenario: The app makes a backup before an event state transition
     Given a backup folder that the host chose
     And an event in the signup state

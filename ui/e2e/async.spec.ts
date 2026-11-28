@@ -93,7 +93,7 @@ test("the host runs an async queue from intake to the reveal", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Publish reveal" })
     .click();
-  await expect(page.getByText("Published")).toBeVisible();
+  await expect(page.getByText("Published", { exact: true })).toBeVisible();
   await expect(page.getByText(/Browser Async/).first()).toBeVisible();
 
   // The minimum width still fits the reveal screen.

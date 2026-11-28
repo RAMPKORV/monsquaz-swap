@@ -1050,6 +1050,7 @@ mod tests {
         );
     }
 
+    // scenario: The app makes a daily backup
     #[test]
     fn the_daily_tick_backs_up_once_per_24_hours() {
         let dir = tempfile::tempdir().unwrap();
@@ -1068,6 +1069,7 @@ mod tests {
         );
     }
 
+    // scenario: A computer that lost the bot lock stops the bot
     #[test]
     fn the_tick_reports_a_lost_lock_and_does_not_overwrite_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -1229,6 +1231,7 @@ mod tests {
         assert_eq!(newest_recovery_dir(&data), Some(later));
     }
 
+    // scenario: A backup never contains the bot token
     #[test]
     fn a_backup_never_contains_the_planted_bot_token() {
         let dir = tempfile::tempdir().unwrap();

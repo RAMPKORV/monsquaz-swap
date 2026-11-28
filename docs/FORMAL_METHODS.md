@@ -7,8 +7,8 @@ current tools, the planned routes, and the gates.
 
 ## Goals
 
-1. Find design bugs in claim, offer, custody, expiry, schedule, and delivery
-   before they reach users.
+1. Find design bugs in claim, offer, custody, expiry, schedule, delivery,
+   reveal, and anonymity before they reach users.
 2. Prevent invariant regressions when the modeled code changes.
 3. Keep a precise, reviewable description of the rules for humans and agents.
 
@@ -113,9 +113,9 @@ describes.
 | Engine trace validation | NDJSON traces checked by TLC | MSW-106 | planned |
 | Planner checker | `crates/swap-plan-check/verus/flat_plan_check.rs` | MSW-107, MSW-133 | pilot: checker proved; certificate verifier open |
 | Inductive invariants | Apalache | MSW-108 | planned |
-| Classic schedule | `SwapSchedule.tla` | MSW-037 | planned |
+| Classic schedule | `specs/tla/SwapSchedule.tla` | MSW-037 | implemented |
 | Async queue | `SwapAsync.tla` | MSW-038 | planned |
-| Reveal gate | `SwapReveal.tla` | MSW-041 | planned |
+| Reveal gate | `specs/tla/SwapReveal.tla` | MSW-041 | implemented |
 | Rust mutation testing | `cargo-mutants` nightly | MSW-097 | planned |
 
 ## Gates
@@ -128,6 +128,9 @@ describes.
   when `changed.mjs` reports a mapped change; a skipped job counts as success.
   The nightly run is unconditional. `changed.mjs` uses `git diff
   --no-renames`, so a moved or renamed mapped file also runs the gate.
+- The PR formal job runs only for `pull_request` events. A direct push to
+  `main` does not run it; the nightly job is the backstop. Add a `push` trigger
+  if the release gate must cover direct pushes.
 - `scripts/check.sh` runs `scripts/formal/check.sh` when `java` is on `PATH`.
   Otherwise it prints `formal: SKIPPED (no java)`.
 - The "Model" step in `ai-rules/WORKFLOW.md` applies to every change to a
@@ -178,6 +181,60 @@ A restart is a stuttering step because the outbox and event state live in
 SQLite. The model proves safety across duplicate sends, lost responses, and
 the retry cap. It does not prove wall-clock liveness.
 
+The schedule model checks:
+
+- `CompleteRounds`: R1 covers every track with its owner. Every planned
+  exchange round gives one track to each participant and one participant to
+  each track.
+- `NoRepeat`: no participant-track pair appears in two exchange rounds.
+- `NoOwnTrack`: no exchange round gives a participant the track they seeded.
+- `GroupContainment`: a participant receives a track from the group one phase
+  step forward. A fallback phase can use the global pool.
+- `SealedPlanComplete`: a locked plan has every exchange round.
+- `TypeOK`: every variable has the expected shape.
+
+The schedule model assumes strict participation. Flexible handoff caps, away
+ranges, fill-ins, bench states, and manual edits are outside the checked bound.
+The group bounds keep the group sizes equal because the classic group planner
+requires one track per participant per group.
+
+The reveal model checks:
+
+- `NoRevealBeforeHostAction`: the reveal is not published before the one-shot
+  host command.
+- `NoRevealWithActiveAssignments`: the reveal is not published while an
+  assignment is active.
+- `NoIdentityBeforeReveal`: before the gate, the participant projection has no
+  seed owner, title, or comment fact in any mode. It has no editor assignment
+  fact in hidden mode. An open schedule can show the editor assignment (D-045).
+- `StreamSafeDefault`: stream-safe is on at Init. While it is on, the presenter
+  has no identity or assignment fact. It turns off only after host
+  confirmation, before or after publish.
+- `PublishedImpliesPlanComplete`: a reveal is published only after the plan is
+  complete.
+- `PublishedImpliesCommitmentVerified`: a reveal is published only after the
+  commitment is verified.
+- `TypeOK`: every variable has the expected shape.
+
+The reveal model abstracts the participant projection to four fact kinds:
+seed owner, title, comments, and editor assignment. It does not model opaque
+assignment text, the Discord message split, redaction, or the ZIP export.
+Atomic publish is structural: one action sets the state and the projection.
+The model does not recompute the commitment hash.
+
+The open schedule shows editor assignment facts before the reveal (D-045). It
+never shows seed owners, titles, or comments. **Known code gap (MSW-120):** the
+current engine `participant_schedule` and the Discord `handle_schedule` still
+send owner names, titles, and comments in open mode. The model forbids that
+leak. Do not treat the current open-schedule response as a legal behaviour.
+`mapping.json` lists both projection functions, so a fix to MSW-120 runs the
+reveal gate.
+
+The stream-safe switch is a UI control (`ui/src/views/Reveal.tsx` and
+`ui/src/App.tsx`). It is not listed in `mapping.json`, so a UI-only presenter
+change does not trigger the formal gate. The model checks the protocol, not the
+rendering.
+
 ## Model-checking bounds
 
 | Run | Model | Bound | Time budget |
@@ -186,9 +243,18 @@ the retry cap. It does not prove wall-clock liveness.
 | Claim nightly | 3 participants × 3 tracks | 2 ticks | 20 minutes |
 | Delivery PR | 3 effects | 2 attempts | 5 minutes |
 | Delivery nightly | 4 effects | 3 attempts | 20 minutes |
+| Schedule PR | 4 participants × 4 tracks | 3 exchange rounds | 5 minutes |
+| Schedule grouped PR | 4 participants × 4 tracks | 2 groups, 2 exchange rounds | 5 minutes |
+| Schedule nightly | 6 participants × 6 tracks | 4 exchange rounds, 2 groups | 20 minutes |
+| Reveal PR | 2 participants × 2 tracks | 1 publish gate, hidden schedule | 5 minutes |
+| Reveal nightly | 3 participants × 3 tracks | 1 publish gate, open schedule | 20 minutes |
 
 The claim PR model has 750 distinct states and the nightly model has 2,338,158.
 The delivery PR model has 343 distinct states and the nightly model has 6,561.
+The schedule PR model has 82 distinct states and the grouped PR model has 10.
+The schedule nightly model has 1,445 and finishes in 2 seconds on 24 workers.
+The reveal PR model has 771 distinct states and the nightly model has 24,579;
+both finish in about one second on 24 workers.
 The nightly timeout is a hard ceiling. If a model exceeds its budget, reduce the
 scope or use Apalache. A skipped model must be reported, never silently
 ignored.
@@ -204,6 +270,16 @@ TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
 `NoLostEffect`, `FailedWereAlerted`, `AttemptsBounded`, and the delivery
 `TypeOK`. A parse error or an unrelated failure is not counted as a detected
 mutation.
+
+`scripts/formal/check.sh` applies the same rule to the schedule and reveal
+models. The schedule set breaks `TypeOK`, `CompleteRounds` (the seed round and
+the exchange matching), `NoRepeat`, `NoOwnTrack`, `GroupContainment`, and
+`SealedPlanComplete`. The reveal set breaks `TypeOK`,
+`NoRevealBeforeHostAction`, `NoRevealWithActiveAssignments`,
+`NoIdentityBeforeReveal` (a hidden-mode assignment leak and open-mode owner,
+title, and comment leaks), `StreamSafeDefault` (default off, an unconfirmed
+disable, and a full presenter), `PublishedImpliesPlanComplete`, and
+`PublishedImpliesCommitmentVerified`. The gate detects 34 mutations in total.
 
 ## Conformance
 
@@ -235,6 +311,11 @@ canary strings, outbound-effect audits, log scans, and adversarial review. Use
 TLA+ only for the reveal gate and the modeled outbound schema. Type-level
 anonymity (MSW-105) makes a leak a compile error for the wrapped values.
 
+The reveal model permits the D-045 open-schedule assignment view and forbids
+seed owners, titles, and comments before the reveal. The current open-schedule
+response still exposes those facts (MSW-120). The model records the required
+behaviour, not the gap.
+
 Module metadata is scrubbed. Non-module audio and zip files pass through
 unchanged, so ID3, Vorbis, and WAV LIST tags remain a residual anonymity risk.
 The default allowlist includes audio. Treat this as a product decision, not a
@@ -251,8 +332,8 @@ delivery, and reveal models are required before 1.0.0.
 ## Commands
 
 ```bash
-scripts/formal/check.sh          # TLA+ PR model + mutations
-scripts/formal/check.sh nightly  # deeper model
+scripts/formal/check.sh          # TLA+ PR models + mutations
+scripts/formal/check.sh nightly  # deeper models
 node scripts/formal/changed.mjs origin/main   # does this branch touch a model?
 cargo test -p swap-core --test assignment_machine
 cargo test -p swap-discord custom_id   # custom-ID property tests

@@ -88,6 +88,30 @@ run_delivery_mutation() {
     "$3" "$4"
 }
 
+run_schedule_mutation() {
+  run_named_mutation "$1" "$2" \
+    specs/tla/SwapSchedule.tla \
+    specs/tla/SwapScheduleMutation.cfg \
+    specs/tla/SwapScheduleMutation.tla \
+    "$3" "$4"
+}
+
+run_reveal_mutation() {
+  run_named_mutation "$1" "$2" \
+    specs/tla/SwapReveal.tla \
+    specs/tla/SwapRevealMutation.cfg \
+    specs/tla/SwapRevealMutation.tla \
+    "$3" "$4"
+}
+
+run_reveal_open_mutation() {
+  run_named_mutation "$1" "$2" \
+    specs/tla/SwapReveal.tla \
+    specs/tla/SwapRevealOpenMutation.cfg \
+    specs/tla/SwapRevealMutation.tla \
+    "$3" "$4"
+}
+
 echo "TLA+ PR model"
 run_tlc specs/tla/SwapClaimPR.cfg specs/tla/SwapClaimPR.tla
 run_claim_mutation "clock leaves the natural numbers" "TypeOK" "now' = now + 1" "now' = -1"
@@ -123,9 +147,91 @@ run_delivery_mutation "failure drops the host alert" "FailedWereAlerted" \
   "alerted' = alerted \\cup {e}" \
   "UNCHANGED alerted"
 
+echo "TLA+ schedule PR model"
+run_tlc specs/tla/SwapSchedulePR.cfg specs/tla/SwapSchedulePR.tla
+echo "TLA+ grouped schedule PR model"
+run_tlc specs/tla/SwapScheduleGroupPR.cfg specs/tla/SwapScheduleGroupPR.tla
+run_schedule_mutation "round cursor leaves the domain" "TypeOK" \
+  "    /\ nextRound' = nextRound + 1" \
+  "    /\ nextRound' = 1"
+run_schedule_mutation "the seed round loses a track owner" "CompleteRounds" \
+  'THEN [t \in Tracks |-> Owner[t]]' \
+  'THEN [t \in Tracks |-> NoOne]'
+run_schedule_mutation "an exchange round is not a matching" "CompleteRounds" \
+  '    /\ \A p \in Participants : Cardinality({t \in Tracks : f[t] = p}) = 1' \
+  '    /\ TRUE'
+run_schedule_mutation "a pair repeats in a later round" "NoRepeat" \
+  '    /\ \A r \in (2 .. (nextRound - 1)), t \in Tracks : plan[r][t] /= f[t]' \
+  '    /\ TRUE'
+run_schedule_mutation "a participant receives their own track" "NoOwnTrack" \
+  '    /\ \A t \in Tracks : f[t] /= Owner[t]' \
+  '    /\ TRUE'
+run_schedule_mutation "a round ignores group containment" "GroupContainment" \
+  '    /\ ((\A t \in Tracks : TrackGroup(t) = TargetGroup(f[t], nextRound))
+        \/ PhaseOf(nextRound) \in FallbackPhases)' \
+  '    /\ TRUE'
+run_schedule_mutation "the plan locks before the last round" "SealedPlanComplete" \
+  '    /\ nextRound = RoundCount + 1' \
+  '    /\ nextRound <= RoundCount'
+
+echo "TLA+ reveal PR model"
+run_tlc specs/tla/SwapRevealPR.cfg specs/tla/SwapRevealPR.tla
+run_reveal_mutation "event state leaves the domain" "TypeOK" \
+  '    /\ eventState'"'"' = "revealed"' \
+  '    /\ eventState'"'"' = "reveal"'
+run_reveal_mutation "publish ignores the host command" "NoRevealBeforeHostAction" \
+  '    /\ hostCommand
+    /\ active = {}' \
+  '    /\ TRUE
+    /\ active = {}'
+run_reveal_mutation "publish ignores active assignments" "NoRevealWithActiveAssignments" \
+  '    /\ hostCommand
+    /\ active = {}' \
+  '    /\ hostCommand
+    /\ TRUE'
+run_reveal_mutation "assignment fact leaks in hidden mode" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection' \
+  '    /\ projection = AssignmentFacts'
+run_reveal_open_mutation "owner fact leaks in open mode" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection' \
+  '    /\ projection = SafeProjection \cup OwnerFacts'
+run_reveal_open_mutation "title fact leaks in open mode" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection' \
+  '    /\ projection = SafeProjection \cup TitleFacts'
+run_reveal_open_mutation "comments fact leaks in open mode" "NoIdentityBeforeReveal" \
+  '    /\ projection = SafeProjection' \
+  '    /\ projection = SafeProjection \cup CommentFacts'
+run_reveal_mutation "stream-safe starts off" "StreamSafeDefault" \
+  '    /\ streamSafe = TRUE' \
+  '    /\ streamSafe = FALSE'
+run_reveal_mutation "presenter starts with full identities" "StreamSafeDefault" \
+  '    /\ presenter = {}' \
+  '    /\ presenter = FullProjection'
+run_reveal_mutation "stream-safe turns off without confirmation" "StreamSafeDefault" \
+  '    /\ streamSafe
+    /\ confirmed
+    /\ streamSafe'"'"' = FALSE' \
+  '    /\ streamSafe
+    /\ TRUE
+    /\ streamSafe'"'"' = FALSE'
+run_reveal_mutation "publish ignores an incomplete plan" "PublishedImpliesPlanComplete" \
+  '    /\ planComplete
+    /\ commitmentVerified' \
+  '    /\ TRUE
+    /\ commitmentVerified'
+run_reveal_mutation "publish ignores an unverified commitment" "PublishedImpliesCommitmentVerified" \
+  '    /\ planComplete
+    /\ commitmentVerified' \
+  '    /\ planComplete
+    /\ TRUE'
+
 if [ "$MODE" = "nightly" ]; then
   echo "TLA+ claim nightly model"
   run_tlc specs/tla/SwapClaimNightly.cfg specs/tla/SwapClaimNightly.tla
   echo "TLA+ delivery nightly model"
   run_tlc specs/tla/SwapDeliveryNightly.cfg specs/tla/SwapDeliveryNightly.tla
+  echo "TLA+ schedule nightly model"
+  run_tlc specs/tla/SwapScheduleNightly.cfg specs/tla/SwapScheduleNightly.tla
+  echo "TLA+ reveal nightly model"
+  run_tlc specs/tla/SwapRevealNightly.cfg specs/tla/SwapRevealNightly.tla
 fi

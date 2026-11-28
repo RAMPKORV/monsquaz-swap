@@ -65,6 +65,78 @@
           "functions": ["deliveries table"]
         }
       ]
+    },
+    {
+      "name": "SwapSchedule",
+      "spec": "specs/tla/SwapSchedule.tla",
+      "configs": ["specs/tla/SwapSchedulePR.cfg", "specs/tla/SwapScheduleGroupPR.cfg", "specs/tla/SwapScheduleNightly.cfg", "specs/tla/SwapScheduleMutation.cfg"],
+      "actions": ["AssignRound", "Seal"],
+      "covers": [
+        {
+          "path": "crates/swap-core/src/schedule.rs",
+          "functions": ["Schedule::generate", "Schedule::generate_with", "cyclic_schedule", "random_schedule", "balanced_schedule", "match_round"]
+        },
+        {
+          "path": "crates/swap-core/src/groups.rs",
+          "functions": ["suggest_groups", "group_sizes", "default_cadence", "phase_count", "group_warnings", "group_schedule"]
+        },
+        {
+          "path": "crates/swap-core/src/state.rs",
+          "functions": ["RoundKind", "RoundStatus"]
+        },
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["generate_schedule", "generate_schedule_internal", "validate_plan_assignments", "start_event", "start_event_with_channel"]
+        },
+        {
+          "path": "crates/swap-engine/tests/classic_flow.rs",
+          "functions": ["the_event_scheduler_setting_selects_each_strategy_and_keeps_the_plan_valid", "group_events_rotate_participants_and_keep_tracks"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["PlanRepo::latest", "PlanRepo::insert_assignment", "PlanRepo::list_assignments"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["plans table", "plan_assignments table", "event_rounds kind", "event_rounds status"]
+        }
+      ]
+    },
+    {
+      "name": "SwapReveal",
+      "spec": "specs/tla/SwapReveal.tla",
+      "configs": ["specs/tla/SwapRevealPR.cfg", "specs/tla/SwapRevealNightly.cfg", "specs/tla/SwapRevealMutation.cfg", "specs/tla/SwapRevealOpenMutation.cfg"],
+      "actions": ["HostPress", "Publish", "Claim", "Resolve", "CompletePlan", "VerifyCommitment", "ConfirmStreamSafeOff", "DisableStreamSafe", "EnableStreamSafe"],
+      "covers": [
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["reveal", "reveal_with_channel", "verify_plan_commitment", "participant_schedule"]
+        },
+        {
+          "path": "crates/swap-engine/src/inbound.rs",
+          "functions": ["handle_schedule"]
+        },
+        {
+          "path": "crates/swap-core/src/state.rs",
+          "functions": ["EventState::can_transition_to", "EventState::transition_to"]
+        },
+        {
+          "path": "crates/swap-engine/tests/classic_flow.rs",
+          "functions": ["the_classic_loop_reaches_a_reveal"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["AssignmentRepo::list_active", "EventRepo::set_state", "PlanRepo::latest", "PlanRepo::list_assignments"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["events.state", "assignments.status"]
+        },
+        {
+          "path": "src-tauri/src/host.rs",
+          "functions": ["host_reveal"]
+        }
+      ]
     }
   ]
 }

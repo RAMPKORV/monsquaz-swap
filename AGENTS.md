@@ -79,8 +79,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
 ./bin/project next
 ./bin/project issue show MSW-###
 ./bin/project issue claim MSW-### --as-agent <name>
-./bin/project worktree new MSW-### --as-agent <name>          # first batch issue
-./bin/project worktree finish MSW-### --yes --as-agent <name>   # from main checkout
+./bin/project worktree new MSW-### --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"                 # first batch issue
+./bin/project worktree finish MSW-### --yes --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"                 # from main checkout
 
 # app
 pnpm install
@@ -96,8 +98,8 @@ node scripts/trace-scenarios.mjs   # Gherkin traceability gate
 scripts/formal/check.sh            # TLA+ models (needs java)
 ```
 
-`worktree new` and `worktree finish` need `--force --reason "D-021: no PRD
-sign-off gate"`. See `ai-rules/WORKFLOW.md`.
+`worktree new` and `worktree finish` need `--force` because of a PRD sign-off
+gate that this project does not use. See `ai-rules/WORKFLOW.md`.
 
 Batch 3–6 related issues into one branch, one PR, and one CI run. Claim every
 issue, create the worktree from the first issue, and work the rest in it. The

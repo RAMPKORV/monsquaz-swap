@@ -1,5 +1,5 @@
 {
-  "$comment": "Each TLA+ model lists the files and functions it describes. scripts/formal/changed.mjs reads 'paths' to decide whether the formal gate runs. Keep 'functions' as a reviewer guide; the gate matches files only.",
+  "$comment": "scripts/formal/changed.mjs reads 'always' (path prefixes) and, for each model, 'spec', 'configs', and 'covers[].path' (exact file paths, or prefixes that end in '/'). A change to any of them runs the formal gate. 'functions' and 'actions' are a guide for reviewers; the gate matches files only.",
   "always": ["specs/tla/", "scripts/formal/"],
   "models": [
     {

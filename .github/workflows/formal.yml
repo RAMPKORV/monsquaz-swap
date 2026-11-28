@@ -1,7 +1,9 @@
 name: Formal
 
+# ci.yml calls this workflow for every pull request, so the PR model job is
+# part of ci-gate. The nightly job runs only from this workflow's own triggers.
 on:
-  pull_request:
+  workflow_call:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
@@ -45,7 +47,7 @@ jobs:
         run: scripts/formal/check.sh
 
   tla-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.workflow == 'Formal' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

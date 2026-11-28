@@ -38,10 +38,17 @@ cargo test --workspace
 cargo test -p swap-discord --features test-proxy --test setup_http
 
 echo "== formal =="
+skipped=()
 if command -v java >/dev/null 2>&1; then
   scripts/formal/check.sh
 else
   echo "formal: SKIPPED (no java)"
+  skipped+=("formal — no java")
 fi
 
-echo "== check OK =="
+if [ "${#skipped[@]}" -eq 0 ]; then
+  echo "== check OK (skipped: none) =="
+else
+  joined="$(printf '%s; ' "${skipped[@]}")"
+  echo "== check OK (skipped: ${joined%; }) =="
+fi

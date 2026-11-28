@@ -45,7 +45,7 @@ function main(argv) {
     files = argv.slice(1);
   } else if (argv.length === 1) {
     try {
-      files = execFileSync("git", ["diff", "--name-only", `${argv[0]}...HEAD`], {
+      files = execFileSync("git", ["diff", "--name-only", "--no-renames", `${argv[0]}...HEAD`], {
         cwd: root,
         encoding: "utf8",
       })

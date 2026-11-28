@@ -117,9 +117,11 @@ when a workflow changes.
   - Rust: fmt, clippy, `cargo test --workspace` (unit, property with bounded
     cases, DB, cucumber, simulation), the `setup_http` proxy test;
   - Tauri smoke build on Ubuntu and Windows;
-  - E2E (`e2e.yml`): `cargo test -p swap-e2e` and the Playwright journeys.
-- **PR, mapped files only (`formal.yml`):** the TLA+ PR models and the mutation
-  set when `scripts/formal/changed.mjs` reports a mapped change.
+  - E2E (`e2e.yml`): `cargo test -p swap-e2e` and the Playwright journeys;
+  - formal (`formal.yml`, called from `ci.yml` and part of `ci-gate`): the
+    TLA+ PR models and the mutation set when `scripts/formal/changed.mjs`
+    reports a mapped change (pull requests only); otherwise the job is
+    skipped and counts as success.
 - **Nightly (`formal.yml`):** the TLA+ nightly models.
 - **Release (`release.yml`):** the E2E gate, the Windows and Linux installers,
   attestations, and `SHA256SUMS`.

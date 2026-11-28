@@ -193,10 +193,16 @@ jobs:
     name: E2E
     uses: ./.github/workflows/e2e.yml
 
+  formal:
+    name: Formal
+    # The PR model job runs only when a mapped file changed. A skipped job
+    # counts as success in ci-gate.
+    uses: ./.github/workflows/formal.yml
+
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [tracker, spec-gates, ui, design, rust, tauri-smoke, e2e]
+    needs: [tracker, spec-gates, ui, design, rust, tauri-smoke, e2e, formal]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

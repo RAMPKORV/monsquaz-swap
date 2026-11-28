@@ -114,9 +114,11 @@ describes.
 - `specs/tla/mapping.json` lists the Rust files and functions that each model
   covers. `scripts/formal/changed.mjs <base>` exits 0 when a diff touches a
   mapped file, `specs/tla/`, or `scripts/formal/`.
-- The PR workflow `.github/workflows/formal.yml` runs `scripts/formal/check.sh`
-  only when `changed.mjs` reports a mapped change. The nightly run is
-  unconditional.
+- `ci.yml` calls `.github/workflows/formal.yml` for every pull request, so the
+  formal job is part of `ci-gate`. The job runs `scripts/formal/check.sh` only
+  when `changed.mjs` reports a mapped change; a skipped job counts as success.
+  The nightly run is unconditional. `changed.mjs` uses `git diff
+  --no-renames`, so a moved or renamed mapped file also runs the gate.
 - `scripts/check.sh` runs `scripts/formal/check.sh` when `java` is on `PATH`.
   Otherwise it prints `formal: SKIPPED (no java)`.
 - The "Model" step in `ai-rules/WORKFLOW.md` applies to every change to a

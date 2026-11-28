@@ -10,8 +10,8 @@ use swap_engine::{
     Effect, EngineError, EventSettings, FillInFlow, FillInTier, JoinRequest, LeaveActor,
     PassthroughPreparer, SubmitRequest, assign_fill_in, claim, create_event_with_secret,
     event_status, fill_in_candidates, generate_schedule, join_with_seed, leave_event, lock_roster,
-    move_round_deadline, open_round, open_seed_round, skip, start_event, start_fill_in_list,
-    submit, tick_deadlines,
+    move_round_deadline, open_round, open_seed_round, set_track_title, skip, start_event,
+    start_fill_in_list, submit, tick_deadlines,
 };
 use swap_files::BlobStore;
 
@@ -22,6 +22,7 @@ const T1: i64 = 2_000;
 const T2: i64 = 2_100;
 const T3: i64 = 2_200;
 const T4: i64 = 2_300;
+const T5: i64 = 2_400;
 
 struct Fixture {
     db: Db,
@@ -244,6 +245,25 @@ fn add_fill_in(db: &Db, user_id: &str) {
     add_fill_in_in(db, user_id, "UTC");
 }
 
+fn add_fill_in_with_cap(db: &Db, user_id: &str, cap: u32) {
+    ParticipantRepo::upsert(
+        db.conn(),
+        &ParticipantRecord {
+            event_id: EVENT.to_string(),
+            user_id: user_id.to_string(),
+            display_name: format!("Volunteer {user_id}"),
+            role: Role::FillIn,
+            membership: Membership::Active,
+            readiness: Readiness::Ready,
+            timezone: "UTC".to_string(),
+            max_handoffs: cap,
+            created_at: T0,
+            updated_at: T0,
+        },
+    )
+    .unwrap();
+}
+
 fn add_fill_in_in(db: &Db, user_id: &str, timezone: &str) {
     ParticipantRepo::upsert(
         db.conn(),
@@ -321,6 +341,7 @@ fn a_fill_in_after_a_missed_deadline_gets_the_fill_in_window() {
     ));
 }
 
+// scenario: The host sets the fill-in due time
 #[test]
 fn the_host_sets_the_fill_in_due_time_and_a_past_time_is_refused() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -454,6 +475,7 @@ fn expected_extra_turns(
     expected
 }
 
+// scenario: A participant planned for the track is refused
 #[test]
 fn a_participant_planned_for_the_track_later_is_refused() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -477,6 +499,8 @@ fn a_participant_planned_for_the_track_later_is_refused() {
     assert!(!SeenRepo::has(fixture.db.conn(), EVENT, &track_b, &user_a).unwrap());
 }
 
+// scenario: A participant who receives every track is never a candidate
+// scenario: No eligible fill-in exists
 #[test]
 fn a_participant_who_sees_every_track_is_never_a_candidate() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -484,6 +508,8 @@ fn a_participant_who_sees_every_track_is_never_a_candidate() {
     assert!(candidate_ids(&fixture, &track).is_empty());
 }
 
+// scenario: A seeded participant can take one extra turn
+// scenario: A fill-in rescue is credited
 #[test]
 fn a_group_participant_who_submitted_is_an_extra_turn_candidate() {
     let fixture = Fixture::started(10, group_settings());
@@ -529,6 +555,7 @@ fn a_group_participant_who_submitted_is_an_extra_turn_candidate() {
     );
 }
 
+// scenario: A participant who skipped is not eligible
 #[test]
 fn a_participant_who_skipped_is_not_eligible() {
     let fixture = Fixture::started(10, group_settings());
@@ -547,6 +574,7 @@ fn a_participant_who_skipped_is_not_eligible() {
     }
 }
 
+// scenario: The fill-in pool has two tiers in classic mode
 #[test]
 fn an_extra_turn_is_hidden_while_a_volunteer_is_eligible() {
     let fixture = Fixture::started(10, group_settings());
@@ -562,6 +590,7 @@ fn an_extra_turn_is_hidden_while_a_volunteer_is_eligible() {
     assert!(matches!(refused, Err(EngineError::FillInNotEligible(_))));
 }
 
+// scenario: A fill-in has never seen the track
 #[test]
 fn a_volunteer_never_receives_the_same_track_twice() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -719,6 +748,7 @@ fn candidates_rank_by_fewest_edits() {
     assert_eq!(ranked[1].edits, 1);
 }
 
+// scenario: The automatic chain offers the slot to one person at a time
 #[test]
 fn an_auto_chain_offers_three_people_in_rank_order_then_asks_the_host() {
     let fixture = Fixture::started(4, flow(FillInFlow::AutoChain));
@@ -792,6 +822,7 @@ fn the_first_claim_fills_the_chain() {
     assert_eq!(fill_in_decisions(&fixture.db), 0);
 }
 
+// scenario: The host orders a fill-in list
 #[test]
 fn a_host_list_skips_an_ineligible_person_and_works_down_the_list() {
     let fixture = Fixture::started(4, flow(FillInFlow::HostList));
@@ -853,6 +884,7 @@ fn a_host_list_skips_an_ineligible_person_and_works_down_the_list() {
     ));
 }
 
+// scenario: The host appoints a fill-in by default
 #[test]
 fn a_declined_host_appointment_opens_a_host_decision() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -873,6 +905,7 @@ fn a_declined_host_appointment_opens_a_host_decision() {
     assert_eq!(fill_in_decisions(&fixture.db), 0);
 }
 
+// scenario: A fill-in chain respects quiet hours
 #[test]
 fn a_chain_waits_for_quiet_hours_to_end() {
     let fixture = Fixture::started(4, flow(FillInFlow::AutoChain));
@@ -900,6 +933,7 @@ fn a_chain_waits_for_quiet_hours_to_end() {
     assert_eq!(offer.offered_at, morning);
 }
 
+// scenario: A fill-in chain never moves a round
 #[test]
 fn opening_the_next_round_stops_a_waiting_chain() {
     let fixture = Fixture::started(4, flow(FillInFlow::AutoChain));
@@ -933,6 +967,7 @@ fn opening_the_next_round_stops_a_waiting_chain() {
     );
 }
 
+// scenario: A fill-in chain survives a restart
 #[test]
 fn a_chain_resumes_after_a_restart() {
     let directory = tempfile::tempdir().unwrap();
@@ -967,6 +1002,7 @@ fn a_chain_resumes_after_a_restart() {
 
 // ---- D-063, D-064, D-069, D-070, and MSW-084 -------------------------------
 
+// scenario: A participant cannot take a second extra turn in the same round
 #[test]
 fn a_person_cannot_take_two_extra_turns_in_the_same_round() {
     let fixture = Fixture::started(10, group_settings());
@@ -1035,6 +1071,7 @@ fn an_auto_chain_does_not_offer_a_second_extra_turn() {
     assert_ne!(next, helper);
 }
 
+// scenario: The automatic chain moves from tier 1 to tier 2
 #[test]
 fn an_auto_chain_falls_to_tier_two_after_tier_one_declines() {
     let fixture = Fixture::started(10, group_flow(FillInFlow::AutoChain));
@@ -1092,6 +1129,7 @@ fn a_host_list_accepts_a_long_ordered_list() {
     assert_eq!(chain.host_list.len(), 8);
 }
 
+// scenario: A chain offer has a separate claim and edit window
 #[test]
 fn a_chain_offer_has_a_claim_window_and_a_separate_edit_due() {
     let fixture = Fixture::started(4, flow(FillInFlow::AutoChain));
@@ -1196,6 +1234,7 @@ fn a_host_due_time_before_the_round_deadline_is_kept_on_claim() {
     );
 }
 
+// scenario: A fill-in is refused for a cell that is not stranded
 #[test]
 fn a_fill_in_is_refused_for_a_cell_that_is_not_stranded() {
     let fixture = Fixture::started(4, EventSettings::default());
@@ -1416,4 +1455,78 @@ fn a_fill_in_list_exhausts_a_gap_cell_without_a_decision() {
         !list.decision_opened,
         "a gap cell with no assignment row has no decision"
     );
+}
+
+// scenario: A dedicated fill-in edit counts toward the shared budget
+#[test]
+fn a_dedicated_fill_in_respects_the_handoff_cap() {
+    let fixture = Fixture::started(4, EventSettings::default());
+    add_fill_in_with_cap(&fixture.db, "volunteer", 1);
+    let (first_track, round_zero) = fixture.strand_round_zero(1);
+    let second_track = round_zero[1].2.clone();
+    let outcome = assign_fill_in(
+        &fixture.db,
+        EVENT,
+        &first_track,
+        2,
+        "volunteer",
+        None,
+        T4 + 10,
+    )
+    .unwrap();
+    fixture.claim_and_submit("volunteer", &outcome.assignment_id, T4 + 20);
+    assert!(
+        fill_in_candidates(&fixture.db, EVENT, &second_track, 2)
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate.participant_id != "volunteer")
+    );
+    assert!(matches!(
+        assign_fill_in(
+            &fixture.db,
+            EVENT,
+            &second_track,
+            2,
+            "volunteer",
+            None,
+            T4 + 30
+        ),
+        Err(EngineError::FillInNotEligible(_))
+    ));
+}
+
+// scenario: A final fill-in can name the track
+#[test]
+fn a_final_fill_in_can_name_the_track() {
+    let fixture = Fixture::started(4, EventSettings::default());
+    for round in 0..2 {
+        let round_offers = offers(
+            &open_round(&fixture.db, EVENT, round, T4 + round as i64 * 100)
+                .unwrap()
+                .effects,
+        );
+        for (user_id, assignment_id, _) in &round_offers {
+            fixture.claim_and_submit(user_id, assignment_id, T4 + round as i64 * 100 + 1);
+        }
+    }
+    let final_offers = offers(&open_round(&fixture.db, EVENT, 2, T5).unwrap().effects);
+    let (holder, _, track) = final_offers[0].clone();
+    skip(&fixture.db, EVENT, &holder, T5 + 1).unwrap();
+    for (user_id, assignment_id, _) in &final_offers[1..] {
+        fixture.claim_and_submit(user_id, assignment_id, T5 + 2);
+    }
+    add_fill_in(&fixture.db, "volunteer");
+    let outcome =
+        assign_fill_in(&fixture.db, EVENT, &track, 4, "volunteer", None, T5 + 10).unwrap();
+    fixture.claim_and_submit("volunteer", &outcome.assignment_id, T5 + 20);
+    let title = set_track_title(
+        &fixture.db,
+        EVENT,
+        &track,
+        "Final Name",
+        "volunteer",
+        T5 + 30,
+    )
+    .expect("the final fill-in must name the track");
+    assert_eq!(title.title, "Final Name");
 }

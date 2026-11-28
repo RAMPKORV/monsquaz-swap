@@ -156,6 +156,7 @@ Feature: Skips and fill-ins
     Then the bot asks the fill-in for the final title
     And the app stores the title for the reveal
 
+  @pending
   Scenario: A fill-in wins over a late original holder
     Given a fill-in who claimed a skipped slot
     When the original holder submits late

@@ -2,7 +2,7 @@
 
 > <!-- GENERATED FILE — run `node scripts/trace-scenarios.mjs`; do not edit by hand. -->
 
-Total: 206 scenarios. Mapped: 69. Pending: 115. Exempt: 22.
+Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 
 | Feature | Scenarios | Mapped | Pending | Exempt |
 |---|---|---|---|---|
@@ -12,7 +12,7 @@ Total: 206 scenarios. Mapped: 69. Pending: 115. Exempt: 22.
 | `deadlines_and_extensions.feature` | 14 | 3 | 11 | 0 |
 | `delivery.feature` | 10 | 3 | 7 | 0 |
 | `files.feature` | 10 | 1 | 9 | 0 |
-| `fill_ins.feature` | 22 | 0 | 0 | 22 |
+| `fill_ins.feature` | 22 | 21 | 1 | 0 |
 | `groups.feature` | 12 | 5 | 7 | 0 |
 | `join_and_seed.feature` | 33 | 21 | 12 | 0 |
 | `ops.feature` | 16 | 4 | 12 | 0 |
@@ -92,28 +92,7 @@ Total: 206 scenarios. Mapped: 69. Pending: 115. Exempt: 22.
 
 ### `fill_ins.feature`
 
-- The fill-in pool has two tiers in classic mode (exempt)
-- A seeded participant can take one extra turn (exempt)
-- A participant cannot take a second extra turn in the same round (exempt)
-- A participant planned for the track is refused (exempt)
-- A participant who skipped is not eligible (exempt)
-- A participant who receives every track is never a candidate (exempt)
-- The host appoints a fill-in by default (exempt)
-- The automatic chain offers the slot to one person at a time (exempt)
-- The automatic chain moves from tier 1 to tier 2 (exempt)
-- A chain offer has a separate claim and edit window (exempt)
-- The host orders a fill-in list (exempt)
-- A fill-in chain respects quiet hours (exempt)
-- A fill-in chain survives a restart (exempt)
-- A fill-in chain never moves a round (exempt)
-- The host sets the fill-in due time (exempt)
-- A fill-in is refused for a cell that is not stranded (exempt)
-- A fill-in has never seen the track (exempt)
-- A dedicated fill-in edit counts toward the shared budget (exempt)
-- No eligible fill-in exists (exempt)
-- A fill-in rescue is credited (exempt)
-- A final fill-in can name the track (exempt)
-- A fill-in wins over a late original holder (exempt)
+- A fill-in wins over a late original holder (pending)
 
 ### `groups.feature`
 

@@ -10,6 +10,7 @@ live.
 |---|---|---|---|
 | Domain unit | `cargo test` in `swap-core` | state machines, invariants, scheduling primitives, scrub rules | every PR |
 | Property | `proptest` | no-repeat, no-own-track, completeness, fairness, determinism | every PR (bounded cases) |
+| Proof | Verus | pure Rust plan and certificate contracts | every PR for proof changes; nightly full |
 | DB integration | `rusqlite` in-memory + temp files | migrations, constraints, transactions, ledger projection | every PR |
 | Acceptance | `cucumber-rs` + fake Discord | user journeys and error paths against app services | every PR |
 | Adapter contract | recorded Discord JSON / `wiremock` | Twilight request shapes, custom IDs, rate-limit handling | every PR |
@@ -95,10 +96,13 @@ A bug fix must add a regression test that fails on the old code.
 
 ```bash
 cargo test --workspace
+cargo test -p swap-plan-check
 cargo test -p swap-core
 pnpm --dir ui test
 pnpm --dir ui typecheck
 scripts/check.sh
+# Verus proof and conformance (dev-only toolchain)
+crates/swap-plan-check/verus/conformance.sh
 cargo test -p swap-acceptance --test cucumber
 node scripts/trace-scenarios.mjs     # writes docs/generated/SCENARIO_COVERAGE.md
 ```

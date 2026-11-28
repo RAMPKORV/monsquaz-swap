@@ -39,6 +39,11 @@ current tools, the planned routes, and the gates.
   6. Record the change in a tracker decision or in the issue evidence.
 - **proptest-state-machine** for model-based tests against the real Rust types
   and engine.
+- **Verus** is the code tier for pure Rust (D-071). The first proof is the
+  flat planner checker in `crates/swap-plan-check/verus/flat_plan_check.rs`
+  (MSW-133). The toolchain is pinned to Verus 0.2026.11.22.1ce6a59 and its
+  bundled Z3 4.16.0. The crate is dev-only. The product build does not use
+  Verus.
 - **Kani** was spiked for the header parser and custom-ID codec. The current
   harnesses exhaust CBMC on standard allocation, so Kani is not in CI. Parser
   and codec safety use property tests instead.
@@ -47,8 +52,8 @@ current tools, the planned routes, and the gates.
   converter. Use NDJSON trace validation for Tier 3 until a pinned converter
   is justified.
 
-TLAPS, Lean, Verus, Creusot, and Prusti are not part of the general strategy.
-They are considered only for a small pure function when the benefit is clear.
+TLAPS, Lean, Creusot, Prusti, Dafny, Aeneas, and Rocq are not part of the
+pillar (D-071, D-073). Verus is the code tier. A new tool needs a decision.
 
 ## Planned routes (D-037)
 
@@ -73,8 +78,11 @@ These routes are decided. They are not built yet. Each route has an issue.
   plan exists, the planner returns a Hall infeasibility certificate: a set of
   tracks whose eligible participants are fewer than the tracks. The checker
   verifies the certificate.
+  The flat checker is proved in MSW-133. The Hall counting theorem is proved.
+  The executable certificate verifier is the remaining step. The shipped
+  checker is not yet refined from the proof.
 
-New models stay on TLA+.
+New protocol models stay on TLA+. Pure Rust functions use Verus.
 
 ## Friction and ownership
 
@@ -103,7 +111,7 @@ describes.
 | DB-enforced invariants | SQLite constraints and triggers | MSW-081 | planned |
 | Type-level anonymity | `HostOnly<T>` + `Revealed` capability | MSW-105 | planned |
 | Engine trace validation | NDJSON traces checked by TLC | MSW-106 | planned |
-| Planner checker | verified checker + Hall certificates | MSW-107 | planned |
+| Planner checker | `crates/swap-plan-check/verus/flat_plan_check.rs` | MSW-107, MSW-133 | pilot: checker proved; certificate verifier open |
 | Inductive invariants | Apalache | MSW-108 | planned |
 | Classic schedule | `SwapSchedule.tla` | MSW-037 | planned |
 | Async queue | `SwapAsync.tla` | MSW-038 | planned |
@@ -124,6 +132,18 @@ describes.
   Otherwise it prints `formal: SKIPPED (no java)`.
 - The "Model" step in `ai-rules/WORKFLOW.md` applies to every change to a
   mapped file. A `full` ceremony issue records the formal evidence.
+- `formal.yml` has a `verus-pr` job for changes under `crates/swap-plan-check/`
+  or `formal.yml`, and a `verus-nightly` job for the full set. The job installs
+  the pinned Verus zip by SHA-256, runs `verus --no-cheating --triggers-mode silent --time`, the
+  conformance comparison, and the two mutation sets. It has no fixed time cap
+  (D-074). The observed proof time is about one second.
+- The Verus trust boundary is Verus, its bundled Z3, rustc, and vstd. The Rust
+  round checker and the flattening adapter are not verified. The conformance
+  corpus covers the adapter. The executable certificate verifier is not
+  verified.
+- `scripts/check.sh` does not run Verus because the toolchain is not a product
+  dependency. The CI job is the gate. A local run uses the pinned toolchain
+  under `/tmp/opencode/verus`.
 
 ## Invariants
 

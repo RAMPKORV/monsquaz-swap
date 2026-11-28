@@ -97,6 +97,7 @@ scripts/design-check.sh   # Refract + contrast + focus + token policy
 node scripts/ste-lint.mjs          # STE gate
 node scripts/trace-scenarios.mjs   # Gherkin traceability gate
 scripts/formal/check.sh            # TLA+ models (needs java)
+crates/swap-plan-check/verus/conformance.sh  # Verus flat checker (dev-only)
 ```
 
 `worktree new` and `worktree finish` need `--force` because of a PRD sign-off

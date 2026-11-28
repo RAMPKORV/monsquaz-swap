@@ -133,8 +133,11 @@ case "$mode" in
     ;;
   --all)
     require_cargo_mutants
-    run_scope "swap-core" "$CORE_GLOB" "$CORE_OUT" --exclude "$SCHEDULER_GLOB"
-    run_scope "scheduler" "$SCHEDULER_GLOB" "$SCHEDULER_OUT"
+    status=0
+    run_scope "swap-core" "$CORE_GLOB" "$CORE_OUT" --exclude "$SCHEDULER_GLOB" || status=$?
+    run_scope "scheduler" "$SCHEDULER_GLOB" "$SCHEDULER_OUT" || status=$?
+    summary
+    exit "$status"
     ;;
   *)
     echo "Unknown mode: $mode" >&2

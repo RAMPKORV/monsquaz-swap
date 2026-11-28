@@ -74,6 +74,9 @@ async fn the_full_classic_journey_reaches_a_reveal() {
     let rune = app.sim.participant("rune").unwrap();
     let seeded = [mira, jonas, selma, theo, ines];
 
+    // Send one seed at a time. Concurrent seeds let the track-code order differ
+    // from the owner order, and some valid Latin rectangles then have no legal
+    // single-cell plan edit for the test below.
     for (index, user) in seeded.iter().enumerate() {
         app.join(user).expect("the join must send");
         app.send_file(
@@ -83,6 +86,9 @@ async fn the_full_classic_journey_reaches_a_reveal() {
             "my seed",
         )
         .expect("the seed must send");
+        app.wait_for_dm(user, "Seed received", timeout())
+            .await
+            .expect("the seed receipt must arrive");
     }
     app.join(rune).expect("the fill-in join must send");
     for user in seeded {

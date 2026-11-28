@@ -3,7 +3,8 @@
 This file lists every event setting, its default, its options, and its lock
 behaviour. The host can change a setting only when the lock column allows it.
 All instants are UTC in the database and local in the UI. The async release
-time is a wall-clock time in the host IANA zone (D-042).
+time is a wall-clock time in the host IANA zone (D-042). Decided, building in
+MSW-087: the code still reads the release time as UTC.
 
 A row marked **decided, building in MSW-###** is an accepted decision that the
 code does not implement yet. The named issue builds it.
@@ -31,11 +32,11 @@ code does not implement yet. The named issue builds it.
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
 | Async expected songs | Seeded track count | 1–1000; must be reached before start | Yes |
 | Async claims per participant | Tracks minus one | 1–40; must be below the track count | Yes |
-| Async release | 18:00 in the host IANA zone, two waves two hours apart | Any HH:MM in the host IANA zone; the second wave is two hours after the first | Yes |
+| Async release | 18:00 in the host IANA zone, two waves two hours apart | Any HH:MM in the host IANA zone; the second wave is two hours after the first. Decided, building in MSW-087 (the code uses UTC) | Yes |
 | Async late seeds | Off | Off; host review with a feasibility check. Decided, building in MSW-091 | Yes |
 | Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
 | Participation | Strict full exposure | Strict; Flexible earliest rounds with gaps | Yes |
-| Schedule visibility | Own assignments only | Own assignments only; Open schedule (assignments only, D-045) | Yes |
+| Schedule visibility | Own assignments only | Own assignments only; Open schedule (assignments only, D-045; decided, building in MSW-120) | Yes |
 | Away ranges | None | Host-recorded UTC ranges; planner skips overlapping rounds | No |
 | Round/phase dates | Host-set | Calendar windows; host can shift | No |
 
@@ -49,8 +50,10 @@ Rules:
 - An away range removes the overlapping projected rounds. Strict participation
   refuses the plan and asks for flexible participation.
 - Open schedule shows which participant edits which track code in each round.
-  It never shows seed owners, titles, or comments before the reveal (D-045).
-  The join card discloses this rule.
+  It must never show seed owners, titles, or comments before the reveal
+  (D-045). Decided, building in MSW-120: the open mode currently exposes the
+  seed owners, the titles, and the comments. The join card discloses this
+  rule.
 - Above 12 participants, each track can have many contributors. The planner
   must show the contributor count and the event duration.
 - The host can cap the length. A capped event does not touch every track with
@@ -74,7 +77,7 @@ social-diversity objective. Optional genre/mood content tags can come later.
 | Group count | Lookup: 1 for ≤9; 2 for 10–13; 3 for 14–18 and 23–32; 4 for 19–22 and 33–40 | 1–4, or manual | Yes |
 | Group size | Balanced, 5–12 | Soft bounds; warn outside | Yes |
 | Group visibility | Hidden | Hidden, host-only names | Yes |
-| Rotation default | Participants | Participants; track pools; merge/re-split. Rotate both is rejected (D-012). Track pools and merge/re-split: decided, building in MSW-090 | Yes |
+| Rotation default | Participants | Participants; track pools; merge/re-split. Rotate both is rejected (D-012); not enforced yet, MSW-090 adds validation. Track pools and merge/re-split: decided, building in MSW-090 | Yes |
 | Scheduler strategy | Balanced | Balanced, random matching, cyclic | No |
 | Swap cadence | `K ≈ T/4` (3–5 phases) | K rounds, calendar, host-triggered, exhausted | No |
 | Exhausted policy | Allowed with a warning | Warn when `group_size > T+1` | No |
@@ -187,7 +190,7 @@ Rules:
 | Expiry protection | Strike + cooldown: the first expiry starts a 24-hour cooldown, the second expiry pauses the participant | Strike + cooldown; cooldown only; host review; none. Decided, building in MSW-084 | No |
 | Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host. Decided, building in MSW-085 | No |
 | Release windows | One per day, two waves | One wave; two waves; four; fixed interval; continuous | No |
-| Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable | No |
+| Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable. Decided, building in MSW-087 (the code uses UTC) | No |
 | Release change | Future offers shift; claimed assignments keep their due date | Future shifts; shift all; fixed after start | No |
 | DM fallback | Private thread | Private thread; host mediation; block join | Yes |
 | Submission channel | DM attachment | DM; slash command | Yes |
@@ -199,7 +202,8 @@ Rules:
 - A claim starts the async deadline.
 - An unclaimed offer does not mark the pair seen.
 - A claim-then-skip marks the pair seen.
-- Strikes reset when the participant resumes. An auto-pause alerts the host.
+- Not built yet (MSW-084): strikes reset when the participant resumes, and an
+  auto-pause alerts the host.
 
 ## 8. Deadlines, reminders, extensions
 
@@ -255,7 +259,7 @@ Rules:
 |---|---|---|---|
 | Commit-reveal | On | On; audit only; off | Yes |
 | Replans | No cap (D-043) | Each replan creates a new commitment and an audit entry | Yes |
-| Verification file | `verify.txt` in the reveal | Participants check the seal with `sha256sum` and `/swap verify` (D-043) | Yes |
+| Verification file | `verify.txt` in the reveal | Participants check the seal with `sha256sum` and `/swap verify` (D-043). Decided, building in MSW-088 | Yes |
 | Audit log | On | On | Yes |
 | Mapping access | Host only until co-hosts exist (MSW-117) | Host; co-hosts; per-person | No |
 | Data location | User-chosen library | Library; app data | No |

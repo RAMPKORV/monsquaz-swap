@@ -140,8 +140,10 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - An away range removes the participant from overlapping projected rounds. The
   gap stays visible. Strict participation refuses the plan.
 - The default participant view is the caller's own assignments. Open schedule
-  shows who edits which track code in each round. It never shows owners,
-  titles, or comments before the reveal (D-045). The join card discloses it.
+  shows who edits which track code in each round. It must never show owners,
+  titles, or comments before the reveal (D-045). Decided, building in MSW-120:
+  the open mode currently exposes owners, titles, and comments. The join card
+  discloses it.
 
 ### Async
 
@@ -152,11 +154,13 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - Per-person queue; one claimed track per person at a time.
 - Claim-first everywhere: offer → claim → deliver. The 24h claim window starts
   at the offer. The claim reminder is a setting: 6h, 12h (default), none, or
-  custom. Validation refuses a reminder at or after the claim window.
+  custom. Validation refuses a reminder at or after the claim window. Decided,
+  building in MSW-086; the code sends a fixed 12h reminder.
 - Ready gate: offer only to a participant who is Ready. A new participant is
   Ready. A paused participant must tap Ready (`/swap resume`) to resume.
 - Expiry protection is a preset (D-041). An expired offer never counts as
-  seen, and the app reports the missed exposure as a gap. The presets are:
+  seen, and the app reports the missed exposure as a gap. The presets are
+  decided, building in MSW-084. The code applies only the default preset:
   - **strike + cooldown** (default): one active offer; the first expiry starts
     a 24-hour cooldown; the second expiry pauses the participant until
     `/swap resume` or a host action;
@@ -167,9 +171,11 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   - **none**: the participant stays Ready and can get a new offer in the next
     wave; the app never offers the same track again unless the re-offer
     setting allows it.
-- Strikes reset when the participant resumes. An auto-pause alerts the host.
+- Not built yet (MSW-084): strikes reset when the participant resumes, and an
+  auto-pause alerts the host.
 - Same-track re-offer after expiry is a setting: never (default), after
-  cooldown, last resort, or host.
+  cooldown, last resort, or host. Decided, building in MSW-085; the code
+  applies "never".
 - Dispatch default: deficit-ordered hybrid (most-constrained ready track, then
   the eligible person with the largest remaining quota, with anti-clustering
   and matching repair). Strict queues and an opportunistic pool are
@@ -184,7 +190,8 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   computes editors per track and warns when the value is fractional. Full
   exposure needs claims equal to tracks minus one.
 - Release: one daily window at 18:00 wall-clock time in the host IANA zone by
-  default (D-042). The release keeps its local time across DST. Run two
+  default (D-042). The release keeps its local time across DST. Decided,
+  building in MSW-087; the code reads the release time as UTC. Run two
   dispatch waves inside the window (the start and two hours later). The host
   can change the time; unclaimed offers shift, claimed assignments keep their
   due date.
@@ -280,7 +287,8 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - Skips show as anonymous "no edit" gaps by default; the host can choose.
 - Commit-reveal: bot posts the schedule/policy commitment at lock; `/swap
   verify` recomputes it at reveal. The reveal publishes `verify.txt` so that a
-  participant can check the seal with `sha256sum` (D-043). Async seals the
+  participant can check the seal with `sha256sum` (D-043). `verify.txt` and
+  `/swap verify`: decided, building in MSW-088. Async seals the
   policy + hash-chained transcript, not a future fixed schedule. No file hashes
   are public. Replans have no cap; each replan creates a new commitment.
 

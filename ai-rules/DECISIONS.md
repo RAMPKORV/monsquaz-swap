@@ -523,13 +523,15 @@ host review, none), re-offer options (never default, after cooldown, last
 resort, host), and the claim-reminder setting (6h, 12h, none, custom). Strikes
 reset on resume; auto-pause alerts the host.
 **Consequences:** more settings to test. Validation refuses a reminder at or
-after the claim window.
+after the claim window. Decided, building in MSW-084 (presets), MSW-085
+(re-offer), and MSW-086 (claim reminder).
 
 ## D-042 — Async release time is wall-clock in the host zone
 
 **Date:** 2026-11-28.
 **Decision:** the async release time is HH:MM in the host IANA zone, not UTC.
-**Consequences:** the release keeps its local time across DST.
+**Consequences:** the release keeps its local time across DST. Decided,
+building in MSW-087; the code still reads the release time as UTC.
 
 ## D-043 — Verifiable commitment; no replan cap
 
@@ -537,6 +539,7 @@ after the claim window.
 **Decision:** the reveal publishes `verify.txt` and the bot offers
 `/swap verify`. The unenforced cap of 2 replans is dropped.
 **Consequences:** participants can verify the seal with `sha256sum`.
+`verify.txt` and `/swap verify` are decided, building in MSW-088.
 
 ## D-044 — Build pack types, rotation modes, async late seeds
 
@@ -552,7 +555,9 @@ late seeds.
 **Decision:** an open schedule shows who edits which track code in each round.
 It never shows owners or titles before the reveal. This supersedes the
 owner/title part of D-032.
-**Consequences:** invariant 3 holds in every mode with no exception.
+**Consequences:** invariant 3 holds in every mode with no exception. Decided,
+building in MSW-120; the open mode currently exposes owners, titles, and
+comments.
 
 ## D-046 — Host UI direction: restrained tracker-retro Monsquaz brand
 

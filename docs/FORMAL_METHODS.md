@@ -134,7 +134,7 @@ describes.
   mapped file. A `full` ceremony issue records the formal evidence.
 - `formal.yml` has a `verus-pr` job for changes under `crates/swap-plan-check/`
   or `formal.yml`, and a `verus-nightly` job for the full set. The job installs
-  the pinned Verus zip by SHA-256, runs `verus --no-cheating --time`, the
+  the pinned Verus zip by SHA-256, runs `verus --no-cheating --triggers-mode silent --time`, the
   conformance comparison, and the two mutation sets. It has no fixed time cap
   (D-074). The observed proof time is about one second.
 - The Verus trust boundary is Verus, its bundled Z3, rustc, and vstd. The Rust

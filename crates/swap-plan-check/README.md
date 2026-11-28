@@ -38,7 +38,7 @@ The verified source is `crates/swap-plan-check/verus/flat_plan_check.rs`.
 | No `assume`, `admit`, or `external_body` | `--no-cheating` | enforced |
 
 The proof has 52 verified functions and 0 errors. Observed proof time is
-about 0.65 s total and 0.38 s SMT on the pilot machine, with one thread.
+about one second total and 0.4-0.5 s SMT on the pilot machine, with one thread.
 
 The Hall proof is direct. Let `T` be the certificate track subset and `N` the
 neighbor set. The certificate contract requires that `N` is a superset of the

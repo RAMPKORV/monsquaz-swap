@@ -60,6 +60,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hmac_hashes_keys_at_and_above_the_block_size() {
+        // A 64-byte key uses the key as one block; a longer key is hashed
+        // first. The public caller always passes an 8-byte seed key, so these
+        // cases protect the branch that the public API does not reach.
+        let message = b"Test Using Larger Than Block-Size Key - Hash Key First";
+        assert_eq!(
+            hex(&hmac_sha256(&[0xaa; 64], message)),
+            "84332a7580ed3cf75de83c644c8d2c1c262ad90e0190e5c5ae4b82b2102e8e75"
+        );
+        assert_eq!(
+            hex(&hmac_sha256(&[0xaa; 131], message)),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+        );
+    }
+
     // scenario: The reveal order does not follow submission time
     #[test]
     fn the_order_is_stable_and_uses_every_track_once() {

@@ -1,0 +1,90 @@
+# Reviewed mutation scope for the nightly job (.github/workflows/mutants.yml).
+#
+# The scope is the pure domain crate, which owns the no-repeat and no-own-track
+# invariants and the seeded classic scheduler. The nightly job splits the scope
+# into two runs: swap-core first, then the scheduler module.
+#
+# cargo-mutants reads this file by default from `.cargo/mutants.toml`.
+# Run `scripts/mutants.sh --list` to review the effective scope.
+
+# Mutate only the pure domain crate. This is a name filter, not a file glob.
+# A command-line --file filter combines with examine_globs, so a bare
+# `cargo mutants` would widen to the whole workspace. The name filter keeps a
+# bare run on swap-core and lets the script split the scope with --file.
+examine_re = ["^crates/swap-core/src/"]
+
+# Run the domain tests, not the whole workspace. The engine and acceptance
+# tests are slow and they exercise other crates; the nightly budget is for
+# swap-core coverage.
+test_package = ["swap-core"]
+
+# Per-mutant limits. The test timeout is the larger of 30 seconds and five
+# times the baseline test time. A hang in the scheduler must not stop the job.
+minimum_test_timeout = 30.0
+timeout_multiplier = 5.0
+build_timeout_multiplier = 4.0
+
+# Reviewed exclusions. Each regex matches the full mutant name.
+# `scripts/mutants.sh --list` shows the remaining mutants.
+exclude_re = [
+  # The exact SplitMix64 bit mixing is an implementation detail. The contract
+  # is a deterministic, well-spread stream. These operator mutants produce a
+  # different but valid schedule, so they are equivalent under the contract.
+  # The constant-return mutants stay in scope: the determinism test must catch
+  # them.
+  "(replace \\^ with [|&]|replace >> with <<) in SplitMix64::next_u64$",
+
+  # The async-queue tie-break uses a private SplitMix64 function and an FNV
+  # hash only to order candidates. The contract is a deterministic, fair
+  # choice. These operator mutants produce a different valid order, so they
+  # are equivalent and are not a test gap. The constant-return mutants stay in
+  # scope.
+  "(replace \\^ with [|&]|replace >> with <<) in splitmix$",
+  "replace \\^= with [|&]= in stable_hash$",
+
+  # The tie-break's second XOR only influences which valid order the queue
+  # takes. The AND variant still returns 64 distinct values for the 4x4x4
+  # sample, so it cannot change the queue contract.
+  "async_queue\\.rs:104:46: replace \\^ with & in tie_break$",
+
+  # The 19..=22 and 33..=40 arms return 4, which is also the `_` fallback.
+  # Deleting either arm cannot change the output.
+  "groups\\.rs:38:9: delete match arm 19\\.\\.= 22 in suggest_groups$",
+  "groups\\.rs:40:9: delete match arm 33\\.\\.= 40 in suggest_groups$",
+
+  # `remaining >= 0` is always true. The extra pass adds zero to the last
+  # group, so the returned sizes are the same.
+  "groups\\.rs:66:22: replace > with >= in group_sizes$",
+
+  # These mutants make the group_sizes loop non-terminating (>= 0 never ends,
+  # += or /= never reduces). The original code terminates.
+  "groups\\.rs:80:21: replace > with >= in group_sizes$",
+  "groups\\.rs:83:19: replace -= with (\\+=|/=) in group_sizes$",
+
+  # The pair key only needs one consistent order. Ascending and descending
+  # orders produce the same counts and the same BalanceReport.
+  "schedule\\.rs:303:36: replace <= with > in Schedule::balance$",
+
+  # balance_of stores the round count in a temporary Schedule, and balance()
+  # never reads that field. The arithmetic cannot change the report.
+  "schedule\\.rs:418:52: replace \\+ with \\* in balance_of$",
+
+  # The rest surcharge is a constant on every edge when tracks equal people.
+  # `>=` only differs at that equality point, so the matching is unchanged.
+  "schedule\\.rs:521:40: replace > with >= in attempt_balanced$",
+
+  # The sink is a graph label. The graph is allocated from the same value, so
+  # the multiplication only relabels the node and the matching is identical.
+  "schedule\\.rs:508:36: replace \\+ with \\* in attempt_balanced$",
+
+  # The rejection loop accepts one extra value at the zone boundary. The
+  # returned value is still in range and deterministic; the bias is below the
+  # observable contract.
+  "schedule\\.rs:780:22: replace < with <= in SplitMix64::next_bounded$",
+
+  # These mutants change a strict improvement or a rejection bound into a
+  # non-terminating loop. The original code terminates; a test cannot kill a
+  # hang without hanging.
+  "schedule\\.rs:723:34: replace < with <= in MinCostFlow::min_cost_flow$",
+  "schedule\\.rs:780:22: replace < with (==|>) in SplitMix64::next_bounded$",
+]

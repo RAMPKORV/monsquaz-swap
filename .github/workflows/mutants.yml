@@ -1,0 +1,83 @@
+name: Mutants
+
+# Nightly mutation testing for the pure domain and the classic scheduler.
+# This workflow is intentionally separate from ci.yml: a survivor is a test
+# gap for triage, not a pull-request gate. A failed nightly job is the signal.
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  CARGO_MUTANTS_VERSION: "27.1.0"
+  # Two parallel cargo-mutants jobs are safe on a 4-core runner. A higher
+  # value can make cargo build thrash and can cause false test timeouts.
+  CARGO_MUTANTS_JOBS: "2"
+
+jobs:
+  mutants:
+    name: Mutants
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: mutants-rust
+          cache-on-failure: true
+      - name: Cache the pinned cargo-mutants binary
+        id: cargo-mutants-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ runner.os }}-${{ env.CARGO_MUTANTS_VERSION }}
+      - name: Install cargo-mutants
+        if: steps.cargo-mutants-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/cargo-mutants"
+          mkdir -p "$tmp"
+          curl --retry 5 --retry-delay 2 -sSLf -o "$tmp/cargo-mutants.tar.gz" \
+            "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e  $tmp/cargo-mutants.tar.gz" | sha256sum -c -
+          tar xzf "$tmp/cargo-mutants.tar.gz" -C "$tmp"
+          install -m 755 "$tmp/cargo-mutants" "$HOME/.cargo/bin/cargo-mutants"
+      - name: Check the pinned tool and the reviewed scope
+        run: scripts/mutants.sh --check
+      - name: Mutants in swap-core
+        id: core
+        continue-on-error: true
+        run: scripts/mutants.sh --core
+      - name: Mutants in the scheduler
+        id: scheduler
+        continue-on-error: true
+        run: scripts/mutants.sh --scheduler
+      - name: Summarize survivors
+        if: always()
+        run: scripts/mutants.sh --summary
+      - name: Upload mutants.out
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out-${{ github.run_id }}
+          path: mutants.out/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Fail when a mutant survived or timed out
+        if: steps.core.outcome == 'failure' || steps.scheduler.outcome == 'failure'
+        run: |
+          echo "cargo-mutants found survivors or timeouts; see the mutants-out artifact." >&2
+          exit 1

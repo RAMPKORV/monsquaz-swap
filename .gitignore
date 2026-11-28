@@ -52,6 +52,9 @@ coverage/
 # Rust
 target/
 
+# mutation testing output (nightly artifact is uploaded, never committed)
+mutants.out/
+
 # Go
 bin/*
 !bin/project

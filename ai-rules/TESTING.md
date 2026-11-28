@@ -54,6 +54,89 @@ A bug fix must add a regression test that fails on the old code.
 - Public aggregates are suppressed below the k-threshold.
 - Idempotent commands (claim, submit, advance, reveal) apply once.
 
+## Mutation testing
+
+Mutation testing changes one operator in the code and runs the tests. A mutant
+that no test kills is a survivor. A survivor shows a test gap, not
+automatically a bug.
+
+- The nightly job is `.github/workflows/mutants.yml`. It runs at 04:00 UTC and
+  on manual dispatch.
+- The job tests `crates/swap-core/src` first. It tests the scheduler module
+  `crates/swap-core/src/schedule.rs` after that.
+- The reviewed scope and the exclusions are in `.cargo/mutants.toml`.
+- The job uses cargo-mutants 27.1.0 and runs the tests of `swap-core` only.
+- The job fails when a mutant survives or times out. The job is not part of
+  `ci-gate` and it does not block a pull request.
+- The job uploads `mutants.out/` as an artifact for 14 days.
+
+The job has a 45-minute limit. The final local run took 4 minutes 26 seconds
+with four jobs on a 24-core workstation. Expect 15 to 25 minutes on a 4-core runner.
+
+Read the survivors:
+
+1. Open `mutants.out/core/mutants.out/missed.txt` or
+   `mutants.out/scheduler/mutants.out/missed.txt`.
+2. Read the mutation diff in `diff/` and the cargo output in `logs/`.
+3. Select one action:
+   - Add the smallest test that kills the mutant.
+   - Add a regex to `exclude_re` in `.cargo/mutants.toml` when the mutant is
+     equivalent, and write the reason.
+   - Raise the timeout or exclude the function when the mutation hangs.
+4. Run `scripts/mutants.sh --core` or `scripts/mutants.sh --scheduler` to
+   confirm the result.
+
+Do not weaken a test to hide a survivor. Do not exclude a mutant without a
+written reason. A higher-layer test in `swap-engine` can prove behaviour that
+the domain tests do not prove. The nightly uses the domain tests only, so it
+can report such a mutant as a survivor.
+
+```bash
+scripts/mutants.sh --check      # tool version and reviewed scope
+scripts/mutants.sh --list       # every mutant in the nightly scope
+scripts/mutants.sh --core       # swap-core, scheduler excluded
+scripts/mutants.sh --scheduler  # scheduler module
+scripts/mutants.sh              # both, in nightly order
+```
+
+The script stops with a clear message when cargo-mutants 27.1.0 is absent.
+
+### Survivor triage result
+
+The first full run on 2026-11-28 tested 347 mutants. It reported 94 survivors
+and 6 timeouts. A later merge added the free-track code. The triage added
+focused tests and line-specific exclusions. The final run tests 355 mutants:
+336 caught, 19 unviable, 0 survivors, and 0 timeouts. `.cargo/mutants.toml`
+documents all 35 excluded mutants: the 20 private bit-mixing and hash
+operators and 15 mutants from this triage.
+
+The triage added tests for:
+
+- the ledger `mark` return value and the `is_empty` lifecycle;
+- the async tie-break seed, participant, and track dependence;
+- group lookup, size overflow, cadence, warning boundaries, three-group
+  rotation, short final phases, and the global-pool fallback;
+- the scheduler balance report, cyclic fallback, balanced choice, ordered
+  pair, matching preconditions, bounded PRNG use, small shuffles, even rest
+  rotation for free tracks, and known deterministic schedules;
+- the HMAC key-length boundary;
+- every state-machine terminal state, the leaver restore, and the overdue
+  restore path.
+
+### Exclusion rule
+
+Add an exclusion only when the mutation cannot change observable behaviour.
+
+1. Name the exact file, line, and mutation. Do not exclude a file or a module.
+2. Write the reason as a comment beside the regex.
+3. Keep the tests that cover the surrounding behaviour.
+4. Ask whether a participant, host, database row, or file can see a
+   difference. If yes, add a test instead.
+
+Use a timeout exclusion only when the mutation makes a loop non-terminating and
+the original code terminates. Raise a timeout only when the code is correct but
+slow. Do not exclude a module to make the job green.
+
 ## Simulation
 
 `swap-sim` is both a test harness and (later) a host dry-run.
@@ -127,12 +210,14 @@ when a workflow changes.
     reports a mapped change (pull requests only); otherwise the job is
     skipped and counts as success.
 - **Nightly (`formal.yml`):** the TLA+ nightly models.
+- **Nightly (`mutants.yml`):** cargo-mutants 27.1.0 on `crates/swap-core/src`
+  and the scheduler. The job fails on a survivor and uploads `mutants.out/`.
 - **Release (`release.yml`):** the E2E gate, the Windows and Linux installers,
   attestations, and `SHA256SUMS`.
 
 Not in CI yet: a secret scan, a dependency audit, long simulation seed runs,
-the chaos and DST matrices, the restore drill, cargo-mutants (MSW-097),
-packaged smoke on clean VMs, and a live test-guild run.
+the chaos and DST matrices, the restore drill, packaged smoke on clean VMs, and
+a live test-guild run.
 
 ## Flake policy
 

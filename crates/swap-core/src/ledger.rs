@@ -180,6 +180,17 @@ mod tests {
     }
 
     #[test]
+    fn mark_reports_a_new_pair_and_rejects_a_repeat() {
+        let mut ledger = SeenLedger::new();
+        assert!(ledger.is_empty());
+        assert!(ledger.mark(&t("S7F3A"), &p("alice")));
+        assert!(!ledger.is_empty());
+        assert_eq!(ledger.len(), 1);
+        assert!(!ledger.mark(&t("S7F3A"), &p("alice")));
+        assert_eq!(ledger.len(), 1);
+    }
+
+    #[test]
     fn a_repeated_touch_does_not_change_the_ledger_length() {
         let mut ledger = SeenLedger::new();
         assert!(ledger.apply(&t("T-1"), &p("alice"), Touch::Claim));

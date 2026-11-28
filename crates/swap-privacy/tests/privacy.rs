@@ -225,6 +225,8 @@ fn deletion_replaces_direct_identifiers_and_keeps_a_hash_audit() {
     assert_eq!(report.assignments_kept, 2);
     assert_eq!(report.seen_pairs, 1);
     assert_eq!(report.files_kept, 2);
+    // Older backups still hold the participant until retention or a purge.
+    assert!(report.backups_still_hold_data);
 
     assert!(
         ParticipantRepo::get(fixture.db.conn(), EVENT, &user(0))

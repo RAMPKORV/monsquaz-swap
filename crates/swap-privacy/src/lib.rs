@@ -5,7 +5,6 @@
 pub mod delete;
 pub mod diagnostics;
 pub mod export;
-pub mod retention;
 
 pub use delete::{DeletionReport, delete_participant};
 pub use diagnostics::{RedactionSpec, redact_diagnostics};
@@ -13,7 +12,6 @@ pub use export::{
     ExportAssignment, ExportComment, ExportFileInfo, ExportManifest, ExportSeenPair, ExportTitle,
     ParticipantExport, ParticipantInfo, export_participant,
 };
-pub use retention::{RetentionReport, prune_backups};
 
 use thiserror::Error;
 

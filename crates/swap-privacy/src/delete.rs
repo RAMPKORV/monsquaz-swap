@@ -19,6 +19,10 @@ pub struct DeletionReport {
     pub files_kept: usize,
     pub plan_assignments_removed: usize,
     pub audit_hash: String,
+    /// Always true: backups made before the deletion still hold the
+    /// participant's data until backup retention removes them or the host
+    /// purges the backups. The host must tell the participant this.
+    pub backups_still_hold_data: bool,
 }
 
 pub fn delete_participant(
@@ -117,6 +121,7 @@ pub fn delete_participant(
         files_kept: counts.files,
         plan_assignments_removed,
         audit_hash,
+        backups_still_hold_data: true,
     })
 }
 

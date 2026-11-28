@@ -96,6 +96,132 @@ Feature: Host operations and recovery
     And the host confirms the restore
     And the app records the restore
 
+  Scenario: The app makes a backup before an event state transition
+    Given a backup folder that the host selected
+    And an event in the signup state
+    When the host locks the roster
+    Then the app writes a backup of the signup state before the event changes state
+    And the backup contains a database snapshot and a manifest
+    And the backup contains every file that the database refers to
+
+  Scenario: A failed backup stops the transition
+    Given a backup folder that the app cannot write to
+    And an event in the signup state
+    When the host locks the roster
+    Then the app refuses the transition
+    And the event stays in the signup state
+    And the app tells the host that the backup failed
+
+  Scenario: The app makes a daily backup
+    Given a backup folder that the host selected
+    And no daily backup from the last 24 hours
+    When the daily backup timer runs
+    Then the app writes a daily backup
+
+  Scenario: The host makes a backup on request
+    Given a backup folder that the host selected
+    When the host selects back up now
+    Then the app writes a manual backup
+
+  Scenario: A backup copies each file one time
+    Given a backup folder that contains a file from an earlier backup
+    When the app writes a new backup
+    Then the app does not copy that file again
+    And the new manifest refers to that file
+
+  Scenario: A partial backup never looks complete
+    Given a backup that stops before the app writes the manifest
+    When the host opens the restore wizard
+    Then the app does not show the partial backup
+    And the next backup removes the partial backup
+
+  Scenario: Retention removes old backups
+    Given 21 transition backups and 15 daily backups
+    When the app writes a new backup
+    Then the app keeps the newest 20 transition backups
+    And the app keeps the newest 14 daily backups
+    And the app removes each file that no kept backup refers to
+
+  Scenario: Retention keeps the newest complete backup
+    Given a backup folder where the newest backup is the only complete backup
+    When retention runs
+    Then the app keeps the newest complete backup
+
+  Scenario: The restore wizard checks the backup
+    Given a backup folder
+    When the host selects a backup to restore
+    Then the app checks the manifest format
+    And the app checks the database hash
+    And the app runs the database integrity check
+    And the app checks that every file exists and matches its hash
+    And the app shows the events, the event states, and the backup time
+
+  Scenario: The restore wizard refuses a damaged backup
+    Given a backup with a file that does not match its hash
+    When the host selects the backup
+    Then the app refuses the restore
+    And the app does not change the current data
+
+  Scenario: The restore wizard warns about an old backup
+    Given a current database with audit entries after the backup time
+    When the host selects the backup
+    Then the app warns that the backup is older than the current data
+
+  Scenario: The host must type a confirmation to restore
+    Given a checked backup
+    When the host types a word other than RESTORE
+    Then the app refuses the restore
+    And the app does not change the current data
+
+  Scenario: A restore keeps the replaced database
+    Given a current database and a checked backup
+    When the host confirms the restore
+    Then the app moves the current database to a pre-restore folder
+    And the app installs the backup database and its files
+    And the app records the restore in the audit log
+
+  Scenario: The host enters the bot token after a restore
+    Given a completed restore
+    When the restore wizard finishes
+    Then the app asks the host for the bot token
+    And the app stores the token in the operating system keychain
+
+  Scenario: A backup never contains the bot token
+    Given a bot token in the keychain
+    When the app writes a backup
+    Then no file in the backup folder contains the bot token
+
+  Scenario: A second machine refuses to start the bot
+    Given a writer lock from another machine with a heartbeat less than 5 minutes old
+    When the app tries to start the bot
+    Then the app refuses to start the bot
+    And the app tells the host that another machine runs the event
+
+  Scenario: A stale writer lock does not block the bot
+    Given a writer lock from another machine with a heartbeat 5 minutes old or older
+    When the app tries to start the bot
+    Then the app starts the bot
+    And the app records its own machine in the writer lock
+
+  Scenario: The host takes over the event
+    Given a writer lock from another machine with a recent heartbeat
+    When the host types TAKE OVER
+    Then the app records this machine in the writer lock
+    And the app records the takeover in the audit log
+    And the app can start the bot
+
+  Scenario: A machine that lost the writer lock stops the bot
+    Given a running bot on this machine
+    And a newer writer lock from another machine in the backup folder
+    When the heartbeat timer runs
+    Then the app stops the bot
+    And the app tells the host that another machine took over
+
+  Scenario: The host purges the backups
+    Given a backup folder with backups
+    When the host types PURGE
+    Then the app removes every backup and every backup file from the folder
+
   @pending
   Scenario: The audit log records an override
     Given an active event

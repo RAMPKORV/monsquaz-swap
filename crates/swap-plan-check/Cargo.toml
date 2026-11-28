@@ -1,0 +1,10 @@
+[package]
+name = "swap-plan-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Pure plan checker and Hall-certificate verifier for the classic swap planner"
+
+[dependencies]

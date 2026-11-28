@@ -50,8 +50,11 @@ not move a track.
    alert after the state change commits.
 
 8. **Marking a turn missed records seen.** The assignment becomes
-   `SkippedAfterClaim`, the track returns to the pool, and the pair is recorded
-   as seen. This is the same rule as a participant skip after claim.
+   `SkippedAfterClaim`, the engine sets the track state to `Pool`, and the pair
+   is recorded as seen. This is the same rule as a participant skip after
+   claim. In classic mode, the track still passes unchanged into the next
+   round, or a fill-in covers the turn. The state name and the DM copy are
+   wrong for classic mode. MSW-121 fixes both.
 
 9. **No silent auto-advance.** The tick never opens a round, never moves a
    track out of custody, and never marks a turn missed. The host decides.

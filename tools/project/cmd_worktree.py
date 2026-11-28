@@ -38,7 +38,7 @@ def worktrees_dir() -> core.Path:
     return core.workspace_root() / "worktrees"
 
 
-GENERATED_PREFIXES = ("docs/PRD.md", "docs/DECISIONS.md", "docs/STATUS.md",
+GENERATED_PREFIXES = ("docs/PRD.md", "docs/STATUS.md",
                       "tests/features/", "project/ledger/")
 
 
@@ -254,11 +254,12 @@ def cmd_worktree_finish(a):
                            "already_done": True, "merge_commit": details["merge_commit"]}, a.json)
                 return
             raise core.ProjectError("issue is already terminal")
-        if issue["status_key"] not in ("review", "testing", "merging") and not a.force:
-            raise core.ProjectError("move the issue to review/testing/merging first "
-                                    "(or --force with a reason)")
+        if issue["status_key"] not in ("review", "testing", "merging"):
+            raise core.ProjectError("move the issue to review/testing/merging first; "
+                                    "the PRD waiver does not skip the review status")
         core.assert_done_allowed(con, issue, evidence=a.evidence or "", force=a.force,
-                                 reason=a.reason or "", require_merge=False)
+                                 reason=a.reason or "", require_merge=False,
+                                 waive_review=False)
         _, prd_warning = _prd_ok(con, a.force)
         details = json.loads(issue["details_json"] or "{}")
         already = details.get("merge_commit", "")

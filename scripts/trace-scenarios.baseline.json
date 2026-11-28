@@ -1,0 +1,10 @@
+{
+  "$comment": "Feature files that are temporarily exempt from the unmapped-scenario rule. Every entry needs a reason and an issue or an expiry (YYYY-MM-DD).",
+  "features": [
+    {
+      "file": "specs/features/fill_ins.feature",
+      "reason": "MSW-080..MSW-083 rewrite the fill-in scenarios for D-050. That batch adds the @pending tags and the test mappings.",
+      "expires": "2026-12-15"
+    }
+  ]
+}

@@ -9,6 +9,9 @@ adjustable, but a locked rule is a contract.
 - **Locked:** color tokens, no `!important`, WCAG AA text contrast, visible
   keyboard focus, the Refract overflow findings, and the spacing, type, and
   radius scales.
+- **Building:** D-046, D-047, and D-048 decide the new brand, scales, and gate
+  rules. They are decided, building in MSW-099 and MSW-100. The UI is not
+  migrated, and `design/policy.json` still locks the old scales.
 - **Advisory:** shadow tokens and reduced motion.
 - The scales became locked in D-029 and ADR 0006 after the UI cleanup. A
   reviewed exception needs a baseline entry with a reason and an issue or an

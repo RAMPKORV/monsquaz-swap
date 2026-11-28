@@ -3,6 +3,7 @@ Feature: Files, packs, and metadata
   The app must accept only allowed files.
   The app must not trust a file name or its metadata.
 
+  @pending
   Scenario: The allowlist blocks a forbidden type
     Given an event whose allowlist contains modules, audio, and zip
     When a participant submits an executable file
@@ -10,6 +11,7 @@ Feature: Files, packs, and metadata
     And the bot explains the allowed types
     And the app does not store the file as a track version
 
+  @pending
   Scenario: A format change is refused
     Given a track whose current format is IT
     When a participant submits an XM file
@@ -17,6 +19,7 @@ Feature: Files, packs, and metadata
     And the bot explains that the original format must stay
     And the host can change the event rule for future events
 
+  @pending
   Scenario: The pack check reports an unknown sample
     Given a host pack with known sample hashes
     When a seed contains an unknown sample
@@ -25,6 +28,7 @@ Feature: Files, packs, and metadata
     And the host can accept the seed
     And the host can reject the seed with a reason
 
+  @pending
   Scenario: Added instruments and altered pack samples are allowed
     Given a seed that adds an instrument
     And a seed that slightly alters a pack sample
@@ -32,13 +36,15 @@ Feature: Files, packs, and metadata
     Then the report marks both seeds for review
     And the app does not reject either seed for that reason
 
+  @pending
   Scenario: An oversized file uses the fallback
     Given a file larger than the 20 MiB cap
     When a participant submits the file
-    Then the bot refuses the direct upload
+    Then the bot refuses the attachment
     And the bot offers a link download or a host import
     And the app records which fallback the host used
 
+  @pending
   Scenario: A corrupt file is rejected
     Given a truncated module file
     When a participant submits the file
@@ -54,6 +60,7 @@ Feature: Files, packs, and metadata
     And the app accepts the scrub only when the audio matches
     And the app keeps the untouched original in the host vault
 
+  @pending
   Scenario: The bot downloads an external link
     Given a participant who provides an allowed external link
     When the bot can download the file
@@ -63,12 +70,14 @@ Feature: Files, packs, and metadata
     Then the host can import the file manually
     And the app records the source
 
+  @pending
   Scenario: A stored file has a stable identity
     Given a stored file
     Then the app records its hash, size, extension, and storage path
     And the app gives the UI an opaque file ID
     And the UI never receives the absolute path
 
+  @pending
   Scenario: The host previews a module
     Given a stored module file
     When the host opens the preview

@@ -26,6 +26,11 @@ pnpm --dir ui test:watch
 ```bash
 scripts/check.sh
 scripts/design-check.sh
+node --test scripts/tests/
+node scripts/ste-lint.mjs
+node scripts/trace-scenarios.mjs
+scripts/formal/check.sh
+node scripts/formal/changed.mjs origin/main
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -44,9 +49,11 @@ Run `pnpm build` before `cargo test` on a clean checkout. `src-tauri` embeds
 ./bin/project next
 ./bin/project issue show MSW-###
 ./bin/project issue claim MSW-### --as-agent <name>
-./bin/project worktree new MSW-### --as-agent <name>
+./bin/project worktree new MSW-### --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"
 ./bin/project worktree sync MSW-###
-./bin/project worktree finish MSW-### --yes --as-agent <name>
+./bin/project worktree finish MSW-### --yes --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"
 ./bin/project export
 ```
 
@@ -117,3 +124,6 @@ The local tracker is the issue source of truth. Do not enable GitHub Issues.
 | pnpm lockfile error | Run `pnpm install --lockfile-only`. Commit the lockfile. |
 | SmartScreen warning | Expected on unsigned Windows builds. |
 | Tracker database missing | Run `python3 tools/project/cli.py rebuild --yes`. |
+| `PRD is not signed off` | Expected. Pass `--force --reason "D-021: no PRD sign-off gate"`. See `ai-rules/WORKFLOW.md`. |
+| `ste: fail` | Rewrite the sentence in STE. See `ai-rules/skills/ste-writing/SKILL.md`. |
+| `trace: ... has no test mapping` | Add `// scenario:` above the proving test, or tag the scenario `@pending`. |

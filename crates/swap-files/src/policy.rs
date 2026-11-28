@@ -399,6 +399,7 @@ mod tests {
         );
     }
 
+    // scenario: Path traversal is blocked
     #[test]
     fn rejects_a_path_in_the_name() {
         assert_eq!(

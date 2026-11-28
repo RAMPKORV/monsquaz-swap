@@ -1,7 +1,9 @@
 # Formal methods
 
 Formal verification is a design tool for the event rules. It is not a product
-dependency, a release artifact, or an architecture driver.
+dependency, a release artifact, or an architecture driver. The program is
+decision D-037 (formal verification program v2). This file describes the
+current tools, the planned routes, and the gates.
 
 ## Goals
 
@@ -12,10 +14,29 @@ dependency, a release artifact, or an architecture driver.
 
 ## Tools
 
-- **TLA+ 1.8.0 and TLC** for finite design models. The build is pinned by
-  SHA-256 in `scripts/formal/check.sh`. The upstream `v1.8.0` asset was
-  rebuilt on 2026-11-26; the pin tracks that build. A mismatch fails the check
-  for review. The jar is not committed.
+- **TLA+ 1.8.0 and TLC** for finite design models. The jar is not committed.
+  `scripts/formal/check.sh` downloads it from our own release asset
+  `tools-tla2tools-1.8.0` and checks a pinned SHA-256 (D-062). A mismatch
+  fails the check.
+
+  We mirror the jar because the upstream `v1.8.0` asset is mutable. Upstream
+  rebuilt it on 2026-11-26 and again on 2026-11-28, and each rebuild broke
+  the pin. The mirror holds the 2026-11-28 build (`sha256:df7cef5d…`). The
+  script keeps the upstream URL as a provenance comment.
+
+  To update the mirror:
+  1. Download the new upstream `tla2tools.jar`.
+  2. Compare its SHA-256 with the digest that the GitHub API reports for the
+     upstream asset.
+  3. Run `scripts/formal/check.sh` and `scripts/formal/check.sh nightly` with
+     the new jar. Every model and every mutation must pass.
+  4. Upload the jar to a new release tag `tools-tla2tools-<version>`. Do not
+     replace the asset of an existing tag.
+  5. Change `TLA_URL`, `TLA_SHA256`, and the provenance comment in
+     `scripts/formal/check.sh` in one PR. The script replaces the cached
+     `target/formal/tla2tools.jar` when the new hash does not match the pin.
+     Change the cache key in `.github/workflows/formal.yml` in the same PR.
+  6. Record the change in a tracker decision or in the issue evidence.
 - **proptest-state-machine** for model-based tests against the real Rust types
   and engine.
 - **Kani** was spiked for the header parser and custom-ID codec. The current
@@ -29,13 +50,39 @@ dependency, a release artifact, or an architecture driver.
 TLAPS, Lean, Verus, Creusot, and Prusti are not part of the general strategy.
 They are considered only for a small pure function when the benefit is clear.
 
+## Planned routes (D-037)
+
+These routes are decided. They are not built yet. Each route has an issue.
+
+- **TLA+ trace validation (MSW-106).** Engine tests write an NDJSON trace of
+  offer, claim, expire, skip, and submit steps. TLC checks that each trace is
+  a legal behaviour of `SwapClaim.tla`. This replaces ITF replay and links
+  the model to the real engine.
+- **Type-level anonymity (MSW-105).** Owner, title, comment, and contributor
+  values are wrapped in `HostOnly<T>`. Only code that holds a `Revealed`
+  capability can unwrap them. The capability exists only after the host
+  triggers the reveal. Participant DTOs cannot hold a `HostOnly<T>`.
+- **DB-enforced invariants (MSW-081).** SQLite constraints and triggers
+  refuse a repeat pair, an own-track assignment, and a second active holder.
+  The engine checks stay; the database is the last line.
+- **Apalache inductive invariants (MSW-108).** Apalache checks that the claim
+  and delivery invariants are inductive. This removes the dependency on the
+  TLC bounds for those properties.
+- **Planner checker with certificates (MSW-107).** The planner is untrusted.
+  A small checker verifies every plan against the hard invariants. When no
+  plan exists, the planner returns a Hall infeasibility certificate: a set of
+  tracks whose eligible participants are fewer than the tracks. The checker
+  verifies the certificate.
+
+New models stay on TLA+.
+
 ## Friction and ownership
 
 - The formal artifacts are dev-only. Product crates do not import them.
 - Any model, harness, or skill can be deleted in one PR. Deleting the artifacts
   does not change product behavior or the schema.
-- `scripts/formal/check.sh` is authoritative. The project-local skill is
-  guidance. A stale skill or a missing agent must not disable the checks.
+- `scripts/formal/check.sh` is authoritative. The shared skill
+  `ai-rules/skills/formal-verification/SKILL.md` is guidance. A stale skill or a missing agent must not disable the checks.
 - Agents may fix mechanical drift. A change to a property, its meaning, or its
   bounds needs human approval through a tracker decision.
 - Verification does not mandate a product refactor. If a proof needs an
@@ -46,16 +93,37 @@ They are considered only for a small pure function when the benefit is clear.
 The models follow their features. Each model lands with the feature it
 describes.
 
-| Target | Model | Status |
-|---|---|---|
-| Claim, offer, custody, expiry | `specs/tla/SwapClaim.tla` | implemented |
-| Assignment lifecycle | `crates/swap-core/tests/assignment_machine.rs` | implemented |
-| Parser and custom-ID codec | `custom_id.rs` and `scrub.rs` property tests | implemented |
-| Anonymity projections | `swap-sim` outbound audit | partial |
-| Classic schedule | `SwapSchedule.tla` | after planner repair |
-| Async queue | `SwapAsync.tla` | after async queue |
-| Delivery terminal safety | `specs/tla/SwapDelivery.tla` | implemented |
-| Reveal gate | `SwapReveal.tla` | after reveal presenter |
+| Target | Model or tool | Issue | Status |
+|---|---|---|---|
+| Claim, offer, custody, expiry | `specs/tla/SwapClaim.tla` | — | implemented |
+| Assignment lifecycle | `crates/swap-core/tests/assignment_machine.rs` | — | implemented |
+| Parser and custom-ID codec | `custom_id.rs` and `scrub.rs` property tests | — | implemented |
+| Delivery terminal safety | `specs/tla/SwapDelivery.tla` | — | implemented |
+| Anonymity projections | `swap-sim` outbound audit | — | partial |
+| DB-enforced invariants | SQLite constraints and triggers | MSW-081 | planned |
+| Type-level anonymity | `HostOnly<T>` + `Revealed` capability | MSW-105 | planned |
+| Engine trace validation | NDJSON traces checked by TLC | MSW-106 | planned |
+| Planner checker | verified checker + Hall certificates | MSW-107 | planned |
+| Inductive invariants | Apalache | MSW-108 | planned |
+| Classic schedule | `SwapSchedule.tla` | MSW-037 | planned |
+| Async queue | `SwapAsync.tla` | MSW-038 | planned |
+| Reveal gate | `SwapReveal.tla` | MSW-041 | planned |
+| Rust mutation testing | `cargo-mutants` nightly | MSW-097 | planned |
+
+## Gates
+
+- `specs/tla/mapping.json` lists the Rust files and functions that each model
+  covers. `scripts/formal/changed.mjs <base>` exits 0 when a diff touches a
+  mapped file, `specs/tla/`, or `scripts/formal/`.
+- `ci.yml` calls `.github/workflows/formal.yml` for every pull request, so the
+  formal job is part of `ci-gate`. The job runs `scripts/formal/check.sh` only
+  when `changed.mjs` reports a mapped change; a skipped job counts as success.
+  The nightly run is unconditional. `changed.mjs` uses `git diff
+  --no-renames`, so a moved or renamed mapped file also runs the gate.
+- `scripts/check.sh` runs `scripts/formal/check.sh` when `java` is on `PATH`.
+  Otherwise it prints `formal: SKIPPED (no java)`.
+- The "Model" step in `ai-rules/WORKFLOW.md` applies to every change to a
+  mapped file. A `full` ceremony issue records the formal evidence.
 
 ## Invariants
 
@@ -123,8 +191,8 @@ The Rust state machine and the TLA+ model use overlapping claim, submit, skip,
 and expiry vocabulary. The Rust lifecycle reference is checked against
 `Assignment` and `SeenLedger` by `proptest-state-machine`. It is a separate
 lifecycle model, not a trace-conformance check. The pinned TLC JSON
-counterexample is the fallback trace artifact. NDJSON trace validation replaces
-ITF replay until a pinned converter is justified.
+counterexample is the fallback trace artifact. NDJSON trace validation (MSW-106)
+replaces ITF replay until a pinned converter is justified.
 
 ## Discord transport
 
@@ -144,7 +212,8 @@ limits. A live test guild still needs a human and a token.
 
 TLA+ cannot prove noninterference end to end. Use participant projections,
 canary strings, outbound-effect audits, log scans, and adversarial review. Use
-TLA+ only for the reveal gate and the modeled outbound schema.
+TLA+ only for the reveal gate and the modeled outbound schema. Type-level
+anonymity (MSW-105) makes a leak a compile error for the wrapped values.
 
 Module metadata is scrubbed. Non-module audio and zip files pass through
 unchanged, so ID3, Vorbis, and WAV LIST tags remain a residual anonymity risk.
@@ -164,6 +233,7 @@ delivery, and reveal models are required before 1.0.0.
 ```bash
 scripts/formal/check.sh          # TLA+ PR model + mutations
 scripts/formal/check.sh nightly  # deeper model
+node scripts/formal/changed.mjs origin/main   # does this branch touch a model?
 cargo test -p swap-core --test assignment_machine
 cargo test -p swap-discord custom_id   # custom-ID property tests
 cargo test -p swap-files scrub         # module-scrub property tests
@@ -173,7 +243,8 @@ cargo test -p swap-files scrub         # module-scrub property tests
 
 - Update the model and the Rust code in the same PR when a modeled action
   changes.
-- Update `specs/tla/README.md` when a property, bound, or mapping changes.
+- Update `specs/tla/README.md` and `specs/tla/mapping.json` when a property,
+  bound, or mapping changes.
 - Run the mutation set after a model change.
 - Do not weaken a property to make a check pass. Report the finding.
 - If the model and the code disagree, decide which one is wrong before editing

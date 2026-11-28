@@ -209,6 +209,7 @@ fn the_fixtures_are_valid_modules_before_and_after_the_scrub() {
     }
 }
 
+// scenario: Metadata is scrubbed and checked
 #[test]
 fn a_real_render_accepts_the_scrub_and_changes_only_metadata() {
     if !openmpt_available() {

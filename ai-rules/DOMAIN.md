@@ -9,7 +9,7 @@ disagree, stop and decide which is wrong; record the decision.
 |---|---|
 | **Event / swap** | One album-making run with a roster, a pack (optional), a schedule, files, and a reveal. |
 | **Host** | The person running the desktop app and bot. May also participate, with disclosure. |
-| **Co-host** | Optional admin with full visibility, audited. |
+| **Co-host** | Optional helper with full visibility, audited. Decided, building in MSW-117 (D-059). |
 | **Participant** | A guild member who joins and seeds a track. |
 | **Fill-in** | A volunteer (or converted non-seeder) who covers a skipped slot; never receives a track twice. |
 | **Seed** | The participant's initial track submission (Round 1 / version 1). |
@@ -59,6 +59,7 @@ Draft → Signup/Seed → Schedule review → Active → Paused → Reveal → A
 - **Active:** offers, claims, edits, submissions, skips, fill-ins, reminders,
   extensions, group phases.
 - **Paused:** global freeze; clocks shift by the pause duration; no replan.
+  The host pause action is decided, building in MSW-113 (D-055).
 - **Reveal:** host-triggered after the release stream; schedule, titles,
   credits, comments, and album are published.
 - **Archived:** read-only; exportable; can be cloned.
@@ -97,14 +98,21 @@ OFFERED ──claim──► CLAIMED/WORKING ──submit──► SUBMITTED
 EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 ```
 
-- Async claim timeout default **24h** (host-set). On expiry: return to pool; a
-  cooldown, then a re-offer; a second expiry pauses the participant.
+- Async claim window default **24h** (host-set). On expiry, the track goes
+  back to the async queue. The expiry preset decides the next step for the
+  participant (see "Async" below and D-041).
 - Classic has one shared deadline for each round. The offer expires at that
   deadline and a claim uses the same deadline. The seed deadline is separate.
 - A claimed track may be skipped: the track returns unchanged, the pair is
   recorded as seen, and the participant can leave.
-- An unclaimed offer is not "seen"; the track can be offered to someone else or
-  to the same person later.
+- An unclaimed offer is not "seen"; the track can be offered to someone else.
+  The re-offer setting decides whether the same person can get the same track
+  again: never (default), after cooldown, last resort, or host (D-041).
+- Classic "mark missed": the host marks an overdue turn missed. The pair is
+  recorded as seen. The engine sets the track state to Pool, and the DM says
+  the track returns to the pool. The track still passes unchanged into the next
+  round, or a fill-in covers the turn. MSW-121 fixes the state name and the
+  copy.
 - Once a fill-in claims a slot, the original holder's turn is forfeited by
   default; the host can override with an audit entry.
 
@@ -134,7 +142,10 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - An away range removes the participant from overlapping projected rounds. The
   gap stays visible. Strict participation refuses the plan.
 - The default participant view is the caller's own assignments. Open schedule
-  is the explicit zero-anonymity mode and must be disclosed at join.
+  shows who edits which track code in each round. It must never show owners,
+  titles, or comments before the reveal (D-045). Decided, building in MSW-120:
+  the open mode currently exposes owners, titles, and comments. The join card
+  discloses it.
 
 ### Async
 
@@ -144,15 +155,29 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   Optional genre/mood content tags can come later.
 - Per-person queue; one claimed track per person at a time.
 - Claim-first everywhere: offer → claim → deliver. The 24h claim window starts
-  at the offer. A 12h reminder reduces expiry.
+  at the offer. The claim reminder is a setting: 6h, 12h (default), none, or
+  custom. Validation refuses a reminder at or after the claim window. Decided,
+  building in MSW-086; the code sends a fixed 12h reminder.
 - Ready gate: offer only to a participant who is Ready. A new participant is
-  Ready. An expired offer auto-pauses the participant; they must tap Ready to
-  resume.
-- Expiry protection is host-configurable. The default is: one active offer;
-  the first expiry starts a 24-hour cooldown; the second expiry pauses the
-  participant until `/swap resume` or a host action. Never offer the same track
-  to the same person again after an expiry. The pair does not count as seen.
-  Report the missed exposure as a gap.
+  Ready. A paused participant must tap Ready (`/swap resume`) to resume.
+- Expiry protection is a preset (D-041). An expired offer never counts as
+  seen, and the app reports the missed exposure as a gap. The presets are
+  decided, building in MSW-084. The code applies only the default preset:
+  - **strike + cooldown** (default): one active offer; the first expiry starts
+    a 24-hour cooldown; the second expiry pauses the participant until
+    `/swap resume` or a host action;
+  - **cooldown only**: every expiry starts a 24-hour cooldown; the app never
+    pauses the participant;
+  - **host review**: an expiry has no automatic effect except a host decision
+    card; the host chooses pause, cooldown, or ignore;
+  - **none**: the participant stays Ready and can get a new offer in the next
+    wave; the app never offers the same track again unless the re-offer
+    setting allows it.
+- Not built yet (MSW-084): strikes reset when the participant resumes, and an
+  auto-pause alerts the host.
+- Same-track re-offer after expiry is a setting: never (default), after
+  cooldown, last resort, or host. Decided, building in MSW-085; the code
+  applies "never".
 - Dispatch default: deficit-ordered hybrid (most-constrained ready track, then
   the eligible person with the largest remaining quota, with anti-clustering
   and matching repair). Strict queues and an opportunistic pool are
@@ -166,9 +191,12 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   seeder, so the seeded track count equals the participant count. The app
   computes editors per track and warns when the value is fractional. Full
   exposure needs claims equal to tracks minus one.
-- Release: one daily window at 18:00 UTC by default. Run two dispatch waves
-  inside the window (the start and two hours later). The host can change
-  the time; unclaimed offers shift, claimed assignments keep their due date.
+- Release: one daily window at 18:00 wall-clock time in the host IANA zone by
+  default (D-042). The release keeps its local time across DST. Decided,
+  building in MSW-087; the code reads the release time as UTC. Run two
+  dispatch waves inside the window (the start and two hours later). The host
+  can change the time; unclaimed offers shift, claimed assignments keep their
+  due date.
 - Deadline: 24h from claim by default. A claimed-but-missed track counts as
   seen. At the deadline, notify the host and show a decision card; target a 6h
   response. Do not auto-advance.
@@ -195,11 +223,15 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 
 - Pool: dedicated volunteers + signed-up non-seeders converted at lock; the host
   can appoint a specific eligible person.
-- Sequential offers, 12h timeout, max 3, then the host; first accept wins.
-- Eligibility: never seen the track, not the owner, available/ready, under the
-  shared handoff budget. All regular and fill-in edits count toward that one
-  budget.
-- Credit: marked as fill-in; can name the track if they are the final editor.
+- Offers are sequential, and first accept wins. The claim window default is 6h
+  (D-069). An auto-chain uses at most 3 offers; a host-ordered list has no size
+  limit (D-070). Decided, building in MSW-083.
+- Eligibility: never seen the track, not the owner, available/ready. A tier-2
+  fill-in rescue is an extra turn and does not count toward the shared handoff
+  budget (D-050). Decided, building in MSW-080..MSW-083.
+- Credit: the badge marks a rescued turn, whoever did it. Planned turns of a
+  person with the fill-in role are plain credits (D-065). Decided, building in
+  MSW-080.
 - No eligible fill-in: classic passes the track unchanged; async returns it to
   the pool. Never relax the no-repeat invariant to rescue a slot.
 
@@ -215,18 +247,22 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   per assignment; host can override.
 - No-response fallback: grace, then host decision; automatic skipping only if
   explicitly configured and disclosed.
-- Host can pause the event; all clocks shift by the pause duration.
+- Host can pause the event; all clocks shift by the pause duration. Decided,
+  building in MSW-113 (D-055).
 
 ## Files and naming
 
-- Track IDs are opaque codes (e.g. `S7F3A`), not owner-derived or submission
+- Track IDs are opaque codes (for example `S7F3A`), not owner-derived or submission
   order. `v#` is the track version (v1 seed, v2 first edit, ...). `R#` is only a
   round number.
-- Host storage is detailed: `v4.S7F3A.alice.it` (version, code, holder). Sent
-  to a participant: `S7F3A.it` only — no version, holder, or original name.
-- Canonical store: a round view (`R1/`, `R2/`) plus a track history
-  (`Tracks/<code>/`); SQLite records the mapping. Hardlinks avoid duplicate
-  bytes.
+- Sent to a participant: `S7F3A.it` only — no version, holder, or original
+  name.
+- Canonical store (built): blobs by SHA-256 in the content store; SQLite
+  records the version, code, and holder for each blob. The reveal ZIP names
+  files `{pos}_{code}.{ext}`.
+- Planned, not built (D-016): detailed host names such as `v4.S7F3A.alice.it`
+  (version, code, holder), a round view (`R1/`, `R2/`), and a track history
+  (`Tracks/<code>/`).
 - Default allowlist: tracker modules + audio + zip, editable per event.
 - Format changes are forbidden unless the host explicitly reconfigures.
 - 20 MiB cap (Discord DM redistribution). The bot downloads external links when
@@ -256,8 +292,11 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   fill-ins marked, comments, schedule, fun stats, and a Markdown/HTML runbook.
 - Skips show as anonymous "no edit" gaps by default; the host can choose.
 - Commit-reveal: bot posts the schedule/policy commitment at lock; `/swap
-  verify` recomputes it at reveal. Async seals the policy + hash-chained
-  transcript, not a future fixed schedule. No file hashes are public.
+  verify` recomputes it at reveal. The reveal publishes `verify.txt` so that a
+  participant can check the seal with `sha256sum` (D-043). `verify.txt` and
+  `/swap verify`: decided, building in MSW-088. Async seals the
+  policy + hash-chained transcript, not a future fixed schedule. No file hashes
+  are public. Replans have no cap; each replan creates a new commitment.
 
 ## Time
 

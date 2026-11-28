@@ -5,7 +5,6 @@
   },
   "license": "MIT",
   "paths": {
-    "decisions": "docs/generated/DECISIONS.md",
     "dump": "project/ledger/current.jsonl",
     "features": "specs/generated",
     "prd": "docs/generated/PRD.md",

@@ -60,6 +60,7 @@ fn a_dense_event_stays_within_the_classic_cap() {
     assert_eq!(report.tracks, 24);
 }
 
+// scenario: The outbound file name hides the lineage
 #[test]
 fn seeds_do_not_leak_names_or_versions() {
     let report = run(&SimulationConfig::new(6)).unwrap();

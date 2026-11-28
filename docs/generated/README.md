@@ -3,6 +3,10 @@
 These files are generated from the SQLite tracker. Do not edit them by hand.
 Use `./bin/project` and `./bin/project export`.
 
+The decision dump is not kept. `project export` writes the PRD, status,
+generated features, and the ledger dump only. `ai-rules/DECISIONS.md` is the
+single human-readable decision log.
+
 The canonical hand-written documents are:
 
 - `docs/PRD.md` — product contract

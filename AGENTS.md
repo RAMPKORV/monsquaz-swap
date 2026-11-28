@@ -20,9 +20,12 @@ This file is a router. Detailed rules live in `ai-rules/`.
 7. `ai-rules/DESIGN.md` — the deterministic design policy, the Refract gate,
    and how to change a locked rule.
 8. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
-9. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
-   and append-only ledger. It is not the PRD; the PRD is hand-written.
-10. The issue you are working on, its notes, and linked docs.
+9. `ai-rules/DECISIONS.md` — the single decision log.
+10. `ai-rules/skills/` — the shared agent skills (formal verification, design
+    review, STE writing).
+11. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
+    and append-only ledger. It is not the PRD; the PRD is hand-written.
+12. The issue you are working on, its notes, and linked docs.
 
 ## Current state
 
@@ -77,8 +80,10 @@ This file is a router. Detailed rules live in `ai-rules/`.
 ./bin/project next
 ./bin/project issue show MSW-###
 ./bin/project issue claim MSW-### --as-agent <name>
-./bin/project worktree new MSW-### --as-agent <name>          # first batch issue
-./bin/project worktree finish MSW-### --yes --as-agent <name>   # from main checkout
+./bin/project worktree new MSW-### --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"                 # first batch issue
+./bin/project worktree finish MSW-### --yes --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"                 # from main checkout
 
 # app
 pnpm install
@@ -89,7 +94,13 @@ pnpm --dir ui build   # before cargo test on a clean checkout
 cargo test --workspace
 scripts/check.sh
 scripts/design-check.sh   # Refract + contrast + focus + token policy
+node scripts/ste-lint.mjs          # STE gate
+node scripts/trace-scenarios.mjs   # Gherkin traceability gate
+scripts/formal/check.sh            # TLA+ models (needs java)
 ```
+
+`worktree new` and `worktree finish` need `--force` because of a PRD sign-off
+gate that this project does not use. See `ai-rules/WORKFLOW.md`.
 
 Batch 3–6 related issues into one branch, one PR, and one CI run. Claim every
 issue, create the worktree from the first issue, and work the rest in it. The
@@ -106,17 +117,16 @@ evidence, sessions, and the ledger. We do **not** use its PRD/sign-off gates;
 
 Use **ASD-STE100 Simplified Technical English** for every specification,
 requirement, Gherkin scenario, event setting, test plan, runbook, CLI
-instruction, and error message. Read `ai-rules/STE.md` before you write a spec.
+instruction, and error message. `ai-rules/STE.md` owns the rules. The three
+most important:
 
 - One word, one meaning. Use the glossary in `ai-rules/DOMAIN.md`.
-- Active voice. Name the actor.
-- Procedures: maximum 20 words per sentence. Descriptions: maximum 25 words.
-- One instruction per sentence. One topic per paragraph, maximum six sentences.
-- Do not use contractions, idioms, `etc.`, `e.g.`, `i.e.`, `and/or`,
-  `appropriate`, `reasonable`, or `as needed`.
-- State every condition, time, unit, and timezone.
+- Active voice, one instruction per sentence, at most 20 words (procedures)
+  or 25 words (descriptions).
 - Use `must` for mandatory behaviour and `can` for capability. Do not use
-  `should` in a requirement.
+  `should`.
+
+`node scripts/ste-lint.mjs` checks the mechanical rules (D-038).
 
 The playful product voice is allowed in user-facing copy. It must not make an
 instruction ambiguous.
@@ -124,24 +134,23 @@ instruction ambiguous.
 ## UI quality gate
 
 A UI issue is not done until the visual evidence exists and the review waves
-pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
-
-- Capture every affected view at 1280×800 and at the minimum 1024×700 width.
-- Capture empty, loading, populated, error, long-content, and dense-table
-  states.
-- Check alignment, spacing, density, typography, contrast, overflow, focus, and
-  responsive behavior.
-- Run at least three independent reviews in waves: visual design, UX/copy, and
-  accessibility. Fix every must-fix, then re-capture.
-- Store the curated screenshots under `docs/ui/screens/` and record the review.
-- Do not use placeholder text or fake-looking data in a review screenshot.
+pass. `docs/UI_REVIEW.md` is the single owner of the screenshot matrix, the
+states, the review waves, the human checkpoints, and the reject list.
+`ai-rules/UX.md` owns the copy rules.
 
 ## Definition of done
 
 - The behaviour has a Gherkin scenario in `specs/features/` (or a recorded
   verification command for a chore).
+- A test declares the scenario with `// scenario: <name>`, and the scenario
+  has no `@pending` tag. A feature file that cucumber-rs runs counts as mapped
+  in full and needs no per-test comment. `node scripts/trace-scenarios.mjs`
+  passes.
 - A failing test existed first, or the change is a docs/chore.
-- New specifications follow `ai-rules/STE.md`.
+- New specifications follow `ai-rules/STE.md`, and `node scripts/ste-lint.mjs`
+  passes.
+- A change to a file in `specs/tla/mapping.json` updates the model or the
+  mapping, and `scripts/formal/check.sh` passes.
 - For UI work, the UI quality gate passes with screenshots and review evidence.
 - `scripts/check.sh` passes.
 - The tracker has evidence and the issue is closed through the CLI.
@@ -152,6 +161,8 @@ pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
 | Path | Purpose |
 |---|---|
 | `ai-rules/` | project rules for humans and agents |
+| `ai-rules/DECISIONS.md` | the single decision log (hand-written D-001..D-028, tracker D-029 and later) |
+| `ai-rules/skills/` | shared agent skills; `.claude/skills/` and `.opencode/skills/` symlink here |
 | `ai-rules/CLI.md` | command map, worktree, release, troubleshooting |
 | `design/` | design policy, page matrix, baseline, Refract lock |
 | `ai-rules/RELEASES.md` | versioning, tags, unsigned Windows, no updater |
@@ -160,7 +171,8 @@ pass. Use `docs/UI_REVIEW.md` and `ai-rules/UX.md`.
 | `docs/ARCHITECTURE.md` | public system design |
 | `docs/SETUP.md` | bot token, keychain, channel mapping, test DM |
 | `docs/FORMAL_METHODS.md` | formal verification scope, tools, and maintenance |
-| `specs/tla/` | TLA+ design models |
+| `specs/tla/` | TLA+ design models; `mapping.json` lists the code each model covers |
+| `docs/generated/SCENARIO_COVERAGE.md` | generated scenario-to-test coverage |
 | `docs/RESEARCH.md` | evidence and sources behind the design |
 | `docs/ROADMAP.md` | milestones and exit criteria |
 | `specs/features/` | hand-written Gherkin, executable later with cucumber-rs |

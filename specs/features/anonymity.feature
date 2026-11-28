@@ -3,6 +3,7 @@ Feature: Anonymity until reveal
   Participants must not learn who made what before the reveal.
   The host can see the mapping.
 
+  @pending
   Scenario: A participant view hides the owner
     Given a track with a known owner and contributors
     When a participant views the track
@@ -20,11 +21,13 @@ Feature: Anonymity until reveal
     And the file name has no version number
     And the file name has no original file name
 
+  @pending
   Scenario: The host store keeps a readable name
     Given a stored track version
     Then the host file name shows the version, the track code, and the holder
     And the host file name is not sent to participants
 
+  @pending
   Scenario: Public progress does not expose a person
     Given an active round
     When the bot posts public progress before the deadline
@@ -40,15 +43,16 @@ Feature: Anonymity until reveal
     And the participant does not see group membership or group names
     And the participant does not see the R1 seed band
 
-  Scenario: An open schedule exposes the full event
+  @pending
+  Scenario: An open schedule shows assignments only
     Given a host who enabled the open schedule
-    When a participant opens the schedule
-    Then the participant sees the R2..RN matrix
-    And the participant sees the seed owners
-    And the participant sees editor names
-    And the participant sees titles and comments
-    And the join card disclosed that the event has no anonymity
+    When a participant opens the schedule before the reveal
+    Then the participant sees which participant edits which track code in each round from R2 to RN
+    And the participant does not see the seed owners
+    And the participant does not see titles or comments
+    And the join card disclosed the open schedule
 
+  @pending
   Scenario: The host planner shows the R1 seed band
     Given a locked roster with seed owners
     When the host opens the schedule planner
@@ -56,6 +60,7 @@ Feature: Anonymity until reveal
     And the exchange matrix starts at R2
     And the seed band is host-only
 
+  @pending
   Scenario: Comments are host and reveal only
     Given a submission with a comment
     When the next participant receives the track
@@ -63,6 +68,7 @@ Feature: Anonymity until reveal
     And the host can read the comment
     And the comment can be published at the reveal
 
+  @pending
   Scenario: Skips stay private
     Given a participant who skipped a turn
     When another participant opens the event view
@@ -71,6 +77,7 @@ Feature: Anonymity until reveal
     When the reveal runs
     Then the skip appears as an anonymous gap by default
 
+  @pending
   Scenario: Stream-safe mode hides the mapping
     Given the host opens the reveal presenter
     When stream-safe mode is on
@@ -78,6 +85,7 @@ Feature: Anonymity until reveal
     And the presenter redacts Discord IDs
     And the host can switch back only behind a confirmation
 
+  @pending
   Scenario: The host participation disclosure is visible
     Given an event where the host also participates
     When a participant reads the rules
@@ -90,6 +98,7 @@ Feature: Anonymity until reveal
     Then the commitment covers the schedule and the policy
     And the commitment does not contain a hash of any submitted file
 
+  @pending
   Scenario: A small event is not blocked or warned
     Given a host who creates an event with 3 participants
     When the host starts the event

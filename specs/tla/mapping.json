@@ -1,0 +1,70 @@
+{
+  "$comment": "scripts/formal/changed.mjs reads 'always' (path prefixes) and, for each model, 'spec', 'configs', and 'covers[].path' (exact file paths, or prefixes that end in '/'). A change to any of them runs the formal gate. 'functions' and 'actions' are a guide for reviewers; the gate matches files only.",
+  "always": ["specs/tla/", "scripts/formal/"],
+  "models": [
+    {
+      "name": "SwapClaim",
+      "spec": "specs/tla/SwapClaim.tla",
+      "configs": ["specs/tla/SwapClaimPR.cfg", "specs/tla/SwapClaimNightly.cfg", "specs/tla/SwapClaimMutation.cfg"],
+      "actions": ["Offer", "Claim", "Expire", "Skip", "Submit", "Tick"],
+      "covers": [
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["open_round", "dispatch_async_wave", "dispatch_async_release", "claim", "submit", "submit_attachment", "submit_inner", "skip", "expire_offer", "tick_deadlines", "decide_deadline", "assign_fill_in", "move_track"]
+        },
+        {
+          "path": "crates/swap-core/src/ledger.rs",
+          "functions": ["SeenLedger::apply", "SeenLedger::mark", "SeenLedger::validate_assignment", "Touch::counts_as_seen"]
+        },
+        {
+          "path": "crates/swap-core/src/state.rs",
+          "functions": ["Assignment::claim", "Assignment::submit", "Assignment::skip", "Assignment::expire", "Assignment::mark_overdue", "Assignment::records_seen", "Readiness::can_receive_offer"]
+        },
+        {
+          "path": "crates/swap-core/src/async_queue.rs",
+          "functions": ["offer selection"]
+        },
+        {
+          "path": "crates/swap-core/tests/assignment_machine.rs",
+          "functions": ["proptest-state-machine reference model"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["SeenRepo::record", "AssignmentRepo::claim", "AssignmentRepo::submit", "AssignmentRepo::update_status"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["seen_pairs primary key", "assignments.status"]
+        }
+      ]
+    },
+    {
+      "name": "SwapDelivery",
+      "spec": "specs/tla/SwapDelivery.tla",
+      "configs": ["specs/tla/SwapDeliveryPR.cfg", "specs/tla/SwapDeliveryNightly.cfg", "specs/tla/SwapDeliveryMutation.cfg"],
+      "actions": ["Enqueue", "Send", "Ack", "Retry", "Fail", "Restart"],
+      "covers": [
+        {
+          "path": "crates/swap-engine/src/delivery.rs",
+          "functions": ["DeliveryWorker::drain", "DeliveryWorker::notify_host", "dispatch_pending", "Delivery::dedupe_key"]
+        },
+        {
+          "path": "crates/swap-engine/src/effects.rs",
+          "functions": ["dispatch"]
+        },
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["enqueue_effect"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["DeliveryRepo::enqueue", "DeliveryRepo::pending", "DeliveryRepo::mark_sent", "DeliveryRepo::mark_retry", "DeliveryRepo::mark_failed"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["deliveries table"]
+        }
+      ]
+    }
+  ]
+}

@@ -159,6 +159,7 @@ fn count(db: &Db, sql: &str, value: &str) -> i64 {
     db.conn().query_row(sql, [value], |row| row.get(0)).unwrap()
 }
 
+// scenario: A participant exports their data
 #[test]
 fn an_export_contains_only_the_participants_data() {
     let fixture = Fixture::new(3);
@@ -206,6 +207,7 @@ fn a_missing_participant_export_is_refused() {
     assert!(matches!(error, PrivacyError::ParticipantMissing(_)));
 }
 
+// scenario: A participant deletes their data
 #[test]
 fn deletion_replaces_direct_identifiers_and_keeps_a_hash_audit() {
     let fixture = Fixture::new(3);

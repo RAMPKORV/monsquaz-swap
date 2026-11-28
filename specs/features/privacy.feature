@@ -3,6 +3,7 @@ Feature: Privacy and data control
   The app collects only what the event needs.
   The host is the data controller for the event.
 
+  @pending
   Scenario: Joining records consent
     Given a guild member who joins an event
     When the member submits the join form
@@ -24,6 +25,7 @@ Feature: Privacy and data control
     And the app keeps a hash-only audit record where needed
     And the app reports what it removed
 
+  @pending
   Scenario: Telemetry is off by default
     Given a new installation
     When the app starts
@@ -31,6 +33,7 @@ Feature: Privacy and data control
     And the app sends no crash report
     And the app records only local logs
 
+  @pending
   Scenario: Diagnostics are redacted
     Given a host who exports diagnostics
     When the app builds the diagnostics bundle
@@ -39,6 +42,7 @@ Feature: Privacy and data control
     And the bundle contains no author mapping
     And the bundle contains no absolute participant paths
 
+  @pending
   Scenario: Backups expire
     Given an automatic backup schedule
     When a backup is older than the retention limit
@@ -46,6 +50,7 @@ Feature: Privacy and data control
     And the app keeps the current event data
     And the host can see the backup age
 
+  @pending
   Scenario: The album license is stated
     Given a completed event
     When the host exports the album
@@ -53,6 +58,7 @@ Feature: Privacy and data control
     And the package credits the participants
     And the package states that participants keep authorship
 
+  @pending
   Scenario: A display name change does not change identity
     Given a participant who changes their Discord display name
     When the app updates the credit name

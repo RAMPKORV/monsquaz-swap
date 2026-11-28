@@ -791,6 +791,7 @@ mod tests {
         );
     }
 
+    // scenario: Every participant receives one unseen track per round
     #[test]
     fn a_full_event_has_no_repeats_or_own_tracks() {
         let people = people(8);

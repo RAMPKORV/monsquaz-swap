@@ -5552,6 +5552,7 @@ mod reveal_tests {
         );
     }
 
+    // scenario: Comments are published with attribution
     #[test]
     fn reveal_messages_include_titles_fill_ins_gaps_and_comments() {
         let track = TrackCredits {

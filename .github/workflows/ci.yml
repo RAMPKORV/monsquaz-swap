@@ -38,6 +38,24 @@ jobs:
       - name: Tracker smoke tests
         run: python3 -m unittest discover -s tests -p 'test_tracker_smoke.py' -v
 
+  spec-gates:
+    name: Spec gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Gate script tests
+        run: node --test scripts/tests/
+      - name: STE lint
+        run: node scripts/ste-lint.mjs
+      - name: Gherkin traceability
+        run: node scripts/trace-scenarios.mjs --check
+
   ui:
     name: UI
     runs-on: ubuntu-24.04
@@ -175,10 +193,16 @@ jobs:
     name: E2E
     uses: ./.github/workflows/e2e.yml
 
+  formal:
+    name: Formal
+    # The PR model job runs only when a mapped file changed. A skipped job
+    # counts as success in ci-gate.
+    uses: ./.github/workflows/formal.yml
+
   ci-gate:
     name: ci-gate
     if: always()
-    needs: [tracker, ui, design, rust, tauri-smoke, e2e]
+    needs: [tracker, spec-gates, ui, design, rust, tauri-smoke, e2e, formal]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

@@ -12,7 +12,7 @@ product contract is hand-written in `docs/`.
 2. **Claim.** `./bin/project issue claim MSW-### --as-agent <name>`.
    Respect the batch WIP limit (6). Claim every issue in the batch.
 3. **Worktree.** `./bin/project worktree new MSW-### --as-agent <name>` for
-   the first issue. Work the other batch issues in that worktree; do not make a
+   the first issue. See "PRD gate and `--force`" below. Work the other batch issues in that worktree; do not make a
    second worktree. Worktrees live in `../MonsquazSwap-worktrees/`, outside the
    repo. Never share a mutable SQLite DB across worktrees.
 4. **Research.** Codebase first, then official docs/web. Record sources and
@@ -21,29 +21,53 @@ product contract is hand-written in `docs/`.
 5. **Specify.** Write or update a scenario in `specs/features/`. State the
    observable behaviour, the error path, and the verification command. Write
    the spec in ASD-STE100 Simplified Technical English (`ai-rules/STE.md`).
+   Tag a scenario `@pending` until a test proves it (`ai-rules/GHERKIN.md`).
 6. **Red.** Add the smallest failing test. For Rust domain behaviour, a unit
    test or `proptest` property. For a user journey, a cucumber-rs scenario.
 7. **Green.** Implement the minimum. No speculative abstractions.
 8. **Refactor.** Remove duplication, keep the domain pure, rerun tests.
-9. **Self-review.** Read the diff as a hostile reviewer: invariants, anonymity,
+9. **Model.** Do this step when the change touches a modeled action, a
+   property, or a mapped file. `specs/tla/mapping.json` lists the mapped files.
+   Update the TLA+ model or the trace mapping in the same PR. Run
+   `scripts/formal/check.sh`. Skip this step for other changes.
+10. **Self-review.** Read the diff as a hostile reviewer: invariants, anonymity,
    error paths, timezones, idempotency, secrets, path safety. Record the review
-   for `standard`/`full` ceremony.
-10. **Check.** `scripts/check.sh`. Fix everything; do not weaken tests.
-11. **Merge.** Squash merge the batch from the main checkout with
+   for `standard`/`full` ceremony. Then run the review loop (below).
+11. **Check.** `scripts/check.sh`. Fix everything; do not weaken tests.
+12. **Merge.** Squash merge the batch from the main checkout with
     `./bin/project worktree finish ...`. Record evidence for every issue.
-12. **Export.** `./bin/project export` and commit the ledger dump with the code.
+13. **Export.** `./bin/project export` and commit the ledger dump with the code.
 
 ## Ceremony
 
 | Tier | Use | Required |
 |---|---|---|
 | `light` | docs, chores, one-line fixes | issue + verification |
-| `standard` | normal feature/bug | scenario + tests + self-review |
-| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + adversarial review + rollback/restore evidence |
+| `standard` | normal feature/bug | scenario + tests + self-review + review loop |
+| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + review loop + rollback/restore evidence + formal evidence (`scripts/formal/check.sh` output, or a note that no modeled action changed) |
 
 The default is `light`; raise it deliberately for `full` work. The tracker's
-status gates still exist, but we do not require an independent reviewer for
-every routine issue. An independent review is required for `full`.
+status gates still exist.
+
+## PRD gate and `--force`
+
+The tracker tool has a PRD sign-off gate. This project does not use it
+(D-021). `tools/project` has no configuration flag that turns the gate off, so
+`worktree new` and `worktree finish` refuse to run without `--force`. Pass
+`--force` with this exact reason:
+
+```bash
+./bin/project worktree new MSW-### --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"
+./bin/project worktree finish MSW-### --yes --as-agent <name> \
+  --force --reason "D-021: no PRD sign-off gate"
+```
+
+`--force` waives the PRD sign-off gate. For `worktree new`, `--force` also
+skips the claim and WIP checks. For `worktree finish`, `--force` does not skip
+the review status, the resolved review, or the evidence check. Before you use
+it, make sure that you claimed the issue and that the issue is in the correct
+status. Do not use `--force` for any other reason.
 
 ## Batch PRs
 
@@ -54,8 +78,9 @@ CI is the main wait. Batch related work into one PR.
 - Claim every issue before you start. Use the first issue for `worktree new`;
   work the rest in the same worktree.
 - The PR body lists every issue key and the evidence for each one.
-- Close each issue after the merge with the same squash commit. Add one review
-  record per `full` issue, or one shared review with all keys.
+- Close each issue after the merge with the same squash commit. Record one
+  review for each `standard` or `full` issue. A shared review file can cover
+  the batch, but the tracker needs a review record for each issue.
 - Do not batch unrelated risky changes. Security, schema, and UI changes can
   share a batch only when they serve one outcome.
 - A batch may delete or retire a formal artifact in the same PR. Keep the
@@ -85,10 +110,41 @@ CI is the main wait. Batch related work into one PR.
 
 - **Plan review:** one fresh adversarial review of the PRD/specs before
   implementation. Fix must-fixes; record it; no formal sign-off gate.
-- **Issue review:** self-review for `standard`; independent adversarial review
-  for `full` (anonymity, scheduling, schema, security, file handling).
+- **Issue review:** use the review loop below. It covers `standard` and `full`
+  issues. Focus on anonymity, scheduling, schema, security, and file handling.
 - Reviewer looks for contradictions, untestable claims, anonymity leaks,
   missing error paths, silent auto-advance, and duplicated truth.
+
+## Review loop
+
+Every `standard` and `full` issue gets an independent review before the merge.
+The reviewer roles depend on the ceremony tier:
+
+| Work | Reviewer roles |
+|---|---|
+| `standard` | correctness |
+| `full` | correctness; invariants and anonymity; security |
+| UI work (any tier) | the three waves in `docs/UI_REVIEW.md`: visual design, UX and copy, accessibility; plus the human checkpoints in "Human in the loop" in `docs/UI_REVIEW.md` |
+
+Procedure:
+
+1. Start one fresh subagent for each role. A reviewer has no memory of the
+   work.
+2. Give each reviewer the diff, the issue, and the relevant rules files.
+3. Do not give the reviewer your conclusions, your self-review, or your
+   explanation of the change.
+4. The reviewer reports each finding on one line in this format:
+   `severity | file:line | problem | fix`. The severity is `must-fix`,
+   `should-fix`, or `nit`.
+5. Fix every `must-fix`. Fix a `should-fix` or record the reason to keep it.
+6. Start a new fresh review of the new diff. Do not reuse a reviewer.
+7. Stop when no `must-fix` remains.
+8. After three rounds with a `must-fix` still open, stop and escalate to the
+   human.
+
+Record the findings and the result in the tracker as one review record for each
+issue. A batch can record one review file that lists all issue keys, but each
+`standard` or `full` issue needs its own tracker record.
 
 ## Handoff
 

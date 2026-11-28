@@ -39,7 +39,7 @@ location.
 |---|---|
 | Active event data | until the event is archived or deleted |
 | Archived event | until the host deletes it |
-| Backups | 90 days, then deleted by the app; pruning is implemented |
+| Backups | 90 days. The pruning function exists; automatic backups are decided, building in MSW-115 (D-057) |
 | Local logs | 30 days, then rotated |
 | Transient DM payloads | dropped after ingest |
 | Public reveal package | controlled by the host |
@@ -82,7 +82,7 @@ privacy policy. The app cannot control Discord's retention or access.
 ## Anonymity limits
 
 - Participants are anonymous from each other until the reveal.
-- The host and co-hosts can see the mapping.
+- The host can see the mapping. Co-hosts will see it too (decided, building in MSW-117).
 - The host machine, Discord, and server admins are outside the anonymity
   boundary.
 - Small events and distinctive musical style can reveal identity by inference.

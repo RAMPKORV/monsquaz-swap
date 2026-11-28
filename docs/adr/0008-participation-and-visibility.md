@@ -37,6 +37,9 @@ needs an explicit choice.
    it in setup. The review step and the join card show a warning. Open schedule
    exposes the R2..RN matrix, seed owners, editor names, titles, and comments.
    The R1 seed band is part of that disclosure.
+   *Superseded in part by D-045 (2026-11-28): an open schedule shows who
+   edits which track code in each round. It never shows owners, titles, or
+   comments before the reveal.*
 
 6. **Gaps are visible, not silent.** The planner shows the empty-cell count and
    the reason. The host must review the gaps before the schedule locks. A

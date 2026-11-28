@@ -220,6 +220,7 @@ impl DeliveryPreparer for RejectingPreparer {
     }
 }
 
+// scenario: Metadata is scrubbed and checked
 #[test]
 fn a_prepared_seed_keeps_the_original_and_delivers_the_scrub() {
     let directory = tempfile::tempdir().unwrap();
@@ -312,6 +313,7 @@ fn a_failed_preparation_does_not_store_a_seed() {
     );
 }
 
+// scenario: The reveal is refused while work is pending
 #[tokio::test]
 async fn the_classic_loop_reaches_a_reveal() {
     let fixture = Fixture::new(4, 0);
@@ -386,7 +388,17 @@ async fn the_classic_loop_reaches_a_reveal() {
     let round_two = fixture.open(2);
     assert_eq!(round_two.len(), 4);
     let blocked = reveal_with_channel(&fixture.db, EVENT, Some("reveal-channel"), T6).unwrap_err();
-    assert!(matches!(blocked, EngineError::PendingAssignments { .. }));
+    let EngineError::PendingAssignments { count, mut ids } = blocked else {
+        panic!("expected pending assignments, got {blocked:?}");
+    };
+    let mut expected_ids = round_two
+        .iter()
+        .map(|(_, assignment_id, _)| assignment_id.clone())
+        .collect::<Vec<_>>();
+    ids.sort();
+    expected_ids.sort();
+    assert_eq!(count, 4);
+    assert_eq!(ids, expected_ids);
     for (_, assignment_id, _) in &round_two {
         expire_offer(&fixture.db, EVENT, assignment_id, T4 + 172_801).unwrap();
     }
@@ -430,6 +442,7 @@ async fn the_classic_loop_reaches_a_reveal() {
     }));
 }
 
+// scenario: An expiry returns the track without a seen mark
 #[test]
 fn only_a_claim_counts_as_seen_for_an_offer() {
     let fixture = Fixture::new(4, 0);
@@ -454,6 +467,7 @@ fn only_a_claim_counts_as_seen_for_an_offer() {
     assert!(!SeenRepo::has(fixture.db.conn(), EVENT, third_track, third_user).unwrap());
 }
 
+// scenario: An expiry returns the track without a seen mark
 #[test]
 fn an_expiry_returns_the_track_and_blocks_a_late_claim() {
     let fixture = Fixture::new(2, 0);
@@ -486,6 +500,7 @@ fn an_expiry_returns_the_track_and_blocks_a_late_claim() {
     ));
 }
 
+// scenario: A resubmission keeps every version
 #[test]
 fn a_resubmission_keeps_every_version_and_a_format_change_is_refused() {
     let fixture = Fixture::new(3, 0);
@@ -669,6 +684,85 @@ fn too_many_rounds_are_refused() {
     ));
 }
 
+// scenario: The host chooses a schedule strategy
+#[test]
+fn the_event_scheduler_setting_selects_each_strategy_and_keeps_the_plan_valid() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn repeated_handoffs(assignments: &[swap_db::PlanAssignmentRecord]) -> u32 {
+        let mut turns: BTreeMap<&str, Vec<(u32, &str)>> = BTreeMap::new();
+        for assignment in assignments {
+            turns
+                .entry(assignment.track_code.as_str())
+                .or_default()
+                .push((assignment.round, assignment.participant_id.as_str()));
+        }
+        let mut pairs: BTreeMap<(&str, &str), u32> = BTreeMap::new();
+        for track_turns in turns.values_mut() {
+            track_turns.sort_by_key(|(round, _)| *round);
+            for pair in track_turns.windows(2) {
+                let (left, right) = (pair[0].1, pair[1].1);
+                let key = if left <= right {
+                    (left, right)
+                } else {
+                    (right, left)
+                };
+                *pairs.entry(key).or_default() += 1;
+            }
+        }
+        pairs.values().map(|count| count.saturating_sub(1)).sum()
+    }
+
+    let mut plans = Vec::new();
+    for strategy in ["balanced", "random_matching", "cyclic"] {
+        let settings = EventSettings {
+            rounds: Some(7),
+            scheduler: Some(strategy.to_string()),
+            ..EventSettings::default()
+        };
+        let fixture = Fixture::with_settings(8, 0, settings.clone());
+        fixture.lock_roster_only();
+        let first = generate_schedule(&fixture.db, EVENT, T2).unwrap();
+        assert_eq!(first.rounds, 7);
+        let owners: BTreeMap<String, String> = TrackRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .into_iter()
+            .map(|track| (track.code, track.owner_id))
+            .collect();
+        let mut seen: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for round in 0..7 {
+            let mut people = BTreeSet::new();
+            let mut tracks = BTreeSet::new();
+            for assignment in first.assignments.iter().filter(|item| item.round == round) {
+                assert!(people.insert(assignment.participant_id.as_str()));
+                assert!(tracks.insert(assignment.track_code.as_str()));
+                assert_ne!(
+                    owners.get(assignment.track_code.as_str()),
+                    Some(&assignment.participant_id)
+                );
+                assert!(
+                    seen.entry(assignment.participant_id.as_str())
+                        .or_default()
+                        .insert(assignment.track_code.as_str())
+                );
+            }
+            assert_eq!(people.len(), 8);
+            assert_eq!(tracks.len(), 8);
+        }
+        let again_fixture = Fixture::with_settings(8, 0, settings);
+        again_fixture.lock_roster_only();
+        let again = generate_schedule(&again_fixture.db, EVENT, T2).unwrap();
+        assert_eq!(first.assignments, again.assignments);
+        plans.push(first.assignments);
+    }
+    let balanced = repeated_handoffs(&plans[0]);
+    let random = repeated_handoffs(&plans[1]);
+    assert!(
+        balanced <= random,
+        "balanced {balanced} vs random {random} repeated handoffs"
+    );
+}
+
 #[test]
 fn a_replacement_draft_uses_a_new_seed() {
     let fixture = Fixture::new(8, 0);
@@ -813,6 +907,7 @@ async fn the_outbox_delivers_offers_and_claimed_files() {
     assert_eq!(discord.sent_files()[0].file.bytes, expected_bytes);
 }
 
+// scenario: A crash before a send does not lose the effect
 #[tokio::test]
 async fn a_restart_preserves_the_event_and_pending_outbox() {
     use swap_discord::FakeDiscord;
@@ -848,12 +943,19 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
         EventState::Active
     );
     assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 6);
+    let recovered = DeliveryRepo::pending(db.conn(), 100).unwrap();
+    assert_eq!(recovered.len(), 6);
     let discord = FakeDiscord::new();
     let report = dispatch_pending(&db, &store, &discord, T5, 100)
         .await
         .unwrap();
     assert_eq!(report.sent, 6);
     assert_eq!(DeliveryRepo::count_pending(db.conn()).unwrap(), 0);
+    for row in &recovered {
+        let row = DeliveryRepo::get(db.conn(), &row.id).unwrap().unwrap();
+        assert_eq!(row.status, "sent");
+        assert_eq!(row.sent_at, Some(T5));
+    }
     drop(db);
 
     let db = Db::open(&database).unwrap();
@@ -864,6 +966,7 @@ async fn a_restart_preserves_the_event_and_pending_outbox() {
     assert_eq!(discord.sent_dms().len(), 6);
 }
 
+// scenario: A submission is stored before the CDN URL expires
 #[tokio::test]
 async fn an_attachment_is_downloaded_stored_and_processed_once() {
     use std::sync::{Arc, Mutex};
@@ -1453,6 +1556,7 @@ async fn a_join_is_refused_while_another_event_is_not_started() {
     );
 }
 
+// scenario: A soft deadline does not move a track
 #[tokio::test]
 async fn the_deadline_tick_is_idempotent_and_marks_overdue_without_moving_the_track() {
     use swap_engine::{DeadlineReport, tick_deadlines};
@@ -1529,6 +1633,7 @@ async fn the_deadline_tick_is_idempotent_and_marks_overdue_without_moving_the_tr
     );
 }
 
+// scenario: Quiet hours delay a non-urgent reminder
 #[test]
 fn quiet_hours_delay_a_reminder_without_moving_the_deadline() {
     use swap_engine::tick_deadlines;
@@ -1627,6 +1732,7 @@ fn reminders_do_not_burst_after_quiet_hours() {
     assert_eq!(tick_deadlines(&fixture.db, base + 99).unwrap().reminders, 0);
 }
 
+// scenario: A manual edit swaps the two people in the round
 #[test]
 fn a_manual_edit_swaps_two_assignments_and_validates_the_plan() {
     use swap_engine::{edit_plan_assignment, plan_edit_candidates};
@@ -1768,6 +1874,7 @@ fn a_manual_edit_swaps_two_assignments_and_validates_the_plan() {
     }
 }
 
+// scenario: A complete schedule has no valid single-cell swap
 #[test]
 fn a_complete_schedule_has_no_valid_single_cell_swap() {
     use swap_engine::{edit_plan_assignment, plan_edit_candidates};
@@ -1815,6 +1922,7 @@ fn a_complete_schedule_has_no_valid_single_cell_swap() {
     );
 }
 
+// scenario: The host previews and edits the schedule
 #[test]
 fn every_single_cell_edit_is_valid_or_rejected_without_writing() {
     use swap_engine::edit_plan_assignment;
@@ -2033,6 +2141,7 @@ fn manual_edit_rejects_an_incomplete_plan_and_a_started_event() {
     ));
 }
 
+// scenario: Participants rotate between groups
 #[test]
 fn group_events_rotate_participants_and_keep_tracks() {
     use std::collections::{BTreeMap, HashSet};
@@ -2097,6 +2206,7 @@ fn group_events_rotate_participants_and_keep_tracks() {
     }
 }
 
+// scenario: Merge is a repair, not a routine phase
 #[test]
 fn group_repair_merges_an_underfilled_group_only_when_needed() {
     use swap_engine::repair_group_schedule;
@@ -2137,6 +2247,8 @@ fn group_repair_merges_an_underfilled_group_only_when_needed() {
     ));
 }
 
+// scenario: The bot reminds the participant to claim
+// scenario: An expiry returns the track without a seen mark
 #[test]
 fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
     let settings = EventSettings {
@@ -2222,6 +2334,8 @@ fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
     }));
 }
 
+// scenario: Locking the schedule publishes a commitment
+// scenario: A commitment does not publish a file hash
 #[test]
 fn locking_the_schedule_publishes_the_latest_commitment() {
     let fixture = Fixture::with_settings(
@@ -2283,6 +2397,7 @@ fn locking_the_schedule_publishes_the_latest_commitment() {
     );
 }
 
+// scenario: The first extension auto-approves up to 6 hours
 #[test]
 fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
     use swap_engine::{ExtensionStatus, decide_extension, open_decisions, request_extension};
@@ -2351,6 +2466,8 @@ fn the_first_small_extension_is_automatic_and_the_third_is_refused() {
     );
 }
 
+// scenario: Comments are published with attribution
+// scenario: The reveal order does not follow submission time
 #[test]
 fn the_reveal_package_carries_titles_comments_and_credits() {
     let fixture = Fixture::new(3, 0);
@@ -2491,6 +2608,7 @@ fn the_reveal_package_carries_titles_comments_and_credits() {
     }));
 }
 
+// scenario: The last holder names the final track
 #[test]
 fn the_final_holder_is_asked_for_a_title_once() {
     let fixture = Fixture::new(3, 0);
@@ -2593,6 +2711,7 @@ fn the_final_holder_is_asked_for_a_title_once() {
     assert_eq!(second.effects.len(), 1);
 }
 
+// scenario: The previous submitter names the final track when the final holder does not
 #[test]
 fn the_previous_submitter_can_name_the_final_track() {
     let fixture = Fixture::new(3, 0);
@@ -2654,7 +2773,7 @@ fn the_previous_submitter_can_name_the_final_track() {
         T5,
     )
     .unwrap();
-    submit(
+    let final_submit = submit(
         &fixture.db,
         &fixture.store,
         &PassthroughPreparer,
@@ -2667,6 +2786,25 @@ fn the_previous_submitter_can_name_the_final_track() {
         T6,
     )
     .unwrap();
+    let prompt = final_submit
+        .effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Dm { user_id, content } if user_id == &previous => Some(content),
+            _ => None,
+        })
+        .expect("the previous submitter gets the title prompt");
+    assert!(prompt.contains(&final_track));
+    assert!(prompt.contains("round 1"));
+    assert!(prompt.contains("/swap title"));
+
+    let untitled = reveal_package(&fixture.db, EVENT).unwrap();
+    let untitled_track = untitled
+        .album
+        .iter()
+        .find(|track| track.track_code == final_track)
+        .unwrap();
+    assert_eq!(untitled_track.title, None);
 
     assert!(matches!(
         set_track_title_for_user_on_track(
@@ -3073,6 +3211,7 @@ async fn stopped_queues_reject_new_events() {
     service.stop_queues().await;
 }
 
+// scenario: A participant with no assignment cannot submit
 #[tokio::test]
 async fn an_offer_holder_cannot_submit_before_a_claim() {
     use std::sync::{Arc, Mutex};
@@ -3182,6 +3321,7 @@ fn an_attachment_source_is_marked_in_the_submit_transaction() {
     assert!(!assignments.is_empty());
 }
 
+// scenario: The host cannot lock fewer than two seeds
 #[test]
 fn seed_round_open_requires_a_pack_and_two_seeds() {
     let directory = tempfile::tempdir().unwrap();
@@ -3374,6 +3514,7 @@ fn moving_a_round_deadline_shifts_planned_rounds_and_the_reveal() {
     );
 }
 
+// scenario: The reveal verifies the commitment
 #[test]
 fn commitment_v2_covers_the_seed_owner_map() {
     let fixture = Fixture::new(3, 0);
@@ -3412,6 +3553,7 @@ fn strict_participation_refuses_a_low_handoff_cap() {
     ));
 }
 
+// scenario: Flexible participation honors each handoff cap
 #[test]
 fn flexible_participation_keeps_earliest_rounds_and_reports_gaps() {
     let settings = EventSettings {
@@ -3438,6 +3580,7 @@ fn flexible_participation_keeps_earliest_rounds_and_reports_gaps() {
     start_event(&fixture.db, EVENT, T3).unwrap();
 }
 
+// scenario: An away range creates a planned gap
 #[test]
 fn availability_blocks_strict_and_creates_a_flexible_gap() {
     let settings = EventSettings {
@@ -3485,6 +3628,8 @@ fn availability_blocks_strict_and_creates_a_flexible_gap() {
     ));
 }
 
+// scenario: Participation keeps the own-assignments schedule by default
+// scenario: The default schedule shows only the caller's assignments
 #[test]
 fn participant_schedule_redacts_by_default_and_opens_on_request() {
     let fixture = Fixture::new(3, 0);

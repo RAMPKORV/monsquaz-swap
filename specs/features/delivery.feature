@@ -3,6 +3,7 @@ Feature: Claim and submit delivery
   The bot is transport.
   The local store is the system of record.
 
+  @pending
   Scenario: A claimed offer delivers one file
     Given a participant with an offer for track S7F3A
     When the participant claims the offer
@@ -25,6 +26,7 @@ Feature: Claim and submit delivery
     And the app keeps the earlier version in the track history
     And the bot confirms which version is current
 
+  @pending
   Scenario: A blocked DM uses a private thread
     Given a participant with a claimed track
     When the bot cannot send a direct message
@@ -32,6 +34,7 @@ Feature: Claim and submit delivery
     And the bot sends the file there
     And the host sees the delivery failure and the fallback
 
+  @pending
   Scenario: A participant skips after claiming
     Given a participant who claimed a track
     When the participant taps Skip
@@ -40,18 +43,20 @@ Feature: Claim and submit delivery
     And the participant can leave the event
     And the host sees the skip
 
+  @pending
   Scenario: An expired offer does not mark the pair seen
     Given a participant who does not claim an offer
     When the offer expires
     Then the track returns to the pool
     And the app does not record the pair as seen
-    And the app never offers that track to that participant again in this event
+    And with the default re-offer setting the app never offers that track to that participant again in this event
     And the app offers the track to another eligible participant
 
+  @pending
   Scenario: A file above the cap uses the fallback
     Given a participant with a file larger than 20 MiB
     When the participant submits the file
-    Then the bot rejects the direct upload with an explanation
+    Then the bot rejects the attachment with an explanation
     And the participant can provide a link for the bot to download
     And the host can import the file if the bot cannot download it
 
@@ -61,6 +66,7 @@ Feature: Claim and submit delivery
     Then the bot does not store the file as an assignment
     And the bot explains that no active track exists
 
+  @pending
   Scenario: A receipt names the next action
     Given a valid submission
     When the app stores the file
@@ -68,6 +74,7 @@ Feature: Claim and submit delivery
     And the receipt states the current version and the next expected action
     And the receipt does not name another participant
 
+  @pending
   Scenario: The host opens the next round
     Given a classic event with every assignment resolved
     When the host opens the next round

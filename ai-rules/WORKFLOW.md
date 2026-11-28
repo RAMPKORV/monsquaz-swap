@@ -43,12 +43,11 @@ product contract is hand-written in `docs/`.
 | Tier | Use | Required |
 |---|---|---|
 | `light` | docs, chores, one-line fixes | issue + verification |
-| `standard` | normal feature/bug | scenario + tests + self-review |
-| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + adversarial review + rollback/restore evidence + formal evidence (`scripts/formal/check.sh` output, or a note that no modeled action changed) |
+| `standard` | normal feature/bug | scenario + tests + self-review + review loop |
+| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + review loop + rollback/restore evidence + formal evidence (`scripts/formal/check.sh` output, or a note that no modeled action changed) |
 
 The default is `light`; raise it deliberately for `full` work. The tracker's
-status gates still exist, but we do not require an independent reviewer for
-every routine issue. An independent review is required for `full`.
+status gates still exist.
 
 ## PRD gate and `--force`
 
@@ -64,9 +63,11 @@ The tracker tool has a PRD sign-off gate. This project does not use it
   --force --reason "D-021: no PRD sign-off gate"
 ```
 
-`--force` also skips the claim, WIP, and status checks. Before you use it, make
-sure that you claimed the issue and that the issue is in the correct status.
-Do not use `--force` for any other reason.
+`--force` waives the PRD sign-off gate. For `worktree new`, `--force` also
+skips the claim and WIP checks. For `worktree finish`, `--force` does not skip
+the review status, the resolved review, or the evidence check. Before you use
+it, make sure that you claimed the issue and that the issue is in the correct
+status. Do not use `--force` for any other reason.
 
 ## Batch PRs
 
@@ -77,8 +78,9 @@ CI is the main wait. Batch related work into one PR.
 - Claim every issue before you start. Use the first issue for `worktree new`;
   work the rest in the same worktree.
 - The PR body lists every issue key and the evidence for each one.
-- Close each issue after the merge with the same squash commit. Add one review
-  record per `full` issue, or one shared review with all keys.
+- Close each issue after the merge with the same squash commit. Record one
+  review for each `standard` or `full` issue. A shared review file can cover
+  the batch, but the tracker needs a review record for each issue.
 - Do not batch unrelated risky changes. Security, schema, and UI changes can
   share a batch only when they serve one outcome.
 - A batch may delete or retire a formal artifact in the same PR. Keep the
@@ -108,8 +110,8 @@ CI is the main wait. Batch related work into one PR.
 
 - **Plan review:** one fresh adversarial review of the PRD/specs before
   implementation. Fix must-fixes; record it; no formal sign-off gate.
-- **Issue review:** self-review for `standard`; independent adversarial review
-  for `full` (anonymity, scheduling, schema, security, file handling).
+- **Issue review:** use the review loop below. It covers `standard` and `full`
+  issues. Focus on anonymity, scheduling, schema, security, and file handling.
 - Reviewer looks for contradictions, untestable claims, anonymity leaks,
   missing error paths, silent auto-advance, and duplicated truth.
 
@@ -140,8 +142,9 @@ Procedure:
 8. After three rounds with a `must-fix` still open, stop and escalate to the
    human.
 
-Record the findings and the result in the tracker as a review record for each
-issue. A batch can record one shared review that lists all issue keys.
+Record the findings and the result in the tracker as one review record for each
+issue. A batch can record one review file that lists all issue keys, but each
+`standard` or `full` issue needs its own tracker record.
 
 ## Handoff
 

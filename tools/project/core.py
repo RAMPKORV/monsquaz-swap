@@ -584,7 +584,8 @@ def _open_bad_review(con, issue) -> dict | None:
 
 
 def assert_done_allowed(con, issue, evidence: str = "", force: bool = False,
-                        reason: str = "", require_merge: bool = True) -> None:
+                        reason: str = "", require_merge: bool = True,
+                        waive_review: bool = True) -> None:
     if issue["status_key"] in TERMINAL:
         raise ProjectError("issue is already terminal")
     details = _details(issue)
@@ -604,15 +605,20 @@ def assert_done_allowed(con, issue, evidence: str = "", force: bool = False,
         if details.get("merge_commit") and pm not in ("passed", "skipped"):
             raise ProjectError("done requires the main post-merge check to pass "
                                "(or an explicit --no-check skip); rerun `worktree finish`")
-    if force:
+    # `worktree finish` always passes --force for the PRD gate (D-021). That
+    # flag must not waive the review gate, so finish calls with waive_review
+    # false. The generic `issue done --force` path keeps its explicit override.
+    if force and waive_review:
         return
+    # Review gate: every standard and full issue (ceremony != light) needs a
+    # resolved review.
     if issue["ceremony"] != "light":
         if not _resolved_review(con, issue):
-            raise ProjectError("done requires a resolved review (or --force with a reason)")
+            raise ProjectError("done requires a resolved review for a standard or full issue")
         bad = _open_bad_review(con, issue)
         if bad:
             raise ProjectError(f"open review #{bad['id']} is below bar or has must-fix items; "
-                               "resolve it (or --force with a reason)")
+                               "resolve it before done")
         if require_merge and not details.get("merge_commit") and not (evidence or "").strip():
             raise ProjectError("done requires the merge commit (or --evidence naming it)")
 

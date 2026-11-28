@@ -806,6 +806,8 @@ mod tests {
         );
     }
 
+    // scenario: The bot token is never shown again
+    // scenario: The token is stored in the OS keychain
     #[tokio::test]
     async fn saving_stores_the_token_outside_the_settings() {
         let directory = FakeDirectory::valid();
@@ -827,6 +829,7 @@ mod tests {
         assert!(!json.contains("aaaaaaaaaaaaaaaaaaaaaaaa"));
     }
 
+    // scenario: Linux without a secret service
     #[tokio::test]
     async fn a_keychain_failure_never_stores_plaintext() {
         let directory = FakeDirectory::valid();
@@ -842,6 +845,7 @@ mod tests {
         assert!(session.token().is_none());
     }
 
+    // scenario: Linux without a secret service
     #[tokio::test]
     async fn an_explicit_session_fallback_keeps_the_token_in_memory() {
         let directory = FakeDirectory::valid();
@@ -901,6 +905,7 @@ mod tests {
         assert!(keychain.token().is_none());
     }
 
+    // scenario: The host maps the announcement and reveal channels
     #[tokio::test]
     async fn the_selected_channels_must_belong_to_the_guild() {
         let directory = FakeDirectory::valid();
@@ -920,6 +925,7 @@ mod tests {
         assert!(keychain.token().is_none());
     }
 
+    // scenario: The host maps the announcement and reveal channels
     #[tokio::test]
     async fn announcements_and_the_reveal_must_differ() {
         let directory = FakeDirectory::valid();

@@ -104,6 +104,7 @@ mod tests {
         assert_eq!(files, 1);
     }
 
+    // scenario: Path traversal is blocked
     #[test]
     fn the_original_name_is_not_used() {
         let dir = tempfile::tempdir().unwrap();

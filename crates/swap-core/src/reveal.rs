@@ -51,6 +51,7 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    // scenario: The album order is secret-shuffled
     #[test]
     fn hmac_matches_rfc_4231_case_two() {
         assert_eq!(
@@ -59,6 +60,7 @@ mod tests {
         );
     }
 
+    // scenario: The reveal order does not follow submission time
     #[test]
     fn the_order_is_stable_and_uses_every_track_once() {
         let codes = ["S1", "S2", "S3", "S4", "S5"]
@@ -75,6 +77,7 @@ mod tests {
         assert_eq!(sorted, codes);
     }
 
+    // scenario: The reveal order does not follow submission time
     #[test]
     fn another_seed_changes_the_order() {
         let codes = ["S1", "S2", "S3", "S4"]

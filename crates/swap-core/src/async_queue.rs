@@ -135,6 +135,7 @@ mod tests {
         }
     }
 
+    // scenario: The global queue prefers social diversity
     #[test]
     fn the_queue_prefers_an_unfamiliar_track() {
         let people = vec![person(0)];

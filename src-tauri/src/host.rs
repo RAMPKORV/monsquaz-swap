@@ -2964,6 +2964,7 @@ mod tests {
         assert_eq!(bot_health(&settings, true, None).status, "Offline");
     }
 
+    // scenario: The bot token is never shown again
     #[test]
     fn the_settings_payload_has_no_secret_field() {
         let json = serde_json::to_string(&SettingsDto::default()).unwrap();
@@ -3184,6 +3185,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    // scenario: Group sizes stay in the soft bounds
     #[test]
     fn a_small_group_produces_a_soft_warning() {
         let (db, directory) = test_db("small-group");
@@ -3220,6 +3222,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    // scenario: Merge is a repair, not a routine phase
     #[test]
     fn group_repair_merges_the_underfilled_group_and_records_it() {
         let (db, directory) = test_db("group-repair");
@@ -3551,6 +3554,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    // scenario: Locking the schedule publishes a commitment
     #[test]
     fn starting_an_event_publishes_the_commitment() {
         use swap_db::DeliveryRepo;

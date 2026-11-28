@@ -3,6 +3,7 @@ Feature: Deadlines, reminders, and extensions
   A deadline is a prompt for the host.
   A deadline is not a silent auto-advance.
 
+  @pending
   Scenario: One classic round has one shared deadline
     Given the host opens an exchange round for 24 hours
     When the round opens
@@ -10,17 +11,20 @@ Feature: Deadlines, reminders, and extensions
     And a claim at any time before the deadline uses the same edit deadline
     And the bot states the exact local time and the UTC time
 
+  @pending
   Scenario: The final exchange round uses the final duration
     Given the host opens the last exchange round
     Then the round deadline is 48 hours after the open
     And every offer in that round uses that deadline
 
+  @pending
   Scenario: The host opens at most one round at a time
     Given an open round with an active assignment
     When the host tries to open the next round
     Then the app refuses the open
     And the host must resolve the active assignment first
 
+  @pending
   Scenario: The host moves a whole round deadline
     Given an open round with offered, claimed, and overdue assignments
     And one assignment has a later individual extension
@@ -32,6 +36,7 @@ Feature: Deadlines, reminders, and extensions
     And every holder receives one message
     And the app writes one audit entry
 
+  @pending
   Scenario: A moved deadline does not reopen submitted work
     Given a submitted assignment in the open round
     When the host moves the round deadline
@@ -46,6 +51,7 @@ Feature: Deadlines, reminders, and extensions
     And the bot does not move the track
     And the host decides the next action
 
+  @pending
   Scenario: Reminders follow the percentage ladder
     Given an assignment window of 24 hours
     When the window reaches 50 percent, 80 percent, and 95 percent
@@ -67,25 +73,29 @@ Feature: Deadlines, reminders, and extensions
     And the deadline moves by 6 hours
     And the app records the extension
 
+  @pending
   Scenario: A second extension needs the host
     Given a participant who already used one extension
     When the participant requests another extension
     Then the app sends the request to the host
     And the deadline does not move until the host approves
 
+  @pending
   Scenario: A third extension is refused
     Given a participant who already used two extensions on one assignment
     When the participant requests another extension
     Then the app refuses the request
     And the app offers Skip or a host decision
 
-  Scenario: A claimed deadline miss counts as seen
-    Given a participant who claimed a track and did not submit
+  @pending
+  Scenario: A classic claimed deadline miss counts as seen
+    Given a participant in a classic event who claimed a track and did not submit
     When the deadline passes and the host marks the turn missed
     Then the app records the pair as seen
-    And the track returns to the pool or passes to the next holder
+    And the track passes unchanged into the next round or a fill-in covers the turn
     And the app reports the missed edit in the gap report
 
+  @pending
   Scenario: The deadline decision card offers clear actions
     Given a deadline decision card for a participant
     Then the host can extend the assignment by 1, 6, or 12 hours
@@ -94,6 +104,7 @@ Feature: Deadlines, reminders, and extensions
     And every action records an audit entry
     And marking the turn missed records the pair as seen
 
+  @pending
   Scenario: The extension decision card offers clear actions
     Given an extension request decision card for a participant
     Then the host can approve the request

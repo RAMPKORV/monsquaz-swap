@@ -15,6 +15,7 @@ fn timeout() -> Duration {
     Duration::from_secs(10)
 }
 
+// scenario: The bot registers the guild command
 #[tokio::test(flavor = "multi_thread")]
 async fn the_gateway_and_http_round_trip() {
     let sim = DiscordSim::start().await.unwrap();

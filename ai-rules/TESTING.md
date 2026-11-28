@@ -99,17 +99,34 @@ cargo test -p swap-core
 pnpm --dir ui test
 pnpm --dir ui typecheck
 scripts/check.sh
-# later: cargo test -p swap-acceptance --test cucumber
+cargo test -p swap-acceptance --test cucumber
+node scripts/trace-scenarios.mjs     # writes docs/generated/SCENARIO_COVERAGE.md
 ```
 
 ## CI split
 
-- **PR:** fmt, clippy, core/property (bounded), DB, cucumber, UI typecheck/test,
-  secret scan, dependency audit.
-- **Main:** full property runs, more simulation seeds, migrations.
-- **Nightly:** 10k seeds, chaos/outage matrix, DST matrix, restore drill.
-- **Release:** packaged smoke on clean VMs, one live test-guild run, installer
-  upgrade test.
+This list matches `.github/workflows/` on 2026-11-28. Update it in the same PR
+when a workflow changes.
+
+- **PR and push to `main` (`ci.yml`):**
+  - tracker: rebuild from the ledger, `doctor`, smoke tests;
+  - spec gates: gate script tests, `scripts/ste-lint.mjs`,
+    `scripts/trace-scenarios.mjs --check`;
+  - UI: typecheck, Vitest, build;
+  - design: `scripts/design-check.sh`;
+  - Rust: fmt, clippy, `cargo test --workspace` (unit, property with bounded
+    cases, DB, cucumber, simulation), the `setup_http` proxy test;
+  - Tauri smoke build on Ubuntu and Windows;
+  - E2E (`e2e.yml`): `cargo test -p swap-e2e` and the Playwright journeys.
+- **PR, mapped files only (`formal.yml`):** the TLA+ PR models and the mutation
+  set when `scripts/formal/changed.mjs` reports a mapped change.
+- **Nightly (`formal.yml`):** the TLA+ nightly models.
+- **Release (`release.yml`):** the E2E gate, the Windows and Linux installers,
+  attestations, and `SHA256SUMS`.
+
+Not in CI yet: a secret scan, a dependency audit, long simulation seed runs,
+the chaos and DST matrices, the restore drill, cargo-mutants (MSW-097),
+packaged smoke on clean VMs, and a live test-guild run.
 
 ## Flake policy
 
@@ -117,7 +134,16 @@ No blind retries. A flaky test gets a seed, an issue, and a quarantine label;
 it does not gate releases until fixed. Never weaken an assertion to hide a real
 intermittency.
 
+## Scenario traceability
+
+Every scenario in `specs/features/` maps to a test or carries `@pending`
+(D-038). The convention and the gate are in `ai-rules/GHERKIN.md`. When you
+add a test that proves a scenario, add the `// scenario:` comment and remove
+the `@pending` tag in the same PR.
+
 ## DoD
 
 A behaviour is done when its scenario exists, its test fails before the change
-and passes after, `scripts/check.sh` is green, and the tracker has evidence.
+and passes after, the test declares the scenario with `// scenario:`, the
+scenario has no `@pending` tag, `scripts/check.sh` is green, and the tracker has
+evidence.

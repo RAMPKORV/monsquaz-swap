@@ -3,6 +3,7 @@ Feature: Security boundaries
   The bot token is a secret.
   A submitted file is untrusted.
 
+  @pending
   Scenario: The token never reaches the UI or a log
     Given a configured bot token
     When the app runs a normal event
@@ -23,6 +24,7 @@ Feature: Security boundaries
     Then the app refuses to store plaintext without consent
     And the app offers a re-entry option or an explicit less-secure fallback
 
+  @pending
   Scenario: File bytes never cross the IPC boundary
     Given a stored file
     When the UI requests a preview or a file action
@@ -37,6 +39,7 @@ Feature: Security boundaries
     And the stored path stays inside the event library
     And the app rejects the unsafe name
 
+  @pending
   Scenario: An executable is blocked
     Given a file whose magic bytes show an executable
     When a participant submits the file with a module extension
@@ -44,6 +47,7 @@ Feature: Security boundaries
     And the app does not distribute the file
     And the host sees the quarantine reason
 
+  @pending
   Scenario: An archive bomb is refused
     Given an archive with an unsafe expansion ratio or depth
     When a participant submits the archive
@@ -51,6 +55,7 @@ Feature: Security boundaries
     And the app reports the limit
     And the app stays responsive
 
+  @pending
   Scenario: A parser crash does not crash the app
     Given a crafted module that stalls the parser
     When the app parses the module in the isolated process
@@ -59,6 +64,7 @@ Feature: Security boundaries
     And the app does not exit
     And the host can quarantine the file
 
+  @pending
   Scenario: The bot uses no privileged intents or self-bot
     Given a configured bot
     When the app connects to Discord
@@ -66,6 +72,7 @@ Feature: Security boundaries
     And the bot does not read message content in public channels
     And the app does not use a user token or a self-bot
 
+  @pending
   Scenario: A co-host mapping view is audited
     Given a co-host with mapping access
     When the co-host opens the author mapping

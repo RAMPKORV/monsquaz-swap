@@ -14,6 +14,7 @@ Feature: Classic anonymous scheduling
     And no assignment gives a participant their own track
     And no participant receives the same track twice
 
+  @pending
   Scenario: A default classic event runs N total rounds
     Given a locked roster of 6 participants
     When the host creates a default classic event
@@ -22,6 +23,7 @@ Feature: Classic anonymous scheduling
     And the event has 6 total rounds
     And the planner reports that each track can reach every eligible participant
 
+  @pending
   Scenario: The planner warns about overcrowding
     Given a locked roster of 20 participants
     When the host opens the schedule planner
@@ -29,6 +31,7 @@ Feature: Classic anonymous scheduling
     And the planner shows the projected event duration
     And the host can cap the number of rounds
 
+  @pending
   Scenario: An infeasible schedule is refused
     Given a round where every eligible participant has already seen the only available track
     When the host tries to start the round
@@ -63,6 +66,7 @@ Feature: Classic anonymous scheduling
     And the commitment does not include any file hash
     And the schedule cannot change without a new plan version
 
+  @pending
   Scenario: A replan creates a new commitment
     Given a locked schedule
     When the host replans the remaining rounds with a reason
@@ -71,8 +75,9 @@ Feature: Classic anonymous scheduling
     And the bot posts a new commitment
     And the app records the replan in the audit log
 
-  Scenario: A third replan is refused
+  @pending
+  Scenario: A replan has no cap
     Given an event with two completed replans
-    When the host tries a third replan
-    Then the app refuses the replan
-    And the host must start a new event
+    When the host replans the remaining rounds with a reason
+    Then the app creates a new plan version
+    And the bot posts a new commitment

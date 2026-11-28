@@ -848,6 +848,7 @@ mod tests {
         ));
     }
 
+    // scenario: The bot registers the guild command
     #[test]
     fn the_command_has_every_subcommand() {
         let command = swap_command(Id::new(42));

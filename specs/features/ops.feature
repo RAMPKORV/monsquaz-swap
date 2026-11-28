@@ -3,6 +3,7 @@ Feature: Host operations and recovery
   A non-technical host can run an event.
   The bot and the local data survive normal failures.
 
+  @pending
   Scenario: The host completes the setup wizard
     Given a new installation
     When the host completes the setup wizard
@@ -35,6 +36,7 @@ Feature: Host operations and recovery
     And the command contains the host subcommands
     And the app reports the bot as online after Discord sends ready
 
+  @pending
   Scenario: Closing the window keeps the bot online
     Given an app with an online bot
     When the host closes the window
@@ -44,6 +46,7 @@ Feature: Host operations and recovery
     Then the app stops the bot
     And the app closes the database
 
+  @pending
   Scenario: A second instance is refused
     Given a running app instance
     When the host starts a second instance
@@ -51,6 +54,7 @@ Feature: Host operations and recovery
     And the first instance stays in control
     And no second bot session starts
 
+  @pending
   Scenario: A crash after a send repeats that send
     Given an assignment that was committed and sent to Discord
     And the app stops before it records the send
@@ -67,6 +71,7 @@ Feature: Host operations and recovery
     And the recipient receives the message
     And the delivery row records the recovery
 
+  @pending
   Scenario: The host restarts during an active event
     Given an active event with committed assignments
     When the host closes the app and starts it again
@@ -75,12 +80,14 @@ Feature: Host operations and recovery
     And the app retries each unacknowledged effect
     And the app never loses a committed effect
 
+  @pending
   Scenario: A failed command does not change state
     Given a command that changes an assignment and enqueues an effect
     When the command fails before it commits
     Then the assignment keeps its previous state
     And the outbox contains no effect for the failed command
 
+  @pending
   Scenario: A backup can be restored
     Given an automatic backup from before a transition
     When the host restores the backup
@@ -89,6 +96,7 @@ Feature: Host operations and recovery
     And the host confirms the restore
     And the app records the restore
 
+  @pending
   Scenario: The audit log records an override
     Given an active event
     When the host reassigns a track with a reason
@@ -96,6 +104,7 @@ Feature: Host operations and recovery
     And the log entry cannot be edited
     And the host can export the log
 
+  @pending
   Scenario: A bot outage is visible
     Given an online bot
     When the bot loses its gateway connection
@@ -104,6 +113,7 @@ Feature: Host operations and recovery
     And the app warns that commands and offers are paused
     And the app reconnects with backoff
 
+  @pending
   Scenario: A DM sent during an outage is recovered
     Given a bot outage
     And a participant who sends a file to the bot during the outage
@@ -112,6 +122,7 @@ Feature: Host operations and recovery
     And the app stores the file once
     And the app sends a receipt
 
+  @pending
   Scenario: The host runs a dry run
     Given a draft event
     When the host starts a dry run
@@ -120,6 +131,7 @@ Feature: Host operations and recovery
     And the app injects one late submission and one skip
     And the app reports the result
 
+  @pending
   Scenario: The event library keeps a past event
     Given a completed event
     When the host opens the event library

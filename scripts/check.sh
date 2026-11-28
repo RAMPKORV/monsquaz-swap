@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One command that proves the repo is healthy.
-# Lean by design: tracker structure, UI, and Rust checks. No PRD gate.
+# Lean by design: tracker structure, spec gates, UI, Rust, and formal checks.
+# No PRD gate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,6 +12,11 @@ fi
 echo "== tracker =="
 python3 tools/project/cli.py doctor
 python3 -m unittest discover -s tests -p 'test_tracker_smoke.py' -v
+
+echo "== spec gates =="
+node --test scripts/tests/
+node scripts/ste-lint.mjs
+node scripts/trace-scenarios.mjs --check
 
 echo "== ui =="
 if ! command -v pnpm >/dev/null 2>&1; then
@@ -30,5 +36,12 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test -p swap-discord --features test-proxy --test setup_http
+
+echo "== formal =="
+if command -v java >/dev/null 2>&1; then
+  scripts/formal/check.sh
+else
+  echo "formal: SKIPPED (no java)"
+fi
 
 echo "== check OK =="

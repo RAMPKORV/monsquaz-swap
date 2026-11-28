@@ -21,6 +21,7 @@ fn next_midnight() -> i64 {
     (BASE_TIME / day() + 1) * day()
 }
 
+// scenario: Exposure completeness is reported, not forced
 #[tokio::test(flavor = "multi_thread")]
 async fn the_full_async_journey_reaches_a_reveal() {
     let app = HeadlessApp::start().await.expect("the app must start");

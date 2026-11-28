@@ -396,6 +396,7 @@ mod tests {
         assert_eq!(group_sizes(13, 4, 0), vec![4, 4, 4, 1]);
     }
 
+    // scenario: The swap cadence targets 3 to 5 phases
     #[test]
     fn the_default_cadence_targets_three_to_five_phases() {
         assert_eq!(default_cadence(8), 2);
@@ -408,6 +409,7 @@ mod tests {
         assert_eq!(phase_count(3, 1), 3);
     }
 
+    // scenario: Group sizes stay in the soft bounds
     #[test]
     fn soft_warnings_do_not_block() {
         let warnings = group_warnings(&[3, 3], 8, "K rounds");
@@ -448,6 +450,7 @@ mod tests {
         (people, tracks)
     }
 
+    // scenario: Participants rotate between groups
     #[test]
     fn group_rotation_keeps_tracks_and_avoids_repeats() {
         let (people, tracks) = roster(10);

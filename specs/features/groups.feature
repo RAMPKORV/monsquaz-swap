@@ -10,6 +10,7 @@ Feature: Classic group swaps
     And the plan is the same for the same input and seed
     And the balanced strategy does not increase repeated handoffs
 
+  @pending
   Scenario: The planner suggests groups
     Given a classic event with 20 expected participants
     When the host opens the event wizard
@@ -37,12 +38,14 @@ Feature: Classic group swaps
     Then the planner sets K to 2
     And the plan has 4 phases
 
+  @pending
   Scenario: Exhausted swap warns when it cannot fire
     Given a classic event with 8 rounds and a group of 10 participants
     When the host selects "swap when exhausted"
     Then the planner warns that the group cannot exhaust before the event ends
     And the planner suggests a K-round swap
 
+  @pending
   Scenario: An infeasible phase falls back to the global pool
     Given a group that cannot fill the next round
     When the planner validates the phase
@@ -51,6 +54,7 @@ Feature: Classic group swaps
     And the planner notifies the host
     And the next phase restores groups
 
+  @pending
   Scenario: Unequal groups get a warning
     Given a plan with group sizes 12 and 5
     When the host previews the plan
@@ -58,6 +62,7 @@ Feature: Classic group swaps
     And the planner suggests a rebalance
     And the host can override
 
+  @pending
   Scenario: Hidden group membership
     Given a classic event with groups
     When a participant opens the season view
@@ -72,11 +77,13 @@ Feature: Classic group swaps
     And the app records the repair in the audit log
     And a routine plan generation does not merge groups
 
+  @pending
   Scenario: The host sees the fun score
     Given a generated classic plan
     When the host opens the planner
     Then the host sees the projected fun score and guardrails
 
+  @pending
   Scenario: The participant does not see the fun score
     Given a generated classic plan
     When a participant opens the season view

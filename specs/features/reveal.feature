@@ -3,6 +3,7 @@ Feature: Reveal and album
   The host triggers the reveal after the release stream.
   The whole server can see the reveal.
 
+  @pending
   Scenario: The host triggers the reveal
     Given an event whose assignments are all resolved
     When the host finishes the release stream
@@ -18,6 +19,7 @@ Feature: Reveal and album
     And the app lists the blocking assignments
     And the host can resolve or explicitly mark each gap
 
+  @pending
   Scenario: Credits show the full history
     Given a track with a seed and three edits
     When the reveal publishes the credits
@@ -33,6 +35,7 @@ Feature: Reveal and album
     And the host can redact an item before publish
     And a redacted item does not appear
 
+  @pending
   Scenario: Skips show as anonymous gaps by default
     Given a track with a skipped turn
     When the reveal publishes the track
@@ -46,6 +49,7 @@ Feature: Reveal and album
     Then the order uses HMAC(track code, event secret)
     And the order does not use submission time
 
+  @pending
   Scenario: The presenter shows the lineage and the audio
     Given a completed track
     When the host opens the presenter
@@ -55,6 +59,7 @@ Feature: Reveal and album
     And the presenter shows the credits
     And the presenter hides the mapping in stream-safe mode
 
+  @pending
   Scenario: The presenter uses opaque audio URLs
     Given a track with a module seed and a final version
     When the host opens the presenter
@@ -62,6 +67,7 @@ Feature: Reveal and album
     And the UI does not receive file bytes or absolute paths
     And the app caches the rendered preview
 
+  @pending
   Scenario: The host records a comment before the reveal
     Given a track with no comments
     When the host adds a comment for a participant
@@ -69,13 +75,15 @@ Feature: Reveal and album
     And the host can redact the comment
     And a redacted comment does not appear in the presenter
 
-  Scenario: Stream-safe mode hides the mapping
+  @pending
+  Scenario: Stream-safe mode hides the mapping in the presenter
     Given the presenter shows a completed track
     When the host turns on stream-safe mode
     Then the presenter shows role labels instead of names
     And the presenter hides the host tools
     And the album, credits, comments, and audio stay visible
 
+  @pending
   Scenario: The app exports the album package
     Given a completed event
     When the host exports the album
@@ -84,13 +92,15 @@ Feature: Reveal and album
     And the app writes a Markdown and HTML runbook
     And the app writes a personal keepsake for each participant
 
+  @pending
   Scenario: A large export uses the host choice
     Given an album ZIP larger than 20 MiB
     When the host exports the album
     Then the app writes the ZIP locally
     And the host chooses a neutral link or split DMs
-    And the bot does not attempt a direct ZIP upload above the cap
+    And the bot does not attach a ZIP file above the cap
 
+  @pending
   Scenario: The schedule is disclosed at the reveal
     Given a hidden schedule
     When the host publishes the Discord reveal
@@ -104,6 +114,13 @@ Feature: Reveal and album
     Then the app recomputes the commitment
     And the app reports a match or a mismatch
     And the app does not publish file hashes
+
+  @pending
+  Scenario: The reveal publishes the verification file
+    Given a published commitment and a revealed schedule
+    When the host publishes the Discord reveal
+    Then the reveal includes the verification file
+    And a participant can recompute the commitment from the verification file with sha256sum
 
   Scenario: The last holder names the final track
     Given the final holder of a track

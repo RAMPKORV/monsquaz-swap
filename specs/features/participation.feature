@@ -4,6 +4,7 @@ Feature: Participation, availability, and schedule visibility
   The host chooses what participants see.
   The seed is not an edit.
 
+  @pending
   Scenario: Strict participation requires enough handoff budget
     Given a classic event with 6 exchange rounds
     And a participant with a handoff budget of 4
@@ -29,6 +30,7 @@ Feature: Participation, availability, and schedule visibility
     And the planner reports the gap
     And strict participation refuses the plan and asks for flexible participation
 
+  @pending
   Scenario: The host records an away range
     Given a participant on the roster
     When the host adds an away range with a start time, an end time, and a note
@@ -36,19 +38,21 @@ Feature: Participation, availability, and schedule visibility
     And the app writes one audit entry
     And the participant row shows the away range
 
-  Scenario: The default schedule shows only the caller's assignments
+  Scenario: Participation keeps the own-assignments schedule by default
     Given an event with the default schedule visibility
     When a participant opens the schedule
     Then the participant sees only their own assignments
     And the participant does not see the full matrix
     And the participant does not see group names or the seed band
 
-  Scenario: Open schedule discloses the loss of anonymity
+  @pending
+  Scenario: Open schedule discloses the visible assignments
     Given a host who chooses an open schedule
     Then the setup review shows a warning
-    And the join instructions say that everyone can see the matrix, owners, names, titles, and comments
-    And participants can see the full matrix after the schedule locks
+    And the join instructions say that everyone can see who edits which track code in each round
+    And the join instructions say that owners and titles stay hidden until the reveal
 
+  @pending
   Scenario: A handoff cap below the plan is not silent
     Given a participant with a handoff cap
     When the planner removes cells to honor the cap

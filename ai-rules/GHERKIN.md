@@ -15,7 +15,7 @@ step, and the exact terms in `ai-rules/DOMAIN.md`. Do not use `should`; use
   fill-ins, deadlines, anonymity, files, groups, reveal, ops, privacy, security.
 - One scenario = one observable behaviour. Cover the happy path plus the error,
   permission, duplicate, boundary, and retry paths that matter.
-- Tags: `@v1`, `@scheduler`, `@async`, `@anonymity`, `@delivery`, `@files`,
+- Tags: `@pending`, `@v1`, `@scheduler`, `@async`, `@anonymity`, `@delivery`, `@files`,
   `@groups`, `@reveal`, `@ops`, `@privacy`, `@security`, `@simulation`.
 - Use `Scenario Outline` only for genuine data tables; avoid brittle examples.
 
@@ -56,19 +56,57 @@ Feature: Anonymous scheduling
   separate snapshots.
 - One feature file should be readable in one sitting.
 
-## Executable later
+## Executable features
 
-When the harness lands:
+`crates/swap-acceptance/tests/cucumber.rs` runs
+`specs/features/core_invariants.feature` with cucumber-rs:
 
 ```bash
 cargo test -p swap-acceptance --test cucumber
 ```
 
 Step definitions call app services with a fake `DiscordPort`, a fake clock, and
-an in-memory SQLite database. They must not touch the network. Each result is
-recorded in the tracker with a `SCENARIO-*` tag or equivalent.
+an in-memory SQLite database. They must not touch the network.
 
-## Traceability
+## Traceability (D-038)
+
+Every scenario must have a test that proves it, or the `@pending` tag.
+
+- A test declares each scenario that it proves with a comment directly above
+  the test (above its attributes):
+
+  ```rust
+  // scenario: An expiry returns the track without a seen mark
+  #[test]
+  fn an_expiry_returns_the_track_and_blocks_a_late_claim() {
+  ```
+
+  ```ts
+  // scenario: A complete schedule has no valid single-cell swap
+  it("explains when no valid swap exists", () => {
+  ```
+
+- The comment text is the exact scenario name. One test can prove more than
+  one scenario. One scenario can have more than one test.
+- Map a test only when it sets up the `Given` state, does the `When` action,
+  and asserts the `Then` results. A test that only touches related code does
+  not prove the scenario.
+- A feature file that cucumber-rs runs counts as mapped in full.
+- Tag a scenario `@pending` when no test proves it. Remove the tag in the PR
+  that adds the test.
+- Scenario names must be unique across `specs/features/`.
+
+`node scripts/trace-scenarios.mjs` writes
+`docs/generated/SCENARIO_COVERAGE.md`. The gate fails when:
+
+- a scenario without `@pending` has no mapping;
+- a `@pending` scenario has a mapping;
+- a mapping names a scenario that does not exist;
+- two scenarios have the same name.
+
+A feature file can be exempt for a limited time through
+`scripts/trace-scenarios.baseline.json`. Each entry needs a reason and an issue
+or an expiry.
 
 Use stable scenario names and tags. The hand-written PRD links requirements to
 feature files; the tracker issue links to the scenario. Do not duplicate the

@@ -119,6 +119,7 @@ mod tests {
         assert_eq!(prepared.scrub_summary_json, "{}");
     }
 
+    // scenario: Metadata is scrubbed and checked
     #[test]
     fn a_module_is_scrubbed_and_audio_verified() {
         let Ok(renderer) = OpenMptRenderer::discover() else {

@@ -367,6 +367,7 @@ mod tests {
         }
     }
 
+    // scenario: Metadata is scrubbed and checked
     #[test]
     fn different_audio_is_rejected() {
         let renderer = EchoRenderer;

@@ -39,7 +39,7 @@ Update the model before you add or change any of these in the modeled scope:
 - a Gherkin scenario in `specs/features/`.
 
 The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
-pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+pilot has 22 formalized scenarios from 21 source scenarios. The other scenarios are
 outside the modeled scope.
 
 ### File format

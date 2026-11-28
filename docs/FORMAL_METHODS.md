@@ -179,9 +179,10 @@ rule table, the scenario results, the premises, the contradiction pairs, the
 unsat cores, the rule necessity, the coverage gaps, the known-bad results, and
 the solver version.
 
-The pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
-outside the modeled scope. Eleven of the 20 formalized scenarios are `@pending`.
-PASS means model satisfiability and entailment, not implementation.
+The pilot has 22 formalized scenarios from 21 source scenarios. The other
+scenarios are outside the modeled scope. Six of the 22 formalized scenarios
+are `@pending`. PASS means model satisfiability and entailment, not
+implementation.
 
 The domain is finite and explicit: 3 participants, 3 tracks, 3 rounds, 6
 turns, and 2 restore invitations. The model uses integer hours; wall-clock

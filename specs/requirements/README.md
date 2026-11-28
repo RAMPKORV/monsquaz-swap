@@ -5,7 +5,7 @@ This directory holds the finite Z3 model for the normative rules (D-076).
 `docs/generated/REQUIREMENT_CONSISTENCY.md`.
 
 The pilot scope is the fill-in, leave, handoff, and scheduling rules. The
-model has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+model has 22 formalized scenarios from 21 source scenarios. The other scenarios are
 outside the modeled scope. PASS means model satisfiability and entailment, not
 implementation.
 

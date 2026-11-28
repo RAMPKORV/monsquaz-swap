@@ -28,14 +28,14 @@ LINK_MANIFEST = {
     "R-EDIT-WINDOW": ("S-FILL-DUE-CLAIM", "S-FILL-DUE-APPOINT", "S-CLAIM-24"),
     "R-CLAIM-EDIT-DUE": ("S-FILL-DUE-CLAIM", "S-CLAIM-24"),
     "R-FILL-AUTO-CHAIN": ("S-FILL-SEQUENCE",),
-    "R-FILL-HOST-LIST": ("S-FILL-SEQUENCE",),
+    "R-FILL-HOST-LIST": ("S-FILL-HOST-LIST",),
     "R-FILL-SEQUENTIAL": ("S-FILL-SEQUENCE",),
     "R-FILL-FIRST-ACCEPT": ("S-FILL-SEQUENCE",),
     "R-FILL-DUE-APPOINT": ("S-FILL-DUE-APPOINT",),
     "R-FILL-DUE-CLAIM": ("S-FILL-DUE-CLAIM",),
-    "R-TIER1-OFFER-ELIGIBLE": ("S-FILL-POOL",),
+    "R-TIER1-OFFER-ELIGIBLE": ("S-FILL-APPOINT",),
     "R-TIER2-OFFER-ELIGIBLE": ("S-TIER2-EXTRA-TURN",),
-    "R-TIER2-ONLY-NO-TIER1": ("S-TIER2-EXTRA-TURN",),
+    "R-TIER2-ONLY-NO-TIER1": ("S-TIER2-EXTRA-TURN", "S-FILL-POOL"),
     "R-TIER2-ONE-PER-ROUND": ("S-TIER2-EXTRA-TURN",),
     "R-TIER2-NO-EVENT-CAP": ("S-TIER2-EXTRA-TURN",),
     "R-BUDGET-REGULAR": ("S-TIER2-EXTRA-TURN",),
@@ -185,7 +185,7 @@ class RequirementConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(z3.unsat, self._check_sat(extra))
 
-    def test_tier2_offer_without_a_submitted_own_this_round_turn_is_unsat(self):
+    def test_tier2_offer_without_a_submitted_own_turn_this_round_is_unsat(self):
         extra = z3.And(
             self.world.tier2_offer[1][0],
             self.world.role[1] == 0,  # PARTICIPANT

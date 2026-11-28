@@ -124,7 +124,7 @@ blocks the change. The natural-language scenario wins; a stale model is a
 defect.
 
 The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
-pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are outside the
+pilot has 22 formalized scenarios from 21 source scenarios. The other scenarios are outside the
 modeled scope.
 
 The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. The format and the

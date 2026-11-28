@@ -478,7 +478,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-069"),
                 _prd("REQ-FILL-003"),
                 _setting("Fill-in offer claim window"),
-                _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
+                _scenario("The automatic chain offers the slot to one person at a time", "fill_ins.feature"),
             ),
             paraphrase="The default fill-in claim window must be 6 hours.",
             formula=world.default_fill_in_claim_window_h == DEFAULT_FILL_IN_CLAIM_WINDOW_H,
@@ -513,7 +513,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-033"),
                 _decision("D-069"),
                 _setting("Async handoff deadline"),
-                _scenario("A claimed fill-in offer starts the 24-hour edit time", "fill_ins.feature"),
+                _scenario("A chain offer has a separate claim and edit window", "fill_ins.feature"),
             ),
             paraphrase="The default edit window must be 24 hours.",
             formula=world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
@@ -552,7 +552,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-069"),
                 _prd("REQ-FILL-003"),
                 _setting("Fill-in flow"),
-                _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
+                _scenario("The automatic chain offers the slot to one person at a time", "fill_ins.feature"),
             ),
             paraphrase="An auto-chain must make at most three offers before the host decides.",
             formula=z3.And(
@@ -570,7 +570,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-070"),
                 _prd("REQ-FILL-003"),
                 _setting("Fill-in flow"),
-                _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
+                _scenario("The host orders a fill-in list", "fill_ins.feature"),
             ),
             paraphrase="A host-ordered fill-in list must have no size limit.",
             formula=z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
@@ -584,7 +584,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-014"),
                 _prd("REQ-FILL-003"),
-                _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
+                _scenario("The automatic chain offers the slot to one person at a time", "fill_ins.feature"),
             ),
             paraphrase="The bot must have at most one open fill-in offer at a time.",
             formula=world.open_fill_in_offers <= 1,
@@ -597,7 +597,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-014"),
                 _prd("REQ-FILL-003"),
-                _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
+                _scenario("The automatic chain offers the slot to one person at a time", "fill_ins.feature"),
             ),
             paraphrase="The first accept must win the fill-in offer.",
             formula=world.first_accept_wins,
@@ -612,7 +612,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-040"),
                 _decision("D-069"),
                 _setting("Fill-in due time"),
-                _scenario("A host-appointed fill-in gets the later due time", "fill_ins.feature"),
+                _scenario("The host sets the fill-in due time", "fill_ins.feature"),
             ),
             paraphrase=(
                 "A host-appointed fill-in must have a due time at the later of two times. "
@@ -645,7 +645,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-069"),
                 _prd("REQ-FILL-003"),
                 _setting("Fill-in offer claim window"),
-                _scenario("A claimed fill-in offer starts the 24-hour edit time", "fill_ins.feature"),
+                _scenario("A chain offer has a separate claim and edit window", "fill_ins.feature"),
             ),
             paraphrase="A claimed fill-in offer must start the edit due time at the claim.",
             formula=z3.And(
@@ -675,7 +675,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
                 _setting("Fill-in flow"),
-                _scenario("The fill-in pool has three sources", "fill_ins.feature"),
+                _scenario("The fill-in pool has two tiers in classic mode", "fill_ins.feature"),
             ),
             paraphrase=(
                 "A tier-1 offer must go to a person with the fill-in role who is active. "
@@ -708,7 +708,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase=(
                 "A tier-2 offer must go to an active seeded participant. "
@@ -749,7 +749,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase=(
                 "A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track."
@@ -780,7 +780,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-063"),
                 _prd("REQ-FILL-003"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase="A person must take at most one tier-2 fill-in turn in one round.",
             formula=z3.And(
@@ -794,7 +794,7 @@ def build_rules(world: World) -> list[Rule]:
             id="R-TIER2-NO-EVENT-CAP",
             sources=(
                 _decision("D-063"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase="The event must not cap the total number of tier-2 fill-in turns.",
             formula=z3.Not(world.event_wide_tier2_cap),
@@ -809,7 +809,7 @@ def build_rules(world: World) -> list[Rule]:
                 _decision("D-014"),
                 _decision("D-034"),
                 _prd("REQ-FILL-004"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase="A planned edit must count toward the shared handoff budget.",
             formula=z3.And(
@@ -824,7 +824,7 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-004"),
-                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
+                _scenario("A seeded participant can take one extra turn", "fill_ins.feature"),
             ),
             paraphrase="A tier-2 rescue must be an extra turn outside the shared handoff budget.",
             formula=z3.And(
@@ -1237,7 +1237,7 @@ def build_scenarios(world: World) -> list[Scenario]:
     scenarios.append(
         Scenario(
             id="S-FILL-SEQUENCE",
-            name="A fill-in offer uses the standard sequence",
+            name="The automatic chain offers the slot to one person at a time",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.offer_kind == OfferKind.FILL_IN,
@@ -1259,14 +1259,12 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.offer_claim_window_h == DEFAULT_FILL_IN_CLAIM_WINDOW_H,
                 world.max_auto_chain_offers == AUTO_CHAIN_MAX_OFFERS,
                 world.fill_in_offer_cap[Flow.AUTO_CHAIN],
-                z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
                 world.open_fill_in_offers <= 1,
                 world.first_accept_wins,
             ),
             rules=(
                 "R-CLAIM-WINDOW-FILLIN",
                 "R-FILL-AUTO-CHAIN",
-                "R-FILL-HOST-LIST",
                 "R-FILL-SEQUENTIAL",
                 "R-FILL-FIRST-ACCEPT",
             ),
@@ -1275,8 +1273,24 @@ def build_scenarios(world: World) -> list[Scenario]:
     )
     scenarios.append(
         Scenario(
+            id="S-FILL-HOST-LIST",
+            name="The host orders a fill-in list",
+            feature="specs/features/fill_ins.feature",
+            precondition=z3.And(
+                world.fill_in_flow == Flow.HOST_LIST,
+                world.turn_kind[0] == TurnKind.FILL_IN,
+                world.turn_offered[0],
+            ),
+            action=world.turn_offered[0],
+            postcondition=z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
+            rules=("R-FILL-HOST-LIST",),
+            pending=False,
+        )
+    )
+    scenarios.append(
+        Scenario(
             id="S-TIER2-EXTRA-TURN",
-            name="A tier-2 fill-in rescue is an extra turn",
+            name="A seeded participant can take one extra turn",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.owner[0] == 0,
@@ -1319,35 +1333,61 @@ def build_scenarios(world: World) -> list[Scenario]:
     )
     scenarios.append(
         Scenario(
+            id="S-FILL-APPOINT",
+            name="The host appoints a fill-in by default",
+            feature="specs/features/fill_ins.feature",
+            precondition=z3.And(
+                world.owner[0] == 0,
+                world.tier1_offer[1][0],
+                world.fill_in_source[1] == FillInSource.HOST_APPOINTED,
+            ),
+            action=world.tier1_offer[1][0],
+            postcondition=z3.And(
+                world.role[1] == Role.FILL_IN,
+                world.membership[1] == Membership.ACTIVE,
+                world.ready[1],
+                z3.Not(world.seen[1][0]),
+                world.owner[0] != 1,
+                world.fill_in_source[1] != FillInSource.NONE,
+            ),
+            rules=("R-TIER1-OFFER-ELIGIBLE",),
+            pending=False,
+        )
+    )
+    scenarios.append(
+        Scenario(
             id="S-FILL-POOL",
-            name="The fill-in pool has three sources",
+            name="The fill-in pool has two tiers in classic mode",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.owner[0] == 0,
                 world.owner[1] == 1,
                 world.owner[2] == 2,
-                world.fill_in_source[0] == FillInSource.HOST_APPOINTED,
-                world.fill_in_source[1] == FillInSource.VOLUNTEER,
+                world.fill_in_source[0] == FillInSource.VOLUNTEER,
                 world.fill_in_source[2] == FillInSource.CONVERTED_SIGNUP,
-                world.tier1_offer[1][0],
                 world.tier1_eligible[0][1],
-                world.tier1_eligible[2][0],
+                world.tier1_eligible[2][1],
+                world.tier2_offer[1][0],
             ),
-            action=world.tier1_offer[1][0],
+            action=world.tier2_offer[1][0],
             postcondition=z3.And(
-                [
-                    z3.And(
-                        world.role[person] == Role.FILL_IN,
-                        world.membership[person] == Membership.ACTIVE,
-                        world.ready[person],
-                        z3.Not(world.seen[person][track]),
-                        world.owner[track] != person,
-                        world.fill_in_source[person] != FillInSource.NONE,
-                    )
-                    for person, track in ((0, 1), (1, 0), (2, 0))
-                ]
+                world.role[0] == Role.FILL_IN,
+                world.membership[0] == Membership.ACTIVE,
+                world.ready[0],
+                z3.Not(world.seen[0][1]),
+                world.owner[1] != 0,
+                world.fill_in_source[0] != FillInSource.NONE,
+                world.role[2] == Role.FILL_IN,
+                world.membership[2] == Membership.ACTIVE,
+                world.ready[2],
+                z3.Not(world.seen[2][1]),
+                world.owner[1] != 2,
+                world.fill_in_source[2] != FillInSource.NONE,
+                z3.Not(
+                    z3.Or([world.tier1_eligible[person][0] for person in range(PARTICIPANTS)])
+                ),
             ),
-            rules=("R-TIER1-OFFER-ELIGIBLE",),
+            rules=("R-TIER2-ONLY-NO-TIER1",),
             pending=False,
         )
     )
@@ -1554,13 +1594,13 @@ def build_scenarios(world: World) -> list[Scenario]:
                 z3.Not(world.has_future_assignment[0]),
             ),
             rules=("R-LEAVE-SEEN", "R-LEAVE-NO-FUTURE"),
-            pending=True,
+            pending=False,
         )
     )
     scenarios.append(
         Scenario(
             id="S-LEAVER-RETURN",
-            name="A leaver can return as a fill-in",
+            name="A confirmed restore starts at the next round",
             feature="specs/features/join_and_seed.feature",
             precondition=z3.And(
                 world.restored[0],
@@ -1580,7 +1620,7 @@ def build_scenarios(world: World) -> list[Scenario]:
                 "R-RESTORE-EXPIRY",
                 "R-RESTORE-EXPIRY-SETTING",
             ),
-            pending=True,
+            pending=False,
         )
     )
     scenarios.append(
@@ -1598,13 +1638,13 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.invitation_valid_h == RESTORE_INVITATION_HOURS,
             ),
             rules=("R-RESTORE-EXPIRED-BLOCKS", "R-RESTORE-EXPIRY-SETTING"),
-            pending=True,
+            pending=False,
         )
     )
     scenarios.append(
         Scenario(
             id="S-FILL-DUE-CLAIM",
-            name="A claimed fill-in offer starts the 24-hour edit time",
+            name="A chain offer has a separate claim and edit window",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.fill_in_flow == Flow.AUTO_CHAIN,
@@ -1620,28 +1660,28 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
             rules=("R-FILL-DUE-CLAIM", "R-CLAIM-EDIT-DUE", "R-EDIT-WINDOW"),
-            pending=True,
+            pending=False,
         )
     )
     scenarios.append(
         Scenario(
             id="S-FILL-DUE-APPOINT",
-            name="A host-appointed fill-in gets the later due time",
+            name="The host sets the fill-in due time",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.fill_in_flow == Flow.HOST_APPOINTS,
                 world.turn_kind[0] == TurnKind.FILL_IN,
                 world.turn_round[0] == 1,
-                world.round_deadline_h[1] == 150,
+                world.round_deadline_h[1] == 90,
                 world.appoint_time_h[0] == 100,
             ),
             action=world.is_fill_in_turn[0],
             postcondition=z3.And(
-                world.fill_in_due_h[0] == 150,
+                world.fill_in_due_h[0] == 124,
                 world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
             rules=("R-FILL-DUE-APPOINT", "R-EDIT-WINDOW"),
-            pending=True,
+            pending=False,
         )
     )
     scenarios.append(

@@ -53,7 +53,7 @@ to an `EVENT_SETTINGS` row, a decision, or a Gherkin scenario in the modeled
 scope. Then run `scripts/requirements-check.sh`.
 
 The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
-pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+pilot has 22 formalized scenarios from 21 source scenarios. The other scenarios are
 outside the modeled scope.
 
 - A contradiction, an unsatisfiable scenario, a missing entailment, an

@@ -2,7 +2,7 @@
 
 > <!-- GENERATED FILE — run `node scripts/trace-scenarios.mjs`; do not edit by hand. -->
 
-Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
+Total: 207 scenarios. Mapped: 90. Pending: 117. Exempt: 0.
 
 | Feature | Scenarios | Mapped | Pending | Exempt |
 |---|---|---|---|---|
@@ -18,7 +18,7 @@ Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 | `ops.feature` | 16 | 4 | 12 | 0 |
 | `participation.feature` | 7 | 3 | 4 | 0 |
 | `privacy.feature` | 8 | 2 | 6 | 0 |
-| `reveal.feature` | 17 | 6 | 11 | 0 |
+| `reveal.feature` | 18 | 6 | 12 | 0 |
 | `scheduling.feature` | 10 | 5 | 5 | 0 |
 | `security.feature` | 10 | 3 | 7 | 0 |
 
@@ -153,6 +153,7 @@ Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 ### `reveal.feature`
 
 - The host triggers the reveal (pending)
+- A reveal without the host action is refused (pending)
 - Credits show the full history (pending)
 - Skips show as anonymous gaps by default (pending)
 - The presenter shows the lineage and the audio (pending)

@@ -10,8 +10,8 @@ leave, handoff, and scheduling rules. The natural-language source wins.
 A stale model is a defect.
 
 **PASS means model satisfiability and entailment, not implementation.**
-Formalized scenarios marked `@pending`: **11/20**.
-The pilot has 20 formalized scenarios from 19 source scenarios.
+Formalized scenarios marked `@pending`: **6/22**.
+The pilot has 22 formalized scenarios from 21 source scenarios.
 The other Gherkin scenarios are outside the modeled scope.
 
 The base conjunction is the authoritative global check. Pair checks
@@ -25,7 +25,7 @@ Defaults are separate from the current event settings. A host-set
 
 - Solver: `z3 5.3.2`
 - Rules: **37** must rules.
-- Formalized scenarios: **20** (11 pending).
+- Formalized scenarios: **22** (6 pending).
 - Reachable premises: **14**.
 - Rule pairs checked: **666**.
 - Participants: **3**, tracks: **3**, rounds: **3**, turns: **6**, invitations: **2**.
@@ -35,23 +35,23 @@ Defaults are separate from the current event settings. A host-set
 | ID | Kind | Source | Rule (ASD-STE100) | Scenarios |
 |---|---|---|---|---|
 | `R-CLAIM-WINDOW-REGULAR` | `setting` | [D-025](../../ai-rules/DECISIONS.md), [REQ-DELIVERY-002](../../docs/PRD.md), [Claim window](../../docs/EVENT_SETTINGS.md), [A claim delivers the file and starts the deadline](../../specs/features/async_queue.feature) | The default regular claim window must be 24 hours. | `S-CLAIM-24` |
-| `R-CLAIM-WINDOW-FILLIN` | `setting` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [A fill-in offer uses the standard sequence](../../specs/features/fill_ins.feature) | The default fill-in claim window must be 6 hours. | `S-FILL-SEQUENCE` |
+| `R-CLAIM-WINDOW-FILLIN` | `setting` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The default fill-in claim window must be 6 hours. | `S-FILL-SEQUENCE` |
 | `R-CLAIM-REMINDER` | `setting` | [D-041](../../ai-rules/DECISIONS.md), [Claim reminder](../../docs/EVENT_SETTINGS.md), [The bot reminds the participant to claim](../../specs/features/async_queue.feature) | The default claim reminder must be 12 hours. The claim reminder must occur before the claim window ends. | `S-CLAIM-REMINDER` |
-| `R-EDIT-WINDOW` | `setting` | [D-033](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Async handoff deadline](../../docs/EVENT_SETTINGS.md), [A claimed fill-in offer starts the 24-hour edit time](../../specs/features/fill_ins.feature) | The default edit window must be 24 hours. | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` |
+| `R-EDIT-WINDOW` | `setting` | [D-033](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Async handoff deadline](../../docs/EVENT_SETTINGS.md), [A chain offer has a separate claim and edit window](../../specs/features/fill_ins.feature) | The default edit window must be 24 hours. | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` |
 | `R-CLAIM-EDIT-DUE` | `behaviour` | [REQ-ASYNC-002](../../docs/PRD.md), [D-033](../../ai-rules/DECISIONS.md), [A claim delivers the file and starts the deadline](../../specs/features/async_queue.feature) | A claimed assignment must start the edit due time at the claim. | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` |
-| `R-FILL-AUTO-CHAIN` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [D-064](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [A fill-in offer uses the standard sequence](../../specs/features/fill_ins.feature) | An auto-chain must make at most three offers before the host decides. | `S-FILL-SEQUENCE` |
-| `R-FILL-HOST-LIST` | `setting` | [D-070](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [A fill-in offer uses the standard sequence](../../specs/features/fill_ins.feature) | A host-ordered fill-in list must have no size limit. | `S-FILL-SEQUENCE` |
-| `R-FILL-SEQUENTIAL` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A fill-in offer uses the standard sequence](../../specs/features/fill_ins.feature) | The bot must have at most one open fill-in offer at a time. | `S-FILL-SEQUENCE` |
-| `R-FILL-FIRST-ACCEPT` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A fill-in offer uses the standard sequence](../../specs/features/fill_ins.feature) | The first accept must win the fill-in offer. | `S-FILL-SEQUENCE` |
-| `R-FILL-DUE-APPOINT` | `setting` | [D-040](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Fill-in due time](../../docs/EVENT_SETTINGS.md), [A host-appointed fill-in gets the later due time](../../specs/features/fill_ins.feature) | A host-appointed fill-in must have a due time at the later of two times. The two times are the round deadline and the default edit window. | `S-FILL-DUE-APPOINT` |
-| `R-FILL-DUE-CLAIM` | `behaviour` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [A claimed fill-in offer starts the 24-hour edit time](../../specs/features/fill_ins.feature) | A claimed fill-in offer must start the edit due time at the claim. | `S-FILL-DUE-CLAIM` |
-| `R-TIER1-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The fill-in pool has three sources](../../specs/features/fill_ins.feature) | A tier-1 offer must go to a person with the fill-in role who is active. The person must be ready, must have a fill-in source, and must not have seen the track. The person must not own the track. | `S-FILL-POOL` |
-| `R-TIER2-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must go to an active seeded participant. The participant must have submitted their own turn in the current round. The plan must never give the track. The participant must not have seen the track and must not own it. The offer round must have at most one tier-2 turn. | `S-TIER2-EXTRA-TURN` |
-| `R-TIER2-ONLY-NO-TIER1` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track. | `S-TIER2-EXTRA-TURN` |
-| `R-TIER2-ONE-PER-ROUND` | `behaviour` | [D-063](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A person must take at most one tier-2 fill-in turn in one round. | `S-TIER2-EXTRA-TURN` |
-| `R-TIER2-NO-EVENT-CAP` | `setting` | [D-063](../../ai-rules/DECISIONS.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | The event must not cap the total number of tier-2 fill-in turns. | `S-TIER2-EXTRA-TURN` |
-| `R-BUDGET-REGULAR` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [D-034](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A planned edit must count toward the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
-| `R-BUDGET-TIER2-EXTRA` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A tier-2 fill-in rescue is an extra turn](../../specs/features/fill_ins.feature) | A tier-2 rescue must be an extra turn outside the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
+| `R-FILL-AUTO-CHAIN` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [D-064](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | An auto-chain must make at most three offers before the host decides. | `S-FILL-SEQUENCE` |
+| `R-FILL-HOST-LIST` | `setting` | [D-070](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The host orders a fill-in list](../../specs/features/fill_ins.feature) | A host-ordered fill-in list must have no size limit. | `S-FILL-HOST-LIST` |
+| `R-FILL-SEQUENTIAL` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The bot must have at most one open fill-in offer at a time. | `S-FILL-SEQUENCE` |
+| `R-FILL-FIRST-ACCEPT` | `setting` | [D-014](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [The automatic chain offers the slot to one person at a time](../../specs/features/fill_ins.feature) | The first accept must win the fill-in offer. | `S-FILL-SEQUENCE` |
+| `R-FILL-DUE-APPOINT` | `setting` | [D-040](../../ai-rules/DECISIONS.md), [D-069](../../ai-rules/DECISIONS.md), [Fill-in due time](../../docs/EVENT_SETTINGS.md), [The host sets the fill-in due time](../../specs/features/fill_ins.feature) | A host-appointed fill-in must have a due time at the later of two times. The two times are the round deadline and the default edit window. | `S-FILL-DUE-APPOINT` |
+| `R-FILL-DUE-CLAIM` | `behaviour` | [D-069](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [Fill-in offer claim window](../../docs/EVENT_SETTINGS.md), [A chain offer has a separate claim and edit window](../../specs/features/fill_ins.feature) | A claimed fill-in offer must start the edit due time at the claim. | `S-FILL-DUE-CLAIM` |
+| `R-TIER1-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [Fill-in flow](../../docs/EVENT_SETTINGS.md), [The fill-in pool has two tiers in classic mode](../../specs/features/fill_ins.feature) | A tier-1 offer must go to a person with the fill-in role who is active. The person must be ready, must have a fill-in source, and must not have seen the track. The person must not own the track. | `S-FILL-APPOINT` |
+| `R-TIER2-OFFER-ELIGIBLE` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must go to an active seeded participant. The participant must have submitted their own turn in the current round. The plan must never give the track. The participant must not have seen the track and must not own it. The offer round must have at most one tier-2 turn. | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-ONLY-NO-TIER1` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-002](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track. | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` |
+| `R-TIER2-ONE-PER-ROUND` | `behaviour` | [D-063](../../ai-rules/DECISIONS.md), [REQ-FILL-003](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A person must take at most one tier-2 fill-in turn in one round. | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-NO-EVENT-CAP` | `setting` | [D-063](../../ai-rules/DECISIONS.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | The event must not cap the total number of tier-2 fill-in turns. | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-REGULAR` | `behaviour` | [D-014](../../ai-rules/DECISIONS.md), [D-034](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A planned edit must count toward the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
+| `R-BUDGET-TIER2-EXTRA` | `behaviour` | [D-050](../../ai-rules/DECISIONS.md), [REQ-FILL-004](../../docs/PRD.md), [A seeded participant can take one extra turn](../../specs/features/fill_ins.feature) | A tier-2 rescue must be an extra turn outside the shared handoff budget. | `S-TIER2-EXTRA-TURN` |
 | `R-FILL-PASS-UNCHANGED` | `behaviour` | [D-052](../../ai-rules/DECISIONS.md), [REQ-FILL-005](../../docs/PRD.md), [No eligible fill-in exists](../../specs/features/fill_ins.feature) | When no eligible fill-in exists, classic must pass the track unchanged. Async must return the track to the pool. | `S-FILL-NO-ELIGIBLE`, `S-FILL-PASS-ASYNC` |
 | `R-NO-REPEAT` | `invariant` | [D-007](../../ai-rules/DECISIONS.md), [REQ-SCHED-001](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | A participant must never work on the same track twice. | `S-SCHEDULE-ROUND` |
 | `R-NO-OWN-TRACK` | `invariant` | [D-007](../../ai-rules/DECISIONS.md), [REQ-SCHED-001](../../docs/PRD.md), [Every participant receives one unseen track per round](../../specs/features/scheduling.feature) | The app must never assign a participant their own track. | `S-SCHEDULE-ROUND` |
@@ -81,9 +81,11 @@ postcondition.
 
 | ID | Scenario | Feature | Pending | Witness | Entailment | Rules |
 |---|---|---|---|---|---|---|
-| `S-FILL-SEQUENCE` | A fill-in offer uses the standard sequence | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-CLAIM-WINDOW-FILLIN`, `R-FILL-AUTO-CHAIN`, `R-FILL-HOST-LIST`, `R-FILL-SEQUENTIAL`, `R-FILL-FIRST-ACCEPT` |
-| `S-TIER2-EXTRA-TURN` | A tier-2 fill-in rescue is an extra turn | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER2-OFFER-ELIGIBLE`, `R-TIER2-ONLY-NO-TIER1`, `R-TIER2-ONE-PER-ROUND`, `R-TIER2-NO-EVENT-CAP`, `R-BUDGET-REGULAR`, `R-BUDGET-TIER2-EXTRA` |
-| `S-FILL-POOL` | The fill-in pool has three sources | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER1-OFFER-ELIGIBLE` |
+| `S-FILL-SEQUENCE` | The automatic chain offers the slot to one person at a time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-CLAIM-WINDOW-FILLIN`, `R-FILL-AUTO-CHAIN`, `R-FILL-SEQUENTIAL`, `R-FILL-FIRST-ACCEPT` |
+| `S-FILL-HOST-LIST` | The host orders a fill-in list | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-HOST-LIST` |
+| `S-TIER2-EXTRA-TURN` | A seeded participant can take one extra turn | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER2-OFFER-ELIGIBLE`, `R-TIER2-ONLY-NO-TIER1`, `R-TIER2-ONE-PER-ROUND`, `R-TIER2-NO-EVENT-CAP`, `R-BUDGET-REGULAR`, `R-BUDGET-TIER2-EXTRA` |
+| `S-FILL-APPOINT` | The host appoints a fill-in by default | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER1-OFFER-ELIGIBLE` |
+| `S-FILL-POOL` | The fill-in pool has two tiers in classic mode | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-TIER2-ONLY-NO-TIER1` |
 | `S-FILL-NO-ELIGIBLE` | No eligible fill-in exists | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-PASS-UNCHANGED` |
 | `S-FILL-PASS-ASYNC` | No eligible fill-in exists | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-PASS-UNCHANGED` |
 | `S-SCHEDULE-ROUND` | Every participant receives one unseen track per round | [`specs/features/scheduling.feature`](../../specs/features/scheduling.feature) | no | PASS | PASS | `R-NO-REPEAT`, `R-NO-OWN-TRACK`, `R-ONE-ASSIGNMENT-PER-PERSON-ROUND`, `R-ONE-ASSIGNMENT-PER-TRACK-ROUND` |
@@ -93,11 +95,11 @@ postcondition.
 | `S-REVEAL-PENDING` | The reveal is refused while work is pending | [`specs/features/reveal.feature`](../../specs/features/reveal.feature) | no | PASS | PASS | `R-REVEAL-NO-ACTIVE` |
 | `S-SOFT-DEADLINE` | A soft deadline does not move a track | [`specs/features/deadlines_and_extensions.feature`](../../specs/features/deadlines_and_extensions.feature) | no | PASS | PASS | `R-NO-AUTO-ADVANCE` |
 | `S-ONE-OPEN-ROUND` | The host opens at most one round at a time | [`specs/features/deadlines_and_extensions.feature`](../../specs/features/deadlines_and_extensions.feature) | yes | PASS | PASS | `R-ONE-OPEN-ROUND` |
-| `S-LEAVE-HOLDING` | A participant leaves while holding a track | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | yes | PASS | PASS | `R-LEAVE-SEEN`, `R-LEAVE-NO-FUTURE` |
-| `S-LEAVER-RETURN` | A leaver can return as a fill-in | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | yes | PASS | PASS | `R-RESTORE-FILLIN-ONLY`, `R-RESTORE-EXPIRY`, `R-RESTORE-EXPIRY-SETTING` |
-| `S-RESTORE-EXPIRY` | A restore invitation expires after 7 days | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | yes | PASS | PASS | `R-RESTORE-EXPIRED-BLOCKS`, `R-RESTORE-EXPIRY-SETTING` |
-| `S-FILL-DUE-CLAIM` | A claimed fill-in offer starts the 24-hour edit time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | yes | PASS | PASS | `R-FILL-DUE-CLAIM`, `R-CLAIM-EDIT-DUE`, `R-EDIT-WINDOW` |
-| `S-FILL-DUE-APPOINT` | A host-appointed fill-in gets the later due time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | yes | PASS | PASS | `R-FILL-DUE-APPOINT`, `R-EDIT-WINDOW` |
+| `S-LEAVE-HOLDING` | A participant leaves while holding a track | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-LEAVE-SEEN`, `R-LEAVE-NO-FUTURE` |
+| `S-LEAVER-RETURN` | A confirmed restore starts at the next round | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-RESTORE-FILLIN-ONLY`, `R-RESTORE-EXPIRY`, `R-RESTORE-EXPIRY-SETTING` |
+| `S-RESTORE-EXPIRY` | A restore invitation expires after 7 days | [`specs/features/join_and_seed.feature`](../../specs/features/join_and_seed.feature) | no | PASS | PASS | `R-RESTORE-EXPIRED-BLOCKS`, `R-RESTORE-EXPIRY-SETTING` |
+| `S-FILL-DUE-CLAIM` | A chain offer has a separate claim and edit window | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-DUE-CLAIM`, `R-CLAIM-EDIT-DUE`, `R-EDIT-WINDOW` |
+| `S-FILL-DUE-APPOINT` | The host sets the fill-in due time | [`specs/features/fill_ins.feature`](../../specs/features/fill_ins.feature) | no | PASS | PASS | `R-FILL-DUE-APPOINT`, `R-EDIT-WINDOW` |
 | `S-CLAIM-24` | A claim delivers the file and starts the deadline | [`specs/features/async_queue.feature`](../../specs/features/async_queue.feature) | yes | PASS | PASS | `R-CLAIM-WINDOW-REGULAR`, `R-CLAIM-EDIT-DUE`, `R-EDIT-WINDOW` |
 | `S-CLAIM-REMINDER` | The bot reminds the participant to claim | [`specs/features/async_queue.feature`](../../specs/features/async_queue.feature) | no | PASS | PASS | `R-CLAIM-REMINDER` |
 | `S-STRICT-REFUSAL` | Strict participation requires enough handoff budget | [`specs/features/participation.feature`](../../specs/features/participation.feature) | yes | PASS | PASS | `R-STRICT-REFUSAL` |
@@ -157,14 +159,14 @@ independently exercised by its scenarios.
 | `R-EDIT-WINDOW` | yes | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` | `S-FILL-DUE-CLAIM`, `S-FILL-DUE-APPOINT`, `S-CLAIM-24` |
 | `R-CLAIM-EDIT-DUE` | yes | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` | `S-FILL-DUE-CLAIM`, `S-CLAIM-24` |
 | `R-FILL-AUTO-CHAIN` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
-| `R-FILL-HOST-LIST` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
+| `R-FILL-HOST-LIST` | yes | `S-FILL-HOST-LIST` | `S-FILL-HOST-LIST` |
 | `R-FILL-SEQUENTIAL` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
 | `R-FILL-FIRST-ACCEPT` | yes | `S-FILL-SEQUENCE` | `S-FILL-SEQUENCE` |
 | `R-FILL-DUE-APPOINT` | yes | `S-FILL-DUE-APPOINT` | `S-FILL-DUE-APPOINT` |
 | `R-FILL-DUE-CLAIM` | yes | `S-FILL-DUE-CLAIM` | `S-FILL-DUE-CLAIM` |
-| `R-TIER1-OFFER-ELIGIBLE` | yes | `S-FILL-POOL` | `S-FILL-POOL` |
+| `R-TIER1-OFFER-ELIGIBLE` | yes | `S-FILL-APPOINT` | `S-FILL-APPOINT` |
 | `R-TIER2-OFFER-ELIGIBLE` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
-| `R-TIER2-ONLY-NO-TIER1` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
+| `R-TIER2-ONLY-NO-TIER1` | yes | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` | `S-TIER2-EXTRA-TURN`, `S-FILL-POOL` |
 | `R-TIER2-ONE-PER-ROUND` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
 | `R-TIER2-NO-EVENT-CAP` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |
 | `R-BUDGET-REGULAR` | yes | `S-TIER2-EXTRA-TURN` | `S-TIER2-EXTRA-TURN` |

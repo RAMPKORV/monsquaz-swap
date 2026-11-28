@@ -83,10 +83,30 @@ readiness:  ready | paused   (paused_until optional)
 - A seeded participant becomes **active** at event start.
 - `paused` means do not offer them new tracks; a pause requested while holding
   a track takes effect after they submit/return it.
-- A leaver keeps past credits; future assignments are removed. Their seeded
-  track keeps circulating (default) or is retired by the host.
-- Rejoin is fill-in-only by default; the host may enable rejoin-with-replan
-  (new plan version, re-seal).
+- **Leave (D-051).** A participant can leave with `/swap leave` or with the
+  Leave button on a DM that carries a file or a prompt. The host can mark a
+  participant as left from the Participants view.
+- Every leave path shows a warning first. The participant must press Confirm
+  on an ephemeral reply within 15 minutes. The host must confirm a two-step
+  dialog. Without a confirm, nothing changes.
+- A leave is immediate. A claimed or overdue track becomes
+  `skipped_after_claim` (seen). An unclaimed offer becomes
+  `skipped_before_claim` (not seen). The track returns unchanged, the fill-in
+  flow starts, and the host gets an alert.
+- Future planned turns of a leaver are gaps. The app does not replan.
+- The seed of a leaver stays in the event and keeps circulating. This is also
+  true for a leave before the roster lock.
+- A leaver keeps past credits. The bot cancels every unsent DM to the leaver
+  and sends the leaver no new DM. A command from a leaver gets an ephemeral
+  answer.
+- **Rejoin (D-051).** Only the host can start a return. The bot then sends one
+  DM with Confirm and Decline. Only a confirm makes the person `active`
+  again, with planned turns from the next round that opens. A decline or no
+  answer keeps the person `left`. The invitation expires after 7 days. A
+  skipped turn stays skipped. A confirm in schedule review voids the draft
+  plan, because the roster changed; the host must generate the schedule
+  again.
+- Every leave, cancellation, and restore writes an audit entry.
 
 ## Assignment lifecycle
 
@@ -221,17 +241,33 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 
 ## Fill-ins
 
-- Pool: dedicated volunteers + signed-up non-seeders converted at lock; the host
-  can appoint a specific eligible person.
-- Offers are sequential, and first accept wins. The claim window default is 6h
-  (D-069). An auto-chain uses at most 3 offers; a host-ordered list has no size
-  limit (D-070). Decided, building in MSW-083.
-- Eligibility: never seen the track, not the owner, available/ready. A tier-2
-  fill-in rescue is an extra turn and does not count toward the shared handoff
-  budget (D-050). Decided, building in MSW-080..MSW-083.
+- Tier 1 (classic): dedicated fill-ins. A dedicated fill-in is a volunteer or
+  a signup without a seed at roster lock. The host can appoint any eligible
+  person.
+- Tier 2 (classic, D-050): a seeded participant who submitted their own turn
+  in the current round, and whom the current plan never gives the track. The
+  app offers tier 2 only when no tier-1 person is eligible. A tier-2 person
+  can take at most one extra turn in one round (D-063). A pre-claim skip does
+  not count as an extra turn.
+- Eligibility for both tiers: active, ready, no active assignment, not the
+  owner, never saw the track. The handoff cap applies to tier 1 only. A
+  tier-2 turn is an extra turn and does not count toward the cap.
+- Flow (`fill_in_flow`, D-040): `host_appoints` (default), `auto_chain`, or
+  `host_list`. The automatic chain makes at most 3 offers. It walks tier 1
+  before tier 2 inside that budget (D-064). The host list has no size limit
+  and keeps the host order inside each tier (D-070). Tier 1 still comes first;
+  the host order does not override the tier rule. After the last offer, the
+  host decides. The bot checks eligibility again before each offer.
+- Claim and edit time (D-069): each chain or host-list offer gets
+  `fill_in_claim_window` (6h). A claim starts the edit window
+  `fill_in_window` (24h). A host appointment has the due time that the host
+  sets, and the claim keeps it. The default due time is the later of the
+  round deadline and now plus `fill_in_window`. A host due time is at most 14
+  days away.
+- A fill-in is refused when the cell is not stranded: a submitted turn or an
+  active holder blocks it.
 - Credit: the badge marks a rescued turn, whoever did it. Planned turns of a
-  person with the fill-in role are plain credits (D-065). Decided, building in
-  MSW-080.
+  person with the fill-in role are plain credits (D-065).
 - No eligible fill-in: classic passes the track unchanged; async returns it to
   the pool. Never relax the no-repeat invariant to rescue a slot.
 

@@ -93,21 +93,153 @@ Feature: Joining and seeding
     Then the app refuses the replacement
     And the bot explains that the seed deadline has passed
 
-  @pending
+  # D-051: a leave is immediate after one explicit confirmation. Only the
+  # host can start a return, and only the person's confirm completes it.
+
+  @leave
+  Scenario: The leave command shows a warning first
+    Given an active participant
+    When the participant uses the leave command
+    Then the bot answers with an ephemeral warning and a Confirm button
+    And the app does not change the membership
+
+  @leave
+  Scenario: A DM with a file or a prompt carries a Leave button
+    Given an active participant
+    When the bot sends an offer, a track file, a reminder, or a deadline prompt
+    Then the DM carries a Leave button
+
+  @leave
+  Scenario: The Leave button shows the same warning
+    Given an active participant
+    When the participant presses the Leave button on a DM
+    Then the bot answers with an ephemeral warning and a Confirm button
+    And the bot does not send a DM
+
+  @leave
+  Scenario: The warning states every consequence
+    When the bot shows the leave warning
+    Then the warning states that a held track is skipped now and returns unchanged
+    And the warning states what happens to a seed that the participant owns
+    And the warning states that past credits keep the name
+    And the warning states that the bot sends no DMs unless the host asks the participant to return
+    And the warning states that only the host can undo the leave
+
+  @leave
   Scenario: A participant leaves while holding a track
     Given a participant who claimed a track
-    When the participant leaves
-    Then the participant must submit or skip the current track first
-    And the app preserves past credits
-    And the app removes future assignments
-    And the app alerts the host if the track is left unsubmitted
+    When the participant confirms the leave within 15 minutes
+    Then the app skips the track as seen
+    And the track returns to the pool unchanged
+    And the app records the participant as left
 
-  @pending
-  Scenario: A leaver can return as a fill-in
+  @leave
+  Scenario: A leave before a claim does not count as seen
+    Given a participant with an offer that is not claimed
+    When the participant confirms the leave
+    Then the app skips the offer as not seen
+
+  @leave
+  Scenario: A leave starts the fill-in flow
+    Given a participant who holds a track in an open round
+    When the participant confirms the leave
+    Then the app starts the fill-in flow of the event for the stranded slot
+    And the app alerts the host
+
+  @leave
+  Scenario: An expired confirmation does nothing
+    Given a leave warning that the bot showed more than 15 minutes ago
+    When the participant presses Confirm
+    Then the app does not change the membership
+    And the bot answers that the confirmation expired
+
+  @leave
+  Scenario: A leaver gets no more event DMs
     Given a participant who left the event
-    When the participant asks to return
-    Then the app allows a fill-in return by default
-    And the app does not assign a new personal track
+    When the app sends offers, reminders, or prompts
+    Then the app cancels every unsent DM to the leaver with an audit entry
+    And the app sends no event DM to the leaver
+    But the host can send one restore invitation
+
+  @leave
+  Scenario: A leaver gets an ephemeral answer to a command
+    Given a participant who left the event
+    When the participant uses a swap command
+    Then the bot answers with an ephemeral message
+    And the bot does not send a DM
+
+  @leave
+  Scenario: A leaver who sends a file gets one direct answer
+    Given a participant who left the event
+    When the participant sends a file to the bot
+    Then the bot sends one answer to that message
+    And the app does not store the file
+
+  @leave
+  Scenario: Future planned turns of a leaver become gaps
+    Given a participant who left the event
+    When the host opens the next round
+    Then the app sends no offer for the planned turns of the leaver
+    And the app does not make a new plan
+
+  @leave
+  Scenario: A leaver keeps past credits
+    Given a participant who submitted an edit and then left the event
+    When the host triggers the reveal
+    Then the credits show the name of the leaver
+
+  @leave
+  Scenario: A seed stays when the owner leaves before the roster lock
+    Given a seeded participant
+    When the participant leaves before the roster lock
+    And the host locks the roster and makes the plan
+    Then the plan keeps the seed of the leaver
+    And each active participant gets one track in each round
+
+  @leave
+  Scenario: The host marks a participant as left
+    Given an active participant
+    When the host marks the participant as left and confirms two times
+    Then the app applies the same leave as the participant leave
+    And the audit log names the host as the actor
+
+  @leave
+  Scenario: The host restore needs the consent of the person
+    Given a participant who left the event
+    When the host restores the participant and confirms two times
+    Then the bot sends one DM with "Confirm" and "Decline" buttons
+    And the participant stays left until the participant presses Confirm
+
+  @leave
+  Scenario: A confirmed restore starts at the next round
+    Given a participant who pressed Confirm on the restore DM
+    When the host opens the next round
+    Then the participant gets the planned turns of that round
+    And a turn that the leave skipped stays skipped
+
+  @leave
+  Scenario: A declined restore keeps the participant out
+    Given a participant who pressed "Decline" on the restore DM
+    Then the participant stays left
+    And the bot sends no DMs unless the host asks again
+
+  @leave
+  Scenario: A restore invitation expires after 7 days
+    Given a participant who left the event
+    And the host asked the participant to return 7 days ago
+    When the participant presses Confirm
+    Then the participant stays left
+    And the app records the expired restore
+    And the host can ask again
+
+  @leave
+  Scenario: A restore in schedule review voids the draft plan
+    Given an event in schedule review with a draft plan
+    And a participant left before the roster locked
+    When the host restores the participant and the participant confirms
+    Then the draft plan is void
+    And the host must generate the schedule again
+    And the audit log records the change
 
   @pending
   Scenario: A rejoin with replan needs the event option
@@ -116,6 +248,7 @@ Feature: Joining and seeding
     Then the app creates a new plan version
     And the app re-seals the schedule
     And the app shows the change in the audit log
+
 
   @pending
   Scenario: The host pack is required with a review

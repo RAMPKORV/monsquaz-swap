@@ -12,6 +12,23 @@ pub enum Mode {
     Async,
 }
 
+/// How the bot finds a fill-in for a stranded classic slot (D-040).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FillInFlow {
+    /// The host picks one eligible person. A decline or an expiry opens a
+    /// host decision.
+    #[default]
+    HostAppoints,
+    /// The bot offers the slot to up to 3 ranked eligible people across both
+    /// tiers, one at a time. The first claim wins (D-064).
+    AutoChain,
+    /// The host orders a list without a size limit. The bot offers the slot
+    /// down the list, one person at a time. Tier 1 still comes first; the host
+    /// order applies inside each tier (D-050, D-070).
+    HostList,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EventSettings {
@@ -41,6 +58,12 @@ pub struct EventSettings {
     pub async_late_seeds: Option<bool>,
     pub quiet_hours_start: u8,
     pub quiet_hours_end: u8,
+    /// The default edit time a fill-in has after the claim, in seconds.
+    pub fill_in_window_secs: i64,
+    /// The claim window of a chain or host-list fill-in offer, in seconds
+    /// (D-069).
+    pub fill_in_claim_window_secs: i64,
+    pub fill_in_flow: FillInFlow,
 }
 
 impl Default for EventSettings {
@@ -75,6 +98,9 @@ impl Default for EventSettings {
             async_late_seeds: None,
             quiet_hours_start: 22,
             quiet_hours_end: 8,
+            fill_in_window_secs: 24 * 60 * 60,
+            fill_in_claim_window_secs: 6 * 60 * 60,
+            fill_in_flow: FillInFlow::HostAppoints,
         }
     }
 }
@@ -115,6 +141,10 @@ pub enum SettingsError {
     AsyncWaveOffset,
     #[error("the quiet hours must be between 0 and 23")]
     QuietHours,
+    #[error("the fill-in window must be between 1 hour and 14 days")]
+    FillInWindow,
+    #[error("the fill-in claim window must be between 1 and 48 hours")]
+    FillInClaimWindow,
 }
 
 impl EventSettings {
@@ -190,6 +220,12 @@ impl EventSettings {
         }
         if self.quiet_hours_start > 23 || self.quiet_hours_end > 23 {
             return Err(SettingsError::QuietHours);
+        }
+        if !(60 * 60..=14 * 24 * 60 * 60).contains(&self.fill_in_window_secs) {
+            return Err(SettingsError::FillInWindow);
+        }
+        if !(60 * 60..=48 * 60 * 60).contains(&self.fill_in_claim_window_secs) {
+            return Err(SettingsError::FillInClaimWindow);
         }
         let mut seen = BTreeSet::new();
         for extension in &self.allowed_extensions {
@@ -289,9 +325,60 @@ mod tests {
     }
 
     #[test]
+    fn the_fill_in_window_defaults_to_24_hours_and_is_bounded() {
+        assert_eq!(EventSettings::default().fill_in_window_secs, 86_400);
+        for (secs, valid) in [
+            (0, false),
+            (3_599, false),
+            (3_600, true),
+            (1_209_600, true),
+            (1_209_601, false),
+        ] {
+            let settings = EventSettings {
+                fill_in_window_secs: secs,
+                ..EventSettings::default()
+            };
+            assert_eq!(settings.validate().is_ok(), valid, "{secs}");
+        }
+    }
+
+    #[test]
+    fn the_fill_in_claim_window_defaults_to_6_hours_and_is_bounded() {
+        assert_eq!(EventSettings::default().fill_in_claim_window_secs, 21_600);
+        for (secs, valid) in [
+            (0, false),
+            (3_599, false),
+            (3_600, true),
+            (172_800, true),
+            (172_801, false),
+        ] {
+            let settings = EventSettings {
+                fill_in_claim_window_secs: secs,
+                ..EventSettings::default()
+            };
+            assert_eq!(settings.validate().is_ok(), valid, "{secs}");
+        }
+    }
+
+    #[test]
+    fn the_fill_in_flow_uses_snake_case_and_defaults_to_host_appoints() {
+        assert_eq!(
+            EventSettings::default().fill_in_flow,
+            FillInFlow::HostAppoints
+        );
+        let settings: EventSettings =
+            serde_json::from_str(r#"{"fill_in_flow": "auto_chain"}"#).unwrap();
+        assert_eq!(settings.fill_in_flow, FillInFlow::AutoChain);
+        assert!(serde_json::from_str::<EventSettings>(r#"{"fill_in_flow": "random"}"#).is_err());
+    }
+
+    #[test]
     fn an_old_settings_json_uses_defaults() {
         let settings: EventSettings = serde_json::from_str(r#"{"rounds": 2}"#).unwrap();
         assert_eq!(settings.rounds, Some(2));
         assert_eq!(settings.claim_window_secs, 86_400);
+        assert_eq!(settings.fill_in_window_secs, 86_400);
+        assert_eq!(settings.fill_in_claim_window_secs, 21_600);
+        assert_eq!(settings.fill_in_flow, FillInFlow::HostAppoints);
     }
 }

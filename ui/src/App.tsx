@@ -61,9 +61,12 @@ import {
   loadSetup,
   saveSettings,
   setParticipantPaused,
+  markParticipantLeft,
+  restoreParticipant,
   setTrackTitle,
   addAvailability,
   assignFillIn,
+  startFillInList,
   removeAvailability,
   addTrackComment,
   redactTrackComment,
@@ -532,6 +535,30 @@ export default function App() {
     }
   }
 
+  async function handleLeaveChange(userId: string, leave: boolean) {
+    if (demo) {
+      setToast(
+        leave
+          ? "Preview: the participant left the event. Any held track returns unchanged."
+          : "Preview: the bot asks the participant to confirm the return.",
+      );
+      return;
+    }
+    try {
+      if (leave) {
+        await markParticipantLeft(userId);
+        setToast("The participant left the event. Any held track returned unchanged.");
+      } else {
+        await restoreParticipant(userId);
+        setToast("The bot asks the participant to confirm the return.");
+      }
+      reloadView();
+    } catch (error) {
+      setToast(`Could not update the participant. ${errorDetail(error)}`);
+      reloadView();
+    }
+  }
+
   async function handleAddAvailability(
     participantId: string,
     startsAt: number,
@@ -570,13 +597,36 @@ export default function App() {
     trackCode: string,
     roundNo: number,
     participantId: string,
+    dueAt?: number,
   ) {
     try {
-      await assignFillIn(trackCode, roundNo, participantId);
+      await assignFillIn(trackCode, roundNo, participantId, dueAt);
       setToast("Fill-in assigned. The offer is queued.");
       reloadView();
     } catch (error) {
       setToast(`Could not assign the fill-in. ${errorDetail(error)}`);
+    }
+  }
+
+  async function handleStartFillInList(
+    trackCode: string,
+    roundNo: number,
+    participantIds: string[],
+  ) {
+    try {
+      const result = await startFillInList(trackCode, roundNo, participantIds);
+      setToast(
+        result.offeredTo
+          ? "Fill-in list saved. The bot offers the track in that order."
+          : result.status === "exhausted"
+            ? result.decisionOpened
+              ? "The fill-in list is exhausted. A host decision is open."
+              : "The fill-in list is exhausted. The track passes unchanged."
+            : "Fill-in list saved. The bot waits for quiet hours to end, then offers the track.",
+      );
+      reloadView();
+    } catch (error) {
+      setToast(`Could not save the fill-in list. ${errorDetail(error)}`);
     }
   }
 
@@ -834,6 +884,7 @@ export default function App() {
         onMoveRoundDeadline={handleMoveRoundDeadline}
         onLoadFillInCandidates={handleLoadFillInCandidates}
         onAssignFillIn={handleAssignFillIn}
+        onStartFillInList={handleStartFillInList}
       />
     ) : view === "setup" && setup ? (
       <SetupView
@@ -846,6 +897,7 @@ export default function App() {
         data={people}
         onAction={notify}
         onSetPaused={handleSetPaused}
+        onLeaveChange={handleLeaveChange}
         onAddAvailability={handleAddAvailability}
         onRemoveAvailability={handleRemoveAvailability}
         timezone={settings?.timezone}

@@ -118,6 +118,18 @@ pub struct SimMessage {
     pub content: String,
     pub attachments: Vec<SimAttachment>,
     pub timestamp: i64,
+    /// The message components as the bot sent them (action rows).
+    pub components: Vec<Value>,
+}
+
+/// One interaction callback that the bot sent (D-051 confirmations).
+#[derive(Debug, Clone)]
+pub struct SimInteractionReply {
+    pub interaction_id: String,
+    pub kind: u64,
+    pub content: String,
+    pub ephemeral: bool,
+    pub button_ids: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -128,6 +140,7 @@ pub struct SimState {
     pub attachment_bytes: BTreeMap<String, Arc<Vec<u8>>>,
     pub commands: Vec<Value>,
     pub dm_by_user: BTreeMap<String, String>,
+    pub interaction_replies: Vec<SimInteractionReply>,
 }
 
 impl SimState {

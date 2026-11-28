@@ -52,6 +52,10 @@ pub(crate) fn router(shared: Arc<SimShared>) -> Router {
             "/api/v10/channels/{channel_id}/thread-members/{user_id}",
             put(add_thread_member),
         )
+        .route(
+            "/api/v10/interactions/{interaction_id}/{token}/callback",
+            post(interaction_callback),
+        )
         .route("/cdn/{attachment_id}/{filename}", get(download_attachment))
         .route("/_control/messages", post(control_message))
         .route("/_control/messages", get(control_messages))
@@ -199,6 +203,7 @@ async fn create_message(
         .unwrap_or_default()
         .to_string();
     let mut content = String::new();
+    let mut components = Vec::new();
     let mut files = Vec::new();
     if content_type.starts_with("multipart/form-data") {
         let mut multipart = Multipart::from_request(request, &())
@@ -221,6 +226,7 @@ async fn create_message(
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();
+                components = payload_components(&payload)?;
             } else if name.starts_with("files[") {
                 let filename = field.file_name().unwrap_or("file.bin").to_string();
                 let content_type = field.content_type().map(str::to_string);
@@ -241,6 +247,7 @@ async fn create_message(
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        components = payload_components(&payload)?;
     }
 
     let message = store_message(
@@ -250,12 +257,106 @@ async fn create_message(
         content,
         files,
     )?;
+    if !components.is_empty() {
+        let mut state = shared.state_mut();
+        if let Some(stored) = state
+            .messages
+            .get_mut(&channel_id)
+            .and_then(|messages| messages.iter_mut().find(|item| item.id == message.id))
+        {
+            stored.components = components;
+        }
+    }
+    let message = shared
+        .state()
+        .messages
+        .get(&channel_id)
+        .and_then(|messages| messages.iter().find(|item| item.id == message.id))
+        .cloned()
+        .unwrap_or(message);
     let state = shared.state();
     Ok(Json(payload::message_json(
         &message,
         &state,
         &shared.base_url,
     )))
+}
+
+/// Read the action rows of a message payload. Discord allows five rows of
+/// at most five buttons, and a button custom id of at most 100 characters.
+fn payload_components(payload: &Value) -> Result<Vec<Value>, ApiError> {
+    let Some(rows) = payload.get("components").and_then(Value::as_array) else {
+        return Ok(Vec::new());
+    };
+    if rows.len() > 5 {
+        return Err(ApiError::bad_request("too many action rows"));
+    }
+    for row in rows {
+        if row.get("type").and_then(Value::as_u64) != Some(1) {
+            return Err(ApiError::bad_request(
+                "a top-level component must be an action row",
+            ));
+        }
+        let buttons = row
+            .get("components")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ApiError::bad_request("an action row needs components"))?;
+        if buttons.is_empty() || buttons.len() > 5 {
+            return Err(ApiError::bad_request(
+                "an action row holds one to five buttons",
+            ));
+        }
+        for button in buttons {
+            let custom_id = button
+                .get("custom_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if button.get("type").and_then(Value::as_u64) != Some(2)
+                || custom_id.is_empty()
+                || custom_id.len() > 100
+            {
+                return Err(ApiError::bad_request("a button needs a custom id"));
+            }
+        }
+    }
+    Ok(rows.clone())
+}
+
+/// Record an interaction callback. Only type 4 (a message) is accepted.
+async fn interaction_callback(
+    State(shared): State<Arc<SimShared>>,
+    Path((interaction_id, _token)): Path<(String, String)>,
+    Json(payload): Json<Value>,
+) -> Result<axum::http::StatusCode, ApiError> {
+    let kind = payload.get("type").and_then(Value::as_u64).unwrap_or(0);
+    if kind != 4 {
+        return Err(ApiError::bad_request("only callback type 4 is simulated"));
+    }
+    let data = payload.get("data").cloned().unwrap_or(Value::Null);
+    let components = payload_components(&data)?;
+    let button_ids = components
+        .iter()
+        .filter_map(|row| row.get("components").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|button| button.get("custom_id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let flags = data.get("flags").and_then(Value::as_u64).unwrap_or(0);
+    shared
+        .state_mut()
+        .interaction_replies
+        .push(super::state::SimInteractionReply {
+            interaction_id,
+            kind,
+            content: data
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            ephemeral: flags & 64 == 64,
+            button_ids,
+        });
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -552,6 +653,7 @@ fn store_message(
         content,
         attachments,
         timestamp: MESSAGE_EPOCH,
+        components: Vec::new(),
     };
     state
         .messages
@@ -688,6 +790,7 @@ pub fn reset(shared: &Arc<SimShared>) {
     let mut state = shared.state_mut();
     state.messages.clear();
     state.attachment_bytes.clear();
+    state.interaction_replies.clear();
 }
 
 pub fn command_count(shared: &Arc<SimShared>) -> usize {

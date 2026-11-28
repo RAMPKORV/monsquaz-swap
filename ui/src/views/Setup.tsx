@@ -309,6 +309,96 @@ function BasicsStep({
           </Field>
         ) : null}
       </div>
+      {draft.mode !== "Async" ? (
+        <fieldset className="choice-field">
+          <legend className="field-label">Fill-ins</legend>
+          <p className="field-help">
+            A fill-in covers a stranded track. The bot checks eligibility again
+            before each offer.
+          </p>
+          <div className="form-grid">
+            <Field
+              label="Fill-in flow"
+              htmlFor="fill-in-flow"
+              helpId="fill-in-flow-help"
+              help={
+                draft.fillInFlow === "host_appoints"
+                  ? "You appoint one eligible person. A decline or an expiry opens a host decision."
+                  : draft.fillInFlow === "auto_chain"
+                    ? "The bot offers the track to ranked people, one at a time, for up to 3 offers. Tier 1 comes before tier 2."
+                    : "You order a list. The bot offers the track down the list, one person at a time. The list has no size limit. Tier 1 still comes first; your order applies inside each tier."
+              }
+            >
+              <select
+                id="fill-in-flow"
+                aria-describedby="fill-in-flow-help"
+                className="input"
+                value={draft.fillInFlow}
+                onChange={(event) =>
+                  update(
+                    "fillInFlow",
+                    event.target.value as EventDraft["fillInFlow"],
+                  )
+                }
+              >
+                <option value="host_appoints">You appoint a person</option>
+                <option value="auto_chain">Automatic chain</option>
+                <option value="host_list">You order a list</option>
+              </select>
+            </Field>
+            <Field
+              label="Fill-in edit window"
+              htmlFor="fill-in-window"
+              helpId="fill-in-window-help"
+              help="Hours to edit after a chain or list offer is claimed. The host-set due time replaces this window."
+            >
+              <div className="number-control">
+                <input
+                  id="fill-in-window"
+                  aria-describedby="fill-in-window-help"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={336}
+                  value={draft.fillInWindowHours}
+                  onChange={(event) =>
+                    update(
+                      "fillInWindowHours",
+                      Number(event.target.value) || 24,
+                    )
+                  }
+                />
+                <span>hours</span>
+              </div>
+            </Field>
+            <Field
+              label="Fill-in claim window"
+              htmlFor="fill-in-claim-window"
+              helpId="fill-in-claim-window-help"
+              help="Hours to claim a chain or list offer before the bot moves to the next person. A host appointment uses its due time as the claim deadline."
+            >
+              <div className="number-control">
+                <input
+                  id="fill-in-claim-window"
+                  aria-describedby="fill-in-claim-window-help"
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={48}
+                  value={draft.fillInClaimWindowHours}
+                  onChange={(event) =>
+                    update(
+                      "fillInClaimWindowHours",
+                      Number(event.target.value) || 6,
+                    )
+                  }
+                />
+                <span>hours</span>
+              </div>
+            </Field>
+          </div>
+        </fieldset>
+      ) : null}
       <details className="advanced-settings">
         <summary>
           <Icon name="chevron-down" size={16} /> Advanced timing
@@ -770,6 +860,21 @@ function ReviewStep({
           <div>
             <dt>Edit window</dt>
             <dd>{draft.roundWindowHours} hours</dd>
+          </div>
+        ) : null}
+        {draft.mode !== "Async" ? (
+          <div>
+            <dt>Fill-ins</dt>
+            <dd>
+              {draft.fillInFlow === "host_appoints"
+                ? "You appoint"
+                : draft.fillInFlow === "auto_chain"
+                  ? "Automatic chain"
+                  : "You order a list"}
+              {" · "}
+              {draft.fillInClaimWindowHours} h to claim,{" "}
+              {draft.fillInWindowHours} h to edit
+            </dd>
           </div>
         ) : null}
         {draft.mode !== "Async" ? (

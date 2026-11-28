@@ -325,6 +325,7 @@ impl HeadlessApp {
             track_code,
             round_no,
             user_id,
+            None,
             self.now(),
         )
         .map(|_| ())

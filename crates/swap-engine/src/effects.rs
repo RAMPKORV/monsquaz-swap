@@ -36,6 +36,13 @@ pub enum Effect {
         key: String,
         content: String,
     },
+    /// A reminder or a deadline prompt to a participant. The DM carries a
+    /// Leave button (D-051).
+    Prompt {
+        user_id: String,
+        event_id: String,
+        content: String,
+    },
 }
 
 /// Deliver every effect. Failures are returned per effect so the caller can
@@ -52,13 +59,30 @@ pub async fn dispatch(
                     .send_dm(
                         &DiscordUserId::new(user_id.clone()),
                         OutboundMessage {
+                            buttons: Vec::new(),
                             content: content.clone(),
+                        },
+                    )
+                    .await
+            }
+            Effect::Prompt {
+                user_id,
+                event_id,
+                content,
+            } => {
+                discord
+                    .send_dm(
+                        &DiscordUserId::new(user_id.clone()),
+                        OutboundMessage {
+                            content: content.clone(),
+                            buttons: crate::delivery::leave_button(event_id),
                         },
                     )
                     .await
             }
             Effect::Offer {
                 user_id,
+                event_id,
                 track_code,
                 due_at,
                 claim_window_secs,
@@ -71,7 +95,10 @@ pub async fn dispatch(
                 discord
                     .send_dm(
                         &DiscordUserId::new(user_id.clone()),
-                        OutboundMessage { content },
+                        OutboundMessage {
+                            content,
+                            buttons: crate::delivery::leave_button(event_id),
+                        },
                     )
                     .await
             }
@@ -86,6 +113,7 @@ pub async fn dispatch(
                     .send_file(
                         &DiscordUserId::new(user_id.clone()),
                         OutboundFile {
+                            buttons: Vec::new(),
                             filename: filename.clone(),
                             bytes: bytes.clone(),
                             caption: caption.clone(),
@@ -101,6 +129,7 @@ pub async fn dispatch(
                     .send_channel_message(
                         &DiscordChannelId::new(channel_id.clone()),
                         OutboundMessage {
+                            buttons: Vec::new(),
                             content: content.clone(),
                         },
                     )

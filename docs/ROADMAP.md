@@ -99,7 +99,7 @@ The invariant suite is green.
 - Ready gate, expiry protection, gap report.
 - Exposure length rules (N-1 small, 6–8 above 12).
 - Classic groups, participant rotation, K cadence, merge repair.
-- Fill-in pool and sequential offers.
+- Two-tier fill-ins, sequential offers, separate claim and edit windows, and automatic tier escalation.
 - Host deadline decision cards.
 
 **Exit:** a 20-person async event with two skips, one fill-in, one late seed,

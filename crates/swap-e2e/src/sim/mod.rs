@@ -24,7 +24,8 @@ pub use http::{InjectInteractionRequest, InjectMessageRequest, default_guild_id,
 pub use payload::SimInteraction;
 pub use state::{
     ANNOUNCEMENTS_CHANNEL_ID, APPLICATION_ID, BOT_USER_ID, DEFAULT_TOKEN, GENERAL_CHANNEL_ID,
-    GUILD_ID, GatewayFrame, PARTICIPANTS, REVEAL_CHANNEL_ID, SimConfig, SimState,
+    GUILD_ID, GatewayFrame, PARTICIPANTS, REVEAL_CHANNEL_ID, SimConfig, SimInteractionReply,
+    SimState,
 };
 
 /// A running simulator. The server stops when this value drops.
@@ -255,6 +256,31 @@ impl DiscordSim {
             }
         }
         output
+    }
+
+    /// The button custom ids on every bot message to a user, oldest first.
+    pub fn bot_button_ids_for(&self, user_id: &str) -> Vec<String> {
+        let state = self.shared.state();
+        let Some(channel) = state.dm_channel_for(user_id) else {
+            return Vec::new();
+        };
+        state
+            .messages
+            .get(&channel.id)
+            .into_iter()
+            .flatten()
+            .filter(|message| message.author_id == self.bot_user_id())
+            .flat_map(|message| message.components.iter())
+            .filter_map(|row| row.get("components").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|button| button.get("custom_id").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Every interaction callback that the bot sent, oldest first.
+    pub fn ephemeral_replies(&self) -> Vec<SimInteractionReply> {
+        self.shared.state().interaction_replies.clone()
     }
 
     pub fn command_count(&self) -> usize {

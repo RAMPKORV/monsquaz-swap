@@ -13,10 +13,11 @@ pub use repos::{
     AssignmentDeadlineRecord, AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo,
     AvailabilityRecord, AvailabilityRepo, DeadlineRepo, DeliveryRecord, DeliveryRepo,
     DmCursorRecord, DmCursorRepo, EventRecord, EventRepo, EventRoundRecord, FileRecord, FileRepo,
-    HostDecisionRecord, HostDecisionRepo, IdentityCounts, LateSeedRecord, LateSeedRepo, MetaRepo,
-    PackRecord, PackRepo, ParticipantRecord, ParticipantRepo, PlanAssignmentRecord,
-    PlanCommitmentMeta, PlanRecord, PlanRepo, PrivacyRepo, ProcessedAttachmentRepo, RoundRepo,
-    SeedOwnerRepo, SeenPairRecord, SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord,
-    TrackRepo, TrackTitleRecord, TrackTitleRepo,
+    FillInChainRecord, FillInChainRepo, HostDecisionRecord, HostDecisionRepo, IdentityCounts,
+    LateSeedRecord, LateSeedRepo, MetaRepo, PackRecord, PackRepo, ParticipantRecord,
+    ParticipantRepo, PlanAssignmentRecord, PlanCommitmentMeta, PlanRecord, PlanRepo, PrivacyRepo,
+    ProcessedAttachmentRepo, RestoreRecord, RestoreRepo, RoundRepo, SeedOwnerRepo, SeenPairRecord,
+    SeenRepo, TrackCommentRecord, TrackCommentRepo, TrackRecord, TrackRepo, TrackTitleRecord,
+    TrackTitleRepo,
 };
 pub use rusqlite::{Connection, Transaction, TransactionBehavior};

@@ -9,13 +9,14 @@
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use swap_core::Membership;
 use swap_db::{
     AuditRepo, Connection, Db, DbError, DeliveryRecord, DeliveryRepo, DmCursorRepo,
-    HostDecisionRepo, MetaRepo, Transaction, TransactionBehavior,
+    HostDecisionRepo, MetaRepo, ParticipantRepo, Transaction, TransactionBehavior,
 };
 use swap_discord::{
-    DiscordChannelId, DiscordError, DiscordPort, DiscordUserId, MessageId, OutboundFile,
-    OutboundMessage,
+    Action, Button, ButtonStyle, CustomId, DiscordChannelId, DiscordError, DiscordPort,
+    DiscordUserId, MessageId, OutboundFile, OutboundMessage,
 };
 use swap_files::{BlobStore, StoreError, sha256_hex};
 use thiserror::Error;
@@ -60,7 +61,28 @@ pub enum PendingDelivery {
         key: String,
         content: String,
     },
+    /// A reminder or a deadline prompt. It carries a Leave button (D-051).
+    /// New variants go at the end: the payload encodes the variant index.
+    Prompt {
+        user_id: String,
+        event_id: String,
+        content: String,
+    },
+    /// The one restore DM to a person who left (D-051). It carries Confirm
+    /// and Decline buttons. It is the only DM that a leaver can get.
+    Restore {
+        user_id: String,
+        event_id: String,
+        issued_at: i64,
+    },
 }
+
+/// The text of the restore DM. It names no other participant.
+pub const RESTORE_TEXT: &str = "The host asks you to return to the event. Press Confirm to take planned turns again from the next round. Press Decline to stay out. If you do nothing, you stay out of the event.";
+
+/// A host alert key with this prefix is a notice. A notice needs no open host
+/// decision, so the worker always sends it.
+pub(crate) const NOTICE_PREFIX: &str = "notice:";
 
 impl PendingDelivery {
     pub fn from_effect(effect: &Effect) -> Self {
@@ -108,6 +130,15 @@ impl PendingDelivery {
                 key: key.clone(),
                 content: content.clone(),
             },
+            Effect::Prompt {
+                user_id,
+                event_id,
+                content,
+            } => Self::Prompt {
+                user_id: user_id.clone(),
+                event_id: event_id.clone(),
+                content: content.clone(),
+            },
         }
     }
 
@@ -116,7 +147,9 @@ impl PendingDelivery {
             Self::Dm { user_id, .. }
             | Self::Offer { user_id, .. }
             | Self::File { user_id, .. }
-            | Self::Pack { user_id, .. } => Some(user_id),
+            | Self::Pack { user_id, .. }
+            | Self::Prompt { user_id, .. }
+            | Self::Restore { user_id, .. } => Some(user_id),
             Self::Channel { .. } | Self::HostAlert { .. } => None,
         }
     }
@@ -129,6 +162,8 @@ impl PendingDelivery {
             Self::Pack { .. } => "pack",
             Self::Channel { .. } => "channel",
             Self::HostAlert { .. } => "host_alert",
+            Self::Prompt { .. } => "prompt",
+            Self::Restore { .. } => "restore",
         }
     }
 
@@ -161,6 +196,14 @@ impl PendingDelivery {
             Self::HostAlert { key, content } => {
                 format!("host_alert:{key}:{now}:{}", sha256_hex(content.as_bytes()))
             }
+            Self::Prompt {
+                user_id, content, ..
+            } => format!("prompt:{user_id}:{now}:{}", sha256_hex(content.as_bytes())),
+            Self::Restore {
+                user_id,
+                event_id,
+                issued_at,
+            } => format!("restore:{event_id}:{user_id}:{issued_at}"),
         }
     }
 
@@ -222,6 +265,11 @@ pub(crate) fn enqueue_pending(
     delivery: &PendingDelivery,
     now: i64,
 ) -> Result<bool, DeliveryError> {
+    if blocked_for_leaver(conn, event_id, delivery)? {
+        // D-051: the bot sends no DM to a person who left. Only the restore
+        // DM can reach a leaver.
+        return Ok(false);
+    }
     let payload = delivery.encode()?;
     let id = format!("{event_id}:{}", delivery.dedupe_key(now));
     Ok(DeliveryRepo::enqueue(
@@ -233,6 +281,53 @@ pub(crate) fn enqueue_pending(
         &payload,
         now,
     )?)
+}
+
+/// True when the delivery goes to a person who left this event and is not
+/// the restore DM.
+fn blocked_for_leaver(
+    conn: &Connection,
+    event_id: &str,
+    delivery: &PendingDelivery,
+) -> Result<bool, DeliveryError> {
+    if matches!(delivery, PendingDelivery::Restore { .. }) {
+        return Ok(false);
+    }
+    let Some(user_id) = delivery.recipient_id() else {
+        return Ok(false);
+    };
+    Ok(ParticipantRepo::get(conn, event_id, user_id)?
+        .is_some_and(|participant| participant.membership == Membership::Left))
+}
+
+/// The Leave button that goes on every DM with a file or a prompt (D-051).
+pub(crate) fn leave_button(event_id: &str) -> Vec<Button> {
+    CustomId::new(event_id, Action::Leave, None)
+        .map(|custom_id| {
+            vec![Button {
+                custom_id: custom_id.to_string(),
+                label: "Leave event".to_string(),
+                style: ButtonStyle::Secondary,
+            }]
+        })
+        .unwrap_or_default()
+}
+
+fn restore_buttons(event_id: &str) -> Vec<Button> {
+    let mut buttons = Vec::new();
+    for (action, label, style) in [
+        (Action::ConfirmRestore, "Confirm", ButtonStyle::Primary),
+        (Action::DeclineRestore, "Decline", ButtonStyle::Secondary),
+    ] {
+        if let Ok(custom_id) = CustomId::new(event_id, action, None) {
+            buttons.push(Button {
+                custom_id: custom_id.to_string(),
+                label: label.to_string(),
+                style,
+            });
+        }
+    }
+    buttons
 }
 
 /// Production dispatcher. The database sits behind a mutex, so the future is
@@ -315,6 +410,7 @@ impl DeliveryWorker {
                     .send_file_to_channel(
                         &thread,
                         OutboundFile {
+                            buttons: Vec::new(),
                             filename: filename.clone(),
                             bytes,
                             caption: caption.clone(),
@@ -335,6 +431,7 @@ impl DeliveryWorker {
                     .send_file_to_channel(
                         &thread,
                         OutboundFile {
+                            buttons: Vec::new(),
                             filename: filename.clone(),
                             bytes,
                             caption: caption.clone(),
@@ -344,12 +441,20 @@ impl DeliveryWorker {
                     .map_err(|error| DeliveryError::Transport(error.to_string()))?;
                 return Ok(true);
             }
+            PendingDelivery::Prompt { content, .. } => content.clone(),
+            PendingDelivery::Restore { .. } => RESTORE_TEXT.to_string(),
             PendingDelivery::Channel { .. } | PendingDelivery::HostAlert { .. } => {
                 return Ok(false);
             }
         };
         discord
-            .send_channel_message(&thread, OutboundMessage { content })
+            .send_channel_message(
+                &thread,
+                OutboundMessage {
+                    content,
+                    buttons: Vec::new(),
+                },
+            )
             .await
             .map_err(|error| DeliveryError::Transport(error.to_string()))?;
         Ok(true)
@@ -389,9 +494,11 @@ impl DeliveryWorker {
             };
             let result = match &delivery {
                 PendingDelivery::HostAlert { key, content } => {
-                    let open = {
+                    let open = if key.starts_with(NOTICE_PREFIX) {
+                        Some(())
+                    } else {
                         let db = db_guard(self);
-                        HostDecisionRepo::open_for_key(db.conn(), &row.event_id, key)?
+                        HostDecisionRepo::open_for_key(db.conn(), &row.event_id, key)?.map(|_| ())
                     };
                     if open.is_none() {
                         let db = db_guard(self);
@@ -413,7 +520,21 @@ impl DeliveryWorker {
                     }
                     self.send_host_alert(discord, content).await.map(|()| None)
                 }
-                _ => deliver(&self.store, discord, &delivery).await,
+                _ => {
+                    let stopped = {
+                        let db = db_guard(self);
+                        if blocked_for_leaver(db.conn(), &row.event_id, &delivery)? {
+                            cancel_for_leaver(db.conn(), &row, now)?;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if stopped {
+                        continue;
+                    }
+                    deliver(&self.store, discord, &row.event_id, &delivery).await
+                }
             };
             if matches!(&delivery, PendingDelivery::HostAlert { .. }) {
                 match result {
@@ -623,6 +744,7 @@ impl DeliveryWorker {
             .send_channel_message(
                 &thread,
                 OutboundMessage {
+                    buttons: Vec::new(),
                     content: content.to_string(),
                 },
             )
@@ -662,7 +784,11 @@ pub async fn dispatch_pending(
                 continue;
             }
         };
-        match deliver(store, discord, &delivery).await {
+        if blocked_for_leaver(db.conn(), &row.event_id, &delivery)? {
+            cancel_for_leaver(db.conn(), &row, now)?;
+            continue;
+        }
+        match deliver(store, discord, &row.event_id, &delivery).await {
             Ok(_) => {
                 DeliveryRepo::mark_sent(db.conn(), &row.id, now)?;
                 report.sent += 1;
@@ -683,6 +809,7 @@ pub async fn dispatch_pending(
 async fn deliver(
     store: &BlobStore,
     discord: &dyn DiscordPort,
+    event_id: &str,
     delivery: &PendingDelivery,
 ) -> Result<Option<MessageId>, DiscordError> {
     match delivery {
@@ -690,6 +817,7 @@ async fn deliver(
             .send_dm(
                 &DiscordUserId::new(user_id.clone()),
                 OutboundMessage {
+                    buttons: Vec::new(),
                     content: content.clone(),
                 },
             )
@@ -709,7 +837,10 @@ async fn deliver(
             discord
                 .send_dm(
                     &DiscordUserId::new(user_id.clone()),
-                    OutboundMessage { content },
+                    OutboundMessage {
+                        content,
+                        buttons: leave_button(event_id),
+                    },
                 )
                 .await
                 .map(Some)
@@ -728,6 +859,7 @@ async fn deliver(
                 .send_file(
                     &DiscordUserId::new(user_id.clone()),
                     OutboundFile {
+                        buttons: leave_button(event_id),
                         filename: filename.clone(),
                         bytes,
                         caption: caption.clone(),
@@ -749,6 +881,7 @@ async fn deliver(
                 .send_file(
                     &DiscordUserId::new(user_id.clone()),
                     OutboundFile {
+                        buttons: leave_button(event_id),
                         filename: filename.clone(),
                         bytes,
                         caption: caption.clone(),
@@ -764,7 +897,34 @@ async fn deliver(
             .send_channel_message(
                 &DiscordChannelId::new(channel_id.clone()),
                 OutboundMessage {
+                    buttons: Vec::new(),
                     content: content.clone(),
+                },
+            )
+            .await
+            .map(Some),
+        PendingDelivery::Prompt {
+            user_id,
+            event_id,
+            content,
+        } => discord
+            .send_dm(
+                &DiscordUserId::new(user_id.clone()),
+                OutboundMessage {
+                    content: content.clone(),
+                    buttons: leave_button(event_id),
+                },
+            )
+            .await
+            .map(Some),
+        PendingDelivery::Restore {
+            user_id, event_id, ..
+        } => discord
+            .send_dm(
+                &DiscordUserId::new(user_id.clone()),
+                OutboundMessage {
+                    content: RESTORE_TEXT.to_string(),
+                    buttons: restore_buttons(event_id),
                 },
             )
             .await
@@ -773,6 +933,30 @@ async fn deliver(
             "host alerts must use the delivery worker".to_string(),
         )),
     }
+}
+
+/// Cancel one row that a leave raced with. The audit keeps the reason.
+fn cancel_for_leaver(
+    conn: &Connection,
+    row: &DeliveryRecord,
+    now: i64,
+) -> Result<(), DeliveryError> {
+    let transaction =
+        Transaction::new_unchecked(conn, TransactionBehavior::Immediate).map_err(DbError::from)?;
+    if DeliveryRepo::cancel(&transaction, &row.id, now, "the recipient left the event")? {
+        AuditRepo::insert(
+            &transaction,
+            &row.event_id,
+            now,
+            "worker",
+            "Delivery cancelled",
+            None,
+            &serde_json::json!({ "kind": row.kind, "reason": "the recipient left the event" })
+                .to_string(),
+        )?;
+    }
+    transaction.commit().map_err(DbError::from)?;
+    Ok(())
 }
 
 fn db_guard(worker: &DeliveryWorker) -> std::sync::MutexGuard<'_, Db> {
@@ -787,7 +971,9 @@ fn user_of(delivery: &PendingDelivery) -> Option<&str> {
         PendingDelivery::Dm { user_id, .. }
         | PendingDelivery::Offer { user_id, .. }
         | PendingDelivery::File { user_id, .. }
-        | PendingDelivery::Pack { user_id, .. } => Some(user_id),
+        | PendingDelivery::Pack { user_id, .. }
+        | PendingDelivery::Prompt { user_id, .. }
+        | PendingDelivery::Restore { user_id, .. } => Some(user_id),
         PendingDelivery::Channel { .. } | PendingDelivery::HostAlert { .. } => None,
     }
 }

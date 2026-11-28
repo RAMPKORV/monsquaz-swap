@@ -349,6 +349,194 @@ CREATE TABLE participant_availability (
 CREATE INDEX availability_by_window
     ON participant_availability(event_id, starts_at, ends_at);
 "#,
+    r#"
+-- Migration 011: database guards for the scheduling invariants (MSW-081).
+-- Migration 001 already keeps one active assignment per track and per person
+-- with partial unique indexes over 'offered', 'claimed', and 'overdue'.
+-- A seen pair now remembers the assignment that made it seen, so a retry of
+-- the same assignment is a no-op and a second assignment fails loudly.
+ALTER TABLE seen_pairs ADD COLUMN assignment_id TEXT;
+
+UPDATE seen_pairs SET assignment_id = (
+    SELECT a.id FROM assignments a
+    WHERE a.event_id = seen_pairs.event_id
+      AND a.track_code = seen_pairs.track_code
+      AND a.participant_id = seen_pairs.participant_id
+      AND (a.claimed_at IS NOT NULL
+           OR a.status IN ('claimed', 'overdue', 'submitted', 'skipped_after_claim'))
+    ORDER BY a.offered_at, a.id
+    LIMIT 1
+);
+
+CREATE TRIGGER assignments_no_own_track_insert
+BEFORE INSERT ON assignments
+WHEN EXISTS (
+    SELECT 1 FROM tracks
+    WHERE event_id = NEW.event_id AND code = NEW.track_code AND owner_id = NEW.participant_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'own track assignment refused');
+END;
+
+CREATE TRIGGER assignments_no_own_track_update
+BEFORE UPDATE OF participant_id, track_code ON assignments
+WHEN EXISTS (
+    SELECT 1 FROM tracks
+    WHERE event_id = NEW.event_id AND code = NEW.track_code AND owner_id = NEW.participant_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'own track assignment refused');
+END;
+
+CREATE TRIGGER plan_assignments_no_own_track_insert
+BEFORE INSERT ON plan_assignments
+WHEN EXISTS (
+    SELECT 1 FROM tracks
+    WHERE event_id = NEW.event_id AND code = NEW.track_code AND owner_id = NEW.participant_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'own track plan row refused');
+END;
+
+CREATE TRIGGER plan_assignments_no_own_track_update
+BEFORE UPDATE OF participant_id, track_code ON plan_assignments
+WHEN EXISTS (
+    SELECT 1 FROM tracks
+    WHERE event_id = NEW.event_id AND code = NEW.track_code AND owner_id = NEW.participant_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'own track plan row refused');
+END;
+
+-- A fill-in chain offers one stranded classic slot to one person at a time
+-- (MSW-083). The row survives a restart. The round is the exchange index.
+CREATE TABLE fill_in_chains (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    track_code TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    flow TEXT NOT NULL CHECK (flow IN ('auto_chain', 'host_list')),
+    host_list_json TEXT NOT NULL DEFAULT '[]',
+    tried_json TEXT NOT NULL DEFAULT '[]',
+    offers INTEGER NOT NULL DEFAULT 0,
+    current_assignment_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('active', 'filled', 'exhausted', 'cancelled')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (event_id, track_code) REFERENCES tracks(event_id, code) ON DELETE CASCADE
+) STRICT;
+
+CREATE UNIQUE INDEX one_active_chain_per_slot
+    ON fill_in_chains(event_id, track_code, round) WHERE status = 'active';
+"#,
+    r#"
+-- Migration 012: the host can restore a participant who left (D-051).
+-- The bot asks the person once. Only a confirm makes the person active again.
+-- A cancelled delivery is a row that the leave stopped before the send.
+CREATE TABLE restore_requests (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
+    answered_at INTEGER,
+    PRIMARY KEY (event_id, user_id, requested_at)
+) STRICT;
+
+CREATE UNIQUE INDEX one_pending_restore
+    ON restore_requests(event_id, user_id) WHERE status = 'pending';
+"#,
+    r#"
+-- Migration 013: separate claim and edit deadlines for fill-ins (D-069), a
+-- database guard for the seen pair (MSW-082), and restore requests that can be
+-- asked again in the same second (MSW-109).
+ALTER TABLE assignments ADD COLUMN claim_deadline_at INTEGER;
+
+UPDATE assignments SET claim_deadline_at = due_at;
+
+-- A seen pair is never assigned again. A retry of the same assignment id is
+-- allowed: the pair points at that assignment, or the engine rolls the whole
+-- transaction back.
+CREATE TRIGGER assignments_no_seen_pair_insert
+BEFORE INSERT ON assignments
+WHEN EXISTS (
+    SELECT 1 FROM seen_pairs
+    WHERE event_id = NEW.event_id
+      AND track_code = NEW.track_code
+      AND participant_id = NEW.participant_id
+      AND (assignment_id IS NULL OR assignment_id <> NEW.id)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'seen pair assignment refused');
+END;
+
+CREATE TRIGGER assignments_no_seen_pair_update
+BEFORE UPDATE OF participant_id, track_code, status ON assignments
+WHEN EXISTS (
+    SELECT 1 FROM seen_pairs
+    WHERE event_id = NEW.event_id
+      AND track_code = NEW.track_code
+      AND participant_id = NEW.participant_id
+      AND (assignment_id IS NULL OR assignment_id <> NEW.id)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'seen pair assignment refused');
+END;
+
+-- The reverse direction is scoped to a new active or claimable assignment.
+-- Historical skipped-before-claim, expired, and submitted rows may legally
+-- share a pair with a later seen row.
+CREATE TRIGGER seen_pairs_no_active_assignment_insert
+BEFORE INSERT ON seen_pairs
+WHEN EXISTS (
+    SELECT 1 FROM assignments
+    WHERE event_id = NEW.event_id
+      AND track_code = NEW.track_code
+      AND participant_id = NEW.participant_id
+      AND status IN ('offered', 'claimed', 'overdue')
+      AND (NEW.assignment_id IS NULL OR id <> NEW.assignment_id)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'seen pair for an active assignment refused');
+END;
+
+CREATE TRIGGER seen_pairs_no_active_assignment_update
+BEFORE UPDATE OF participant_id, track_code, assignment_id ON seen_pairs
+WHEN EXISTS (
+    SELECT 1 FROM assignments
+    WHERE event_id = NEW.event_id
+      AND track_code = NEW.track_code
+      AND participant_id = NEW.participant_id
+      AND status IN ('offered', 'claimed', 'overdue')
+      AND (NEW.assignment_id IS NULL OR id <> NEW.assignment_id)
+)
+BEGIN
+    SELECT RAISE(ABORT, 'seen pair for an active assignment refused');
+END;
+
+-- The old primary key (event, user, requested_at) refused a second request in
+-- the same second. The row id is the key now; one pending request per person
+-- remains.
+CREATE TABLE restore_requests_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
+    answered_at INTEGER
+) STRICT;
+
+INSERT INTO restore_requests_v2 (event_id, user_id, requested_at, status, answered_at)
+SELECT event_id, user_id, requested_at, status, answered_at FROM restore_requests;
+
+DROP TABLE restore_requests;
+ALTER TABLE restore_requests_v2 RENAME TO restore_requests;
+
+CREATE UNIQUE INDEX one_pending_restore
+    ON restore_requests(event_id, user_id) WHERE status = 'pending';
+CREATE INDEX restore_requests_by_user ON restore_requests(event_id, user_id);
+"#,
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -12,17 +12,17 @@ use tauri::{AppHandle, Manager, State};
 use swap_core::{EventState, Membership, Role, RoundStatus};
 use swap_db::{
     AssignmentRepo, AuditRepo, AvailabilityRepo, Db, DeadlineRepo, EventRecord, EventRepo,
-    LateSeedRepo, MetaRepo, PackRepo, ParticipantRepo, PlanRepo, RoundRepo, TrackRepo,
+    LateSeedRepo, MetaRepo, PackRepo, ParticipantRepo, PlanRepo, RestoreRepo, RoundRepo, TrackRepo,
 };
 use swap_engine::{
-    CreditEntry, EngineError, EventSettings, Mode, TrackCredits, accept_late_seed,
-    add_availability, add_track_comment, assign_fill_in, async_coverage, create_event,
-    dispatch_async_wave, edit_plan_assignment, extend_seed_deadline, fill_in_candidates,
-    generate_schedule, lock_roster, move_round_deadline, next_async_release, open_round,
-    open_seed_round, pending_late_seeds, plan_edit_candidates, redact_track_comment,
-    reject_late_seed, remove_availability, reopen_seed_round, repair_group_schedule,
-    reveal_package, reveal_with_channel, reveal_zip, set_track_title, start_async_event,
-    start_event_with_channel, upload_pack, verify_commitment,
+    CreditEntry, EngineError, EventSettings, FillInFlow, LeaveActor, Mode, TrackCredits,
+    accept_late_seed, add_availability, add_track_comment, assign_fill_in, async_coverage,
+    create_event, dispatch_async_wave, edit_plan_assignment, extend_seed_deadline,
+    fill_in_candidates, generate_schedule, leave_event, lock_roster, move_round_deadline,
+    next_async_release, open_round, open_seed_round, pending_late_seeds, plan_edit_candidates,
+    redact_track_comment, reject_late_seed, remove_availability, reopen_seed_round,
+    repair_group_schedule, request_restore, reveal_package, reveal_with_channel, reveal_zip,
+    set_track_title, start_async_event, start_event_with_channel, upload_pack, verify_commitment,
 };
 
 #[cfg(feature = "e2e")]
@@ -104,6 +104,9 @@ pub struct EventSummaryDto {
     pack_id: Option<String>,
     open_schedule: bool,
     handoff_policy: String,
+    fill_in_flow: String,
+    fill_in_window_hours: i64,
+    fill_in_claim_window_hours: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -276,6 +279,9 @@ struct DecisionDto {
     deadline: Option<String>,
     new_deadline: Option<String>,
     extensions_used: Option<i64>,
+    /// The stranded track and its round, for a fill-in decision.
+    track_code: Option<String>,
+    round_no: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -435,6 +441,12 @@ pub struct EventDraftDto {
     async_claims_per_participant: Option<u32>,
     async_release_time: String,
     async_late_seeds: bool,
+    #[serde(default)]
+    fill_in_window_hours: Option<i64>,
+    #[serde(default)]
+    fill_in_claim_window_hours: Option<i64>,
+    #[serde(default)]
+    fill_in_flow: Option<FillInFlow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -475,6 +487,9 @@ struct PersonRowDto {
     joined: String,
     delivery_risk: bool,
     away: Vec<AwayDto>,
+    /// The bot asked a person who left to come back, and the person has not
+    /// answered yet (D-051).
+    restore_pending: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -621,6 +636,9 @@ fn default_draft() -> EventDraftDto {
         async_claims_per_participant: None,
         async_release_time: "18:00".to_string(),
         async_late_seeds: false,
+        fill_in_window_hours: Some(24),
+        fill_in_claim_window_hours: Some(6),
+        fill_in_flow: Some(FillInFlow::HostAppoints),
     }
 }
 
@@ -671,6 +689,9 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
             .clone()
             .unwrap_or_else(|| "18:00".to_string()),
         async_late_seeds: settings.async_late_seeds.unwrap_or(false),
+        fill_in_window_hours: Some(settings.fill_in_window_secs / 3600),
+        fill_in_claim_window_hours: Some(settings.fill_in_claim_window_secs / 3600),
+        fill_in_flow: Some(settings.fill_in_flow),
     }
 }
 
@@ -835,6 +856,14 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
             .handoff_policy
             .clone()
             .unwrap_or_else(|| "Strict".to_string()),
+        fill_in_flow: match settings.fill_in_flow {
+            swap_engine::FillInFlow::HostAppoints => "host_appoints",
+            swap_engine::FillInFlow::AutoChain => "auto_chain",
+            swap_engine::FillInFlow::HostList => "host_list",
+        }
+        .to_string(),
+        fill_in_window_hours: settings.fill_in_window_secs / 3600,
+        fill_in_claim_window_hours: settings.fill_in_claim_window_secs / 3600,
     })
 }
 
@@ -907,6 +936,47 @@ fn set_participant_paused(db: &Db, user_id: &str, paused: bool) -> Result<People
     people_data(db)
 }
 
+/// D-051: the host marks a person as left. The UI asks twice first.
+#[tauri::command]
+pub fn host_mark_participant_left(
+    app: AppHandle,
+    user_id: String,
+) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    let people = mark_participant_left(&db, &user_id)?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(people)
+}
+
+fn mark_participant_left(db: &Db, user_id: &str) -> Result<PeopleDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    leave_event(db, &event.id, user_id, LeaveActor::Host, now_secs()).map_err(
+        |error| match error {
+            EngineError::ParticipantLeft => "the participant has already left".to_string(),
+            other => other.to_string(),
+        },
+    )?;
+    people_data(db)
+}
+
+/// D-051: the host asks a person who left to come back. The bot sends one DM
+/// with Confirm and Decline. The UI asks twice first.
+#[tauri::command]
+pub fn host_restore_participant(app: AppHandle, user_id: String) -> Result<PeopleDataDto, String> {
+    let db = open_db(&app)?;
+    let people = restore_participant(&db, &user_id)?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(people)
+}
+
+fn restore_participant(db: &Db, user_id: &str) -> Result<PeopleDataDto, String> {
+    let event = current_event(db)?.ok_or_else(|| "there is no event".to_string())?;
+    request_restore(db, &event.id, user_id, now_secs()).map_err(|error| error.to_string())?;
+    people_data(db)
+}
+
 #[tauri::command]
 pub fn host_add_availability(
     app: AppHandle,
@@ -957,9 +1027,17 @@ fn people_data(db: &Db) -> Result<PeopleDataDto, String> {
         ParticipantRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let availability = AvailabilityRepo::list_for_event(db.conn(), &event.id)
         .map_err(|error| error.to_string())?;
+    let restores: Vec<_> = RestoreRepo::list_pending(db.conn(), &event.id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|request| now_secs() <= request.requested_at + swap_engine::RESTORE_REQUEST_SECS)
+        .collect();
     let rows = participants
         .into_iter()
         .map(|participant| PersonRowDto {
+            restore_pending: restores
+                .iter()
+                .any(|restore| restore.user_id == participant.user_id),
             away: availability
                 .iter()
                 .filter(|range| range.participant_id == participant.user_id)
@@ -1463,6 +1541,9 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         async_late_seeds: Some(draft.async_late_seeds),
         quiet_hours_start: draft.quiet_hours_start,
         quiet_hours_end: draft.quiet_hours_end,
+        fill_in_window_secs: draft.fill_in_window_hours.unwrap_or(24) * 3600,
+        fill_in_claim_window_secs: draft.fill_in_claim_window_hours.unwrap_or(6) * 3600,
+        fill_in_flow: draft.fill_in_flow.unwrap_or_default(),
     };
     settings.validate().map_err(|error| error.to_string())?;
     let now = now_secs();
@@ -1583,6 +1664,25 @@ pub struct FillInCandidateDto {
     display_name: String,
     seen: usize,
     cap: u32,
+    /// "volunteer" or "extra_turn" (D-050).
+    tier: &'static str,
+    edits: usize,
+}
+
+impl From<swap_engine::FillInCandidate> for FillInCandidateDto {
+    fn from(candidate: swap_engine::FillInCandidate) -> Self {
+        Self {
+            tier: match candidate.tier {
+                swap_engine::FillInTier::Volunteer => "volunteer",
+                swap_engine::FillInTier::ExtraTurn => "extra_turn",
+            },
+            edits: candidate.edits,
+            participant_id: candidate.participant_id,
+            display_name: candidate.display_name,
+            seen: candidate.seen,
+            cap: candidate.cap,
+        }
+    }
 }
 
 #[tauri::command]
@@ -1596,12 +1696,7 @@ pub fn host_fill_in_candidates(
     Ok(fill_in_candidates(&db, &event.id, &track_code, round_no)
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|candidate| FillInCandidateDto {
-            participant_id: candidate.participant_id,
-            display_name: candidate.display_name,
-            seen: candidate.seen,
-            cap: candidate.cap,
-        })
+        .map(FillInCandidateDto::from)
         .collect())
 }
 
@@ -1611,6 +1706,7 @@ pub fn host_assign_fill_in(
     track_code: String,
     round_no: u32,
     participant_id: String,
+    due_at: Option<i64>,
 ) -> Result<(), String> {
     let db = open_db(&app)?;
     let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
@@ -1620,10 +1716,44 @@ pub fn host_assign_fill_in(
         &track_code,
         round_no,
         &participant_id,
+        due_at,
         now_secs(),
     )
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillInListDto {
+    offered_to: Option<String>,
+    status: String,
+    decision_opened: bool,
+}
+
+#[tauri::command]
+pub fn host_start_fill_in_list(
+    app: AppHandle,
+    track_code: String,
+    round_no: u32,
+    participant_ids: Vec<String>,
+) -> Result<FillInListDto, String> {
+    let db = open_db(&app)?;
+    let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
+    let outcome = swap_engine::start_fill_in_list(
+        &db,
+        &event.id,
+        &track_code,
+        round_no,
+        &participant_ids,
+        now_secs(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(FillInListDto {
+        offered_to: outcome.offered_to,
+        status: outcome.status,
+        decision_opened: outcome.decision_opened,
+    })
 }
 
 #[tauri::command]
@@ -2447,6 +2577,8 @@ fn mission_control_with_health(
             deadline: None,
             new_deadline: None,
             extensions_used: None,
+            track_code: None,
+            round_no: None,
         });
     }
     if let Ok(open) = swap_db::HostDecisionRepo::list_open(db.conn(), &event.id) {
@@ -2480,6 +2612,30 @@ fn mission_control_with_health(
                         "Track {track_code} keeps its holder until the host decides. The deadline does not move yet."
                     ),
                 )
+            } else if decision.kind == "fill_in" {
+                let round_no = assignment
+                    .map(|assignment| assignment.round + 2)
+                    .unwrap_or(2);
+                let next: Vec<String> = fill_in_candidates(db, &event.id, &track_code, round_no)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .take(3)
+                    .map(|candidate| match candidate.tier {
+                        swap_engine::FillInTier::Volunteer => candidate.display_name,
+                        swap_engine::FillInTier::ExtraTurn => {
+                            format!("{} (extra turn)", candidate.display_name)
+                        }
+                    })
+                    .collect();
+                (
+                    "Fill-in",
+                    format!("Track {track_code} needs a fill-in"),
+                    if next.is_empty() {
+                        "No person can take the track now. If you open the next round, the track passes unchanged.".to_string()
+                    } else {
+                        format!("Next eligible: {}.", next.join(", "))
+                    },
+                )
             } else {
                 (
                     "Deadline",
@@ -2510,6 +2666,8 @@ fn mission_control_with_health(
                 deadline,
                 new_deadline,
                 extensions_used,
+                track_code: assignment.map(|assignment| assignment.track_code.clone()),
+                round_no: assignment.map(|assignment| assignment.round + 2),
             });
         }
     }
@@ -2553,6 +2711,28 @@ fn mission_control_with_health(
             value: settings.timezone.clone(),
         },
     ];
+    if let Ok(status) = swap_engine::event_status(db, &event.id) {
+        let participants =
+            ParticipantRepo::list_for_event(db.conn(), &event.id).unwrap_or_default();
+        for waiting in status.waiting_fill_ins {
+            let name = participants
+                .iter()
+                .find(|participant| participant.user_id == waiting.participant_id)
+                .map(|participant| participant.display_name.clone())
+                .unwrap_or_else(|| "A fill-in".to_string());
+            facts.push(EventFactDto {
+                label: "Next round waits on".to_string(),
+                value: format!(
+                    "Track {} with {name}, due {}",
+                    waiting.track_code,
+                    waiting
+                        .due_at
+                        .map(|at| format_local_time(at, &settings.timezone))
+                        .unwrap_or_else(|| "with the round".to_string())
+                ),
+            });
+        }
+    }
     if settings_json.mode == Mode::Async {
         facts.retain(|fact| fact.label != "Seed round" && fact.label != "Exchange round");
         facts.insert(
@@ -3048,6 +3228,41 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    /// D-051: the host marks a person as left and later asks them back.
+    #[test]
+    fn the_host_marks_a_person_as_left_and_asks_them_back() {
+        let (db, _directory) = test_db("leave-and-restore");
+        let draft = EventDraftDto {
+            name: "Leave Rotation".to_string(),
+            ..default_draft()
+        };
+        let created = create_host_event(&db, draft).unwrap();
+        seed_person(&db, &created.id, "u-alice", "Alice");
+        seed_person(&db, &created.id, "u-bob", "Bob");
+
+        let left = mark_participant_left(&db, "u-alice").unwrap();
+        assert_eq!(left.rows[0].status, "Left");
+        assert!(!left.rows[0].restore_pending);
+        assert!(mark_participant_left(&db, "u-alice").is_err());
+
+        let asked = restore_participant(&db, "u-alice").unwrap();
+        assert_eq!(asked.rows[0].status, "Left");
+        assert!(asked.rows[0].restore_pending);
+        assert!(restore_participant(&db, "u-bob").is_err());
+
+        let entries = audit_log(&db, &SettingsDto::default()).unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.action == "Restore requested")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.action == "Participant left")
+        );
     }
 
     #[test]

@@ -82,6 +82,9 @@ export type EventSummary = {
   packId: string | null;
   openSchedule: boolean;
   handoffPolicy: "Strict" | "Flexible";
+  fillInFlow: "host_appoints" | "auto_chain" | "host_list";
+  fillInWindowHours: number;
+  fillInClaimWindowHours: number;
 };
 
 export type PackInfo = {
@@ -110,6 +113,9 @@ export type FillInCandidate = {
   displayName: string;
   seen: number;
   cap: number;
+  /** "volunteer" is a dedicated fill-in; "extra_turn" is a seeded participant (D-050). */
+  tier: "volunteer" | "extra_turn";
+  edits: number;
 };
 
 export type BotHealth = {
@@ -136,7 +142,8 @@ export type Decision = {
     | "Offer"
     | "Schedule"
     | "Delivery"
-    | "Seeds";
+    | "Seeds"
+    | "Fill-in";
   title: string;
   detail: string;
   due: string;
@@ -147,6 +154,8 @@ export type Decision = {
   deadline?: string;
   newDeadline?: string;
   extensionsUsed?: number;
+  trackCode?: string;
+  roundNo?: number;
 };
 
 export type ActivityEntry = {
@@ -272,6 +281,9 @@ export type EventDraft = {
   asyncClaimsPerParticipant: number | null;
   asyncReleaseTime: string;
   asyncLateSeeds: boolean;
+  fillInWindowHours: number;
+  fillInClaimWindowHours: number;
+  fillInFlow: "host_appoints" | "auto_chain" | "host_list";
 };
 
 export type SetupData = {
@@ -292,6 +304,8 @@ export type PersonRow = {
   joined: string;
   deliveryRisk: boolean;
   away: AwayRange[];
+  /** The bot asked a participant who left to come back (D-051). */
+  restorePending?: boolean;
 };
 
 export type AwayRange = {

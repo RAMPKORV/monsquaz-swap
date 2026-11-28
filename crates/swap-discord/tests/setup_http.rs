@@ -6,8 +6,8 @@
 //! or a live Discord connection.
 
 use swap_discord::{
-    DiscordChannelId, DiscordPort, DiscordUserId, HttpDiscordPort, OutboundFile, OutboundMessage,
-    SetupDirectory, TwilightSetup,
+    Button, ButtonStyle, DiscordChannelId, DiscordPort, DiscordUserId, HttpDiscordPort,
+    InteractionRef, InteractionReply, OutboundFile, OutboundMessage, SetupDirectory, TwilightSetup,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -157,6 +157,7 @@ async fn the_http_port_sends_a_dm_through_the_mock() {
         .send_dm(
             &DiscordUserId::new("42"),
             OutboundMessage {
+                buttons: Vec::new(),
                 content: "Monsquaz Swap test message.".to_string(),
             },
         )
@@ -185,6 +186,7 @@ async fn the_http_port_sends_a_file_through_the_mock() {
         .send_file(
             &DiscordUserId::new("42"),
             OutboundFile {
+                buttons: Vec::new(),
                 filename: "S7F3A.it".to_string(),
                 bytes: vec![1, 2, 3],
                 caption: "Track S7F3A. Your turn.".to_string(),
@@ -257,6 +259,7 @@ async fn the_http_port_creates_a_private_thread_and_sends_a_file() {
         .send_file_to_channel(
             &thread,
             OutboundFile {
+                buttons: Vec::new(),
                 filename: "S7F3A.it".to_string(),
                 bytes: vec![1, 2, 3],
                 caption: "Track S7F3A. Your turn.".to_string(),
@@ -275,4 +278,89 @@ async fn the_http_port_creates_a_private_thread_and_sends_a_file() {
         "/api/v10/channels/101/thread-members/42"
     );
     assert_eq!(requests[2].url.path(), "/api/v10/channels/101/messages");
+}
+
+#[tokio::test]
+async fn a_dm_and_a_file_carry_buttons_as_one_action_row() {
+    install_crypto();
+    let server = MockServer::start().await;
+    mount_json(&server, "POST", "/api/v10/users/@me/channels", DM_CHANNEL).await;
+    mount_json(&server, "POST", "/api/v10/channels/100/messages", MESSAGE).await;
+
+    let token = "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc";
+    let port = HttpDiscordPort::with_proxy(token, proxy_host(&server)).unwrap();
+    let leave = Button {
+        custom_id: "swap:evt-1:leave:".to_string(),
+        label: "Leave event".to_string(),
+        style: ButtonStyle::Secondary,
+    };
+    port.send_dm(
+        &DiscordUserId::new("42"),
+        OutboundMessage {
+            content: "Track S7F3A is available.".to_string(),
+            buttons: vec![leave.clone()],
+        },
+    )
+    .await
+    .unwrap();
+    port.send_file(
+        &DiscordUserId::new("42"),
+        OutboundFile {
+            filename: "S7F3A.it".to_string(),
+            bytes: vec![1, 2, 3],
+            caption: "Track S7F3A. Your turn.".to_string(),
+            buttons: vec![leave],
+        },
+    )
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    let message: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    let row = &message["components"][0];
+    assert_eq!(row["type"], 1);
+    assert_eq!(row["components"][0]["type"], 2);
+    assert_eq!(row["components"][0]["style"], 2);
+    assert_eq!(row["components"][0]["custom_id"], "swap:evt-1:leave:");
+    assert_eq!(row["components"][0]["label"], "Leave event");
+    let file_body = String::from_utf8_lossy(&requests[3].body);
+    assert!(file_body.contains("swap:evt-1:leave:"));
+    assert!(file_body.contains("S7F3A.it"));
+}
+
+#[tokio::test]
+async fn an_ephemeral_reply_uses_the_interaction_callback() {
+    install_crypto();
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v10/interactions/777/secret-token/callback"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let token = "aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbb.ccccccccccccccccccccccccc";
+    let port = HttpDiscordPort::with_proxy(token, proxy_host(&server)).unwrap();
+    port.reply_ephemeral(
+        &InteractionRef::new("777", "secret-token"),
+        InteractionReply {
+            content: "Leave the event? Confirm below.".to_string(),
+            buttons: vec![Button {
+                custom_id: "swap:evt-1:leave_ok:1700000000".to_string(),
+                label: "Confirm".to_string(),
+                style: ButtonStyle::Danger,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["type"], 4);
+    assert_eq!(body["data"]["flags"], 64);
+    assert_eq!(body["data"]["content"], "Leave the event? Confirm below.");
+    assert_eq!(body["data"]["components"][0]["components"][0]["style"], 4);
+    assert_eq!(
+        body["data"]["components"][0]["components"][0]["custom_id"],
+        "swap:evt-1:leave_ok:1700000000"
+    );
 }

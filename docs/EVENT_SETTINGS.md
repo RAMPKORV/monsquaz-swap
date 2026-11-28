@@ -207,6 +207,57 @@ Rules:
 - Not built yet (MSW-084): strikes reset when the participant resumes, and an
   auto-pause alerts the host.
 
+### Fill-ins (classic)
+
+| Setting | Default | Options | Lock at commit |
+|---|---|---|---|
+| `fill_in_flow` | `host_appoints` | `host_appoints`; `auto_chain`; `host_list` | No |
+| `fill_in_window` | 24 hours | 1 hour to 14 days | No |
+| `fill_in_claim_window` | 6 hours | 1 to 48 hours | No |
+| Fill-in due time | Later of the round deadline and now plus `fill_in_window` | The host can set a future UTC time for each appointment, at most 14 days away | No |
+
+Rules:
+
+- A slot needs a fill-in after a pre-claim skip or a skip after a claim. It
+  also needs one after an unclaimed offer at the deadline, or after a turn
+  that the host marks missed.
+- Tier 1 is a dedicated fill-in: a volunteer, or a signup without a seed at
+  roster lock. The handoff cap applies to a dedicated fill-in.
+- Tier 2 is a seeded participant who submitted their own turn in the current
+  round. The current plan must not give that participant the track in any
+  round.
+- The app offers tier 2 only when no tier-1 person is eligible.
+- A tier-2 person can take at most one extra turn in one round. A pre-claim
+  skip does not count as an extra turn (D-063).
+- Both tiers need a ready, active person who has no active assignment, does
+  not own the track, and never saw the track.
+- A tier-2 turn is an extra turn. The extra turn does not count toward the
+  handoff cap of the participant. The reveal marks the turn as a fill-in.
+- The app ranks the people in one tier by fewest edits, then by a stable
+  hash of the event, the track, and the person.
+- `host_appoints`: the host selects one eligible person. A skip or an expiry
+  of that offer opens a host decision that lists the next eligible people.
+- `auto_chain`: the bot offers the slot to one ranked eligible person at a
+  time. The chain walks every eligible tier in rank order. Tier 1 comes first
+  and tier 2 comes next (D-064). The first claim wins. After 3 offers, the bot
+  stops and opens a host decision.
+- `host_list`: the bot opens a host decision. The host orders any number of
+  people in the order they choose. The bot offers the slot down the list in the
+  same way (D-070). The tier rule still applies: the bot offers tier-1 people
+  first, and the host order applies inside each tier.
+- Each chain or host-list offer gets `fill_in_claim_window` to claim. A claim
+  starts the edit window `fill_in_window` (D-069). A host appointment keeps
+  the due time that the host sets, even when it is before the round deadline.
+- The bot checks eligibility again before each offer. The bot never offers
+  the slot to a person who is not eligible.
+- The bot does not send a chain offer during the quiet hours of the person.
+  The chain waits and continues after the quiet hours.
+- A fill-in never moves a round. The next classic round cannot open while a
+  fill-in offer or turn is active. When the host opens the next round, a
+  waiting chain stops and the track passes unchanged.
+- The bot refuses a fill-in for a cell that is not stranded. A submitted turn
+  or an active holder blocks the appointment.
+
 ## 8. Deadlines, reminders, extensions
 
 | Setting | Default | Options | Lock at commit |
@@ -226,12 +277,12 @@ Rules:
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
-| Fill-in due time | max(round deadline, now + 24h) | Host-set due time. Decided, building in MSW-082 | No |
-| Fill-in flow | `host_appoints` | `host_appoints`; `auto_chain`; `host_list`. Decided, building in MSW-083 (D-064, D-070) | No |
-| Fill-in offer claim window | 6 hours | Event setting. The edit due time starts at claim. Decided, building in MSW-083 (D-069) | No |
+| Fill-in due time | The later of the round deadline and now plus `fill_in_window` | Host-set due time, at most 14 days away | No |
+| Fill-in flow | `host_appoints` | `host_appoints`; `auto_chain`; `host_list` (D-064, D-070) | No |
+| Fill-in offer claim window | 6 hours | 1–48 hours. The edit due time starts at claim (D-069) | No |
 
 A seeded participant can take at most one extra tier-2 fill-in turn in one
-round. There is no event-wide cap. Decided, building in MSW-080 (D-063).
+round. There is no event-wide cap (D-063).
 
 ## 10. Join, leave, rejoin
 
@@ -242,8 +293,8 @@ round. There is no event-wide cap. Decided, building in MSW-080 (D-063).
 | Late seed cutoff | Seed deadline | Seed deadline; host close | No |
 | Late seed integration | Host choice; if allowed in a capped event, extra quota + minimum editor quota | Extra quota + minimum; no late seeds; fill-in only | Yes |
 | Unseeded signup | Auto fill-in | Fill-in; waitlist; remove; spectator (not in v1) | Yes |
-| Leave | Allowed | Allowed; before lock only; host approval. Decided, building in MSW-109 | Yes |
-| Rejoin | Fill-in only | Fill-in; rejoin with replan; next event; host. Fill-in return: decided, building in MSW-109. Replan: decided, building in MSW-128 | Yes |
+| Leave | Allowed after one confirm; immediate (D-051) | Allowed after one confirm; before lock only; host approval | Yes |
+| Rejoin | Host restore with the person's consent, from the next round (D-051) | Host restore with consent; rejoin with replan (MSW-128); next event; host. The invitation expires after 7 days (D-068). | Yes |
 | Participant cap | None | None; cap; waitlist | No |
 
 ## 11. Comments, naming, reveal

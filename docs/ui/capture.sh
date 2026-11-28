@@ -113,6 +113,10 @@ shot mission-populated-light-1024 "view=mission&theme=light" 1024 700
 shot mission-populated-dark-zoom200 "view=mission" 640 400
 shot mission-fill-in-dark-1280 "view=mission&dialog=fillin" 1280 800
 shot mission-fill-in-dark-1024 "view=mission&dialog=fillin" 1024 700
+shot mission-fill-in-light-1280 "view=mission&dialog=fillin&theme=light" 1280 800
+shot mission-fill-in-list-dark-1280 "view=mission&dialog=fillin&fillinlist=1" 1280 800
+shot mission-fill-in-list-dark-1024 "view=mission&dialog=fillin&fillinlist=1" 1024 700
+shot mission-fill-in-list-light-1280 "view=mission&dialog=fillin&fillinlist=1&theme=light" 1280 800
 shot shell-command-palette-dark-1280 "view=mission&palette=1" 1280 800
 
 shot setup-first-run-dark-1280 "view=setup&state=empty" 1280 800
@@ -122,6 +126,8 @@ shot setup-error-dark-1280 "view=setup&state=error" 1280 800
 shot setup-long-dark-1280 "view=setup&state=long" 1280 800
 shot setup-populated-light-1280 "view=setup&theme=light" 1280 800
 shot setup-populated-dark-1024 "view=setup" 1024 700
+shot setup-populated-dark-1280x1200 "view=setup" 1280 1200
+shot setup-populated-dark-1024x1100 "view=setup" 1024 1100
 shot setup-review-dark-1280 "view=setup&step=review" 1280 800
 shot setup-async-review-dark-1280 "view=setup&step=review&state=async" 1280 800
 shot setup-async-review-dark-1024 "view=setup&step=review&state=async" 1024 700
@@ -161,6 +167,15 @@ shot people-dense-dark-1280 "view=people&state=dense" 1280 800
 shot people-populated-light-1280 "view=people&theme=light" 1280 800
 shot people-away-dialog-dark-1280 "view=people&dialog=away" 1280 800
 shot people-away-dialog-dark-1024 "view=people&dialog=away" 1024 700
+shot people-leave-dialog-dark-1280 "view=people&dialog=leave" 1280 800
+shot people-leave-dialog-dark-1024 "view=people&dialog=leave" 1024 700
+shot people-leave-dialog-light-1280 "view=people&dialog=leave&theme=light" 1280 800
+shot people-leave-fill-in-dialog-dark-1280 "view=people&dialog=leave&person=fillin" 1280 800
+shot people-leave-fill-in-dialog-dark-1024 "view=people&dialog=leave&person=fillin" 1024 700
+shot people-leave-fill-in-dialog-light-1280 "view=people&dialog=leave&person=fillin&theme=light" 1280 800
+shot people-restore-dialog-dark-1280 "view=people&dialog=restore" 1280 800
+shot people-restore-dialog-dark-1024 "view=people&dialog=restore" 1024 700
+shot people-restore-dialog-light-1280 "view=people&dialog=restore&theme=light" 1280 800
 shot people-populated-dark-1024 "view=people" 1024 700
 shot people-populated-dark-zoom200 "view=people" 640 800
 

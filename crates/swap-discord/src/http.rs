@@ -16,10 +16,19 @@ use twilight_model::http::attachment::Attachment as DiscordAttachment;
 use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, MessageMarker, UserMarker};
 
-use crate::inbound::DmAttachment;
+use twilight_model::channel::message::MessageFlags;
+use twilight_model::channel::message::component::{
+    ActionRow, Button as DiscordButton, ButtonStyle as DiscordButtonStyle, Component,
+};
+use twilight_model::http::interaction::{
+    InteractionResponse, InteractionResponseData, InteractionResponseType,
+};
+use twilight_model::id::marker::ApplicationMarker;
+
+use crate::inbound::{DmAttachment, InteractionRef};
 use crate::port::{
-    AttachmentError, AttachmentFetcher, DiscordError, DiscordPort, InboundDm, OutboundFile,
-    OutboundMessage,
+    AttachmentError, AttachmentFetcher, Button, ButtonStyle, DiscordError, DiscordPort, InboundDm,
+    InteractionReply, OutboundFile, OutboundMessage,
 };
 use crate::setup::validate_bot_token_shape;
 use crate::{DiscordChannelId, DiscordUserId, MessageId};
@@ -70,11 +79,16 @@ impl HttpDiscordPort {
         message: &OutboundMessage,
     ) -> Result<MessageId, DiscordError> {
         let allowed = AllowedMentions::default();
-        let sent = self
+        let components = components(&message.buttons);
+        let mut request = self
             .http
             .create_message(channel)
             .content(&message.content)
-            .allowed_mentions(Some(&allowed))
+            .allowed_mentions(Some(&allowed));
+        if !components.is_empty() {
+            request = request.components(&components);
+        }
+        let sent = request
             .await
             .map_err(map_http_error)?
             .model()
@@ -129,9 +143,13 @@ impl DiscordPort for HttpDiscordPort {
             title: None,
             waveform: None,
         };
+        let components = components(&file.buttons);
         let mut message = self.http.create_message(channel);
         if !file.caption.trim().is_empty() {
             message = message.content(&file.caption);
+        }
+        if !components.is_empty() {
+            message = message.components(&components);
         }
         let sent = message
             .attachments(std::slice::from_ref(&attachment))
@@ -216,9 +234,13 @@ impl DiscordPort for HttpDiscordPort {
             title: None,
             waveform: None,
         };
+        let components = components(&file.buttons);
         let mut message = self.http.create_message(channel);
         if !file.caption.trim().is_empty() {
             message = message.content(&file.caption);
+        }
+        if !components.is_empty() {
+            message = message.components(&components);
         }
         let sent = message
             .attachments(std::slice::from_ref(&attachment))
@@ -277,6 +299,65 @@ impl DiscordPort for HttpDiscordPort {
             .map(Self::map_message)
             .collect())
     }
+
+    async fn reply_ephemeral(
+        &self,
+        interaction: &InteractionRef,
+        reply: InteractionReply,
+    ) -> Result<(), DiscordError> {
+        let interaction_id = parse_id(&interaction.id)?;
+        let components = components(&reply.buttons);
+        let response = InteractionResponse {
+            kind: InteractionResponseType::ChannelMessageWithSource,
+            data: Some(InteractionResponseData {
+                allowed_mentions: Some(AllowedMentions::default()),
+                components: (!components.is_empty()).then_some(components),
+                content: Some(reply.content),
+                flags: Some(MessageFlags::EPHEMERAL),
+                ..InteractionResponseData::default()
+            }),
+        };
+        // The callback route does not use the application id. Twilight still
+        // needs one to build the interaction client, so the adapter passes a
+        // placeholder instead of an extra request.
+        let application = Id::<ApplicationMarker>::new(1);
+        self.http
+            .interaction(application)
+            .create_response(interaction_id, interaction.token(), &response)
+            .await
+            .map_err(map_http_error)?;
+        Ok(())
+    }
+}
+
+/// Put the buttons in one action row. Discord allows five buttons in a row.
+fn components(buttons: &[Button]) -> Vec<Component> {
+    if buttons.is_empty() {
+        return Vec::new();
+    }
+    vec![Component::ActionRow(ActionRow {
+        id: None,
+        components: buttons
+            .iter()
+            .take(5)
+            .map(|button| {
+                Component::Button(DiscordButton {
+                    custom_id: Some(button.custom_id.clone()),
+                    disabled: false,
+                    emoji: None,
+                    id: None,
+                    label: Some(button.label.clone()),
+                    sku_id: None,
+                    style: match button.style {
+                        ButtonStyle::Primary => DiscordButtonStyle::Primary,
+                        ButtonStyle::Secondary => DiscordButtonStyle::Secondary,
+                        ButtonStyle::Danger => DiscordButtonStyle::Danger,
+                    },
+                    url: None,
+                })
+            })
+            .collect(),
+    })]
 }
 
 fn parse_id<M>(value: &str) -> Result<Id<M>, DiscordError> {

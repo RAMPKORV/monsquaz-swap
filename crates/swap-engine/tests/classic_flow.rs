@@ -3494,6 +3494,10 @@ fn moving_a_round_deadline_shifts_planned_rounds_and_the_reveal() {
     )
     .unwrap();
     assert_eq!(moved.moved, 4);
+    assert!(moved.effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Dm { content, .. } if content.contains(&format!("due at {new_deadline} UTC"))
+    )));
     assert_eq!(
         AssignmentRepo::get(fixture.db.conn(), &assignment_id)
             .unwrap()
@@ -3515,6 +3519,49 @@ fn moving_a_round_deadline_shifts_planned_rounds_and_the_reveal() {
 }
 
 // scenario: The reveal verifies the commitment
+#[test]
+fn moving_a_round_deadline_keeps_unclaimed_offers_claimable() {
+    let fixture = Fixture::new(4, 0);
+    fixture.lock_and_schedule();
+    fixture.start();
+    let offers = fixture.open(0);
+    assert_eq!(offers.len(), 4);
+    let old_deadline = T4 + 86_400;
+    let new_deadline = T4 + 2 * 86_400;
+    move_round_deadline(
+        &fixture.db,
+        EVENT,
+        2,
+        new_deadline,
+        "host moved the round",
+        T4 + 100,
+    )
+    .unwrap();
+
+    tick_deadlines(&fixture.db, old_deadline + 1).unwrap();
+    for (user_id, assignment_id, _) in &offers {
+        let assignment = AssignmentRepo::get(fixture.db.conn(), assignment_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            assignment.status,
+            AssignmentStatus::Offered,
+            "{user_id} must still have a claimable offer"
+        );
+        assert_eq!(assignment.claim_deadline_at, Some(new_deadline));
+    }
+    let (user_id, assignment_id, _) = offers[0].clone();
+    claim(
+        &fixture.db,
+        &fixture.store,
+        EVENT,
+        &assignment_id,
+        &user_id,
+        old_deadline + 60,
+    )
+    .expect("the moved deadline must allow the claim");
+}
+
 #[test]
 fn commitment_v2_covers_the_seed_owner_map() {
     let fixture = Fixture::new(3, 0);
@@ -3722,6 +3769,41 @@ fn async_coverage_reports_exposed_pairs_and_expired_gaps() {
 }
 
 #[test]
+fn an_async_wave_does_not_abort_on_a_pre_existing_seen_pair() {
+    let fixture = async_fixture(EventSettings {
+        mode: Mode::Async,
+        ..EventSettings::default()
+    });
+    let tracks = TrackRepo::list_for_event(fixture.db.conn(), EVENT).unwrap();
+    let track = tracks
+        .iter()
+        .find(|track| track.owner_id != user(0))
+        .unwrap()
+        .code
+        .clone();
+    SeenRepo::record(
+        fixture.db.conn(),
+        EVENT,
+        &track,
+        &user(0),
+        "upgrade-probe",
+        "claim",
+        T3,
+    )
+    .unwrap();
+    let wave = dispatch_async_wave(&fixture.db, EVENT, T4).unwrap();
+    assert!(wave.offers > 0, "the wave still offers other pairs");
+    assert!(
+        AssignmentRepo::list_for_event(fixture.db.conn(), EVENT)
+            .unwrap()
+            .iter()
+            .all(
+                |assignment| assignment.participant_id != user(0) || assignment.track_code != track
+            )
+    );
+}
+
+#[test]
 fn async_release_waves_are_daily_and_deduplicated() {
     let fixture = async_fixture(EventSettings {
         mode: Mode::Async,
@@ -3796,6 +3878,7 @@ fn a_fill_in_covers_a_stranded_track_and_keeps_the_invariants() {
         &track_code,
         2,
         &candidate.participant_id,
+        None,
         T4 + 10,
     )
     .unwrap();
@@ -3821,6 +3904,7 @@ fn a_fill_in_covers_a_stranded_track_and_keeps_the_invariants() {
             &track_code,
             2,
             &candidate.participant_id,
+            None,
             T4 + 11
         ),
         Err(EngineError::FillInNotEligible(_))

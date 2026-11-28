@@ -4,19 +4,58 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::inbound::DmAttachment;
+use crate::inbound::{DmAttachment, InteractionRef};
 use crate::{DiscordChannelId, DiscordUserId, MessageId};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OutboundMessage {
-    pub content: String,
+/// The look of a message button. Discord maps these to button styles 1, 2,
+/// and 4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonStyle {
+    Primary,
+    Secondary,
+    Danger,
 }
 
+/// One message button. The custom id is a `CustomId` string. The app checks
+/// the event state and the actor again when a person presses the button.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Button {
+    pub custom_id: String,
+    pub label: String,
+    pub style: ButtonStyle,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutboundMessage {
+    pub content: String,
+    /// Buttons in one action row. Discord allows at most five.
+    pub buttons: Vec<Button>,
+}
+
+impl OutboundMessage {
+    pub fn text(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            buttons: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OutboundFile {
     pub filename: String,
     pub bytes: Vec<u8>,
     pub caption: String,
+    /// Buttons in one action row under the file.
+    pub buttons: Vec<Button>,
+}
+
+/// An ephemeral answer to an interaction. Only the person who pressed the
+/// button or sent the command sees it. It is not a direct message.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InteractionReply {
+    pub content: String,
+    pub buttons: Vec<Button>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +202,21 @@ pub trait DiscordPort: Send + Sync {
         user_id: &DiscordUserId,
         after: Option<&MessageId>,
     ) -> Result<Vec<InboundDm>, DiscordError>;
+
+    /// Answer an interaction with an ephemeral message (callback type 4,
+    /// flag 64). Discord accepts the answer only within 3 seconds of the
+    /// interaction, and the token expires after 15 minutes.
+    async fn reply_ephemeral(
+        &self,
+        interaction: &InteractionRef,
+        reply: InteractionReply,
+    ) -> Result<(), DiscordError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EphemeralReply {
+    pub interaction_id: String,
+    pub reply: InteractionReply,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +273,7 @@ struct FakeState {
     thread_members: Vec<ThreadMember>,
     channel_files: Vec<SentChannelFile>,
     edits: Vec<EditedMessage>,
+    replies: Vec<EphemeralReply>,
     inbound: Vec<(DiscordUserId, InboundDm)>,
     fail_next_dm: Option<DiscordError>,
     fail_next_thread: Option<DiscordError>,
@@ -278,6 +333,10 @@ impl FakeDiscord {
 
     pub fn edits(&self) -> Vec<EditedMessage> {
         self.lock().edits.clone()
+    }
+
+    pub fn ephemeral_replies(&self) -> Vec<EphemeralReply> {
+        self.lock().replies.clone()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, FakeState> {
@@ -422,6 +481,18 @@ impl DiscordPort for FakeDiscord {
         }
         Ok(messages)
     }
+
+    async fn reply_ephemeral(
+        &self,
+        interaction: &InteractionRef,
+        reply: InteractionReply,
+    ) -> Result<(), DiscordError> {
+        self.lock().replies.push(EphemeralReply {
+            interaction_id: interaction.id.clone(),
+            reply,
+        });
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -433,12 +504,7 @@ mod tests {
         let discord = FakeDiscord::new();
         let user = DiscordUserId::new("u1");
         let id = discord
-            .send_dm(
-                &user,
-                OutboundMessage {
-                    content: "Track S7F3A is yours".to_string(),
-                },
-            )
+            .send_dm(&user, OutboundMessage::text("Track S7F3A is yours"))
             .await
             .unwrap();
         assert_eq!(id, MessageId::new("m1"));
@@ -449,6 +515,7 @@ mod tests {
                     filename: "S7F3A.it".to_string(),
                     bytes: vec![1, 2, 3],
                     caption: "claim".to_string(),
+                    buttons: Vec::new(),
                 },
             )
             .await
@@ -462,12 +529,7 @@ mod tests {
         let discord = FakeDiscord::new();
         discord.fail_next_dm(DiscordError::DmClosed);
         let result = discord
-            .send_dm(
-                &DiscordUserId::new("u1"),
-                OutboundMessage {
-                    content: "hello".to_string(),
-                },
-            )
+            .send_dm(&DiscordUserId::new("u1"), OutboundMessage::text("hello"))
             .await;
         assert_eq!(result, Err(DiscordError::DmClosed));
         assert!(discord.sent_dms().is_empty());

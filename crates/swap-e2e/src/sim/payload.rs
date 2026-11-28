@@ -93,7 +93,7 @@ pub fn message_json(message: &SimMessage, state: &SimState, base_url: &str) -> V
         "pinned": false,
         "type": 0,
         "flags": 0,
-        "components": []
+        "components": message.components
     })
 }
 
@@ -376,6 +376,7 @@ mod tests {
                 content_type: Some("application/octet-stream".to_string()),
             }],
             timestamp: 1_760_000_000,
+            components: Vec::new(),
         };
         let event = message_create_event(&message, &state, "http://127.0.0.1:9");
         let raw = serde_json::to_string(&event).unwrap();

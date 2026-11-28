@@ -36,6 +36,7 @@ export function MissionControlView({
   onMoveRoundDeadline,
   onLoadFillInCandidates,
   onAssignFillIn,
+  onStartFillInList,
 }: {
   data: MissionControl;
   timezone?: string;
@@ -60,6 +61,12 @@ export function MissionControlView({
     trackCode: string,
     roundNo: number,
     participantId: string,
+    dueAt?: number,
+  ) => Promise<void>;
+  onStartFillInList?: (
+    trackCode: string,
+    roundNo: number,
+    participantIds: string[],
   ) => Promise<void>;
 }) {
   const initialDialog = new URLSearchParams(window.location.search).get("dialog");
@@ -76,6 +83,12 @@ export function MissionControlView({
     [],
   );
   const [fillInChoice, setFillInChoice] = useState("");
+  const [fillInDue, setFillInDue] = useState("");
+  const [fillInList, setFillInList] = useState<string[]>(() =>
+    new URLSearchParams(window.location.search).get("fillinlist") === "1"
+      ? ["user-08", "user-04"]
+      : [],
+  );
   const [selectedDecision, setSelectedDecision] = useState<Decision | null>(
     initialDialog === "decision" ? (data.decisions[0] ?? null) : null,
   );
@@ -83,6 +96,16 @@ export function MissionControlView({
     initialDialog === "decision" &&
       new URLSearchParams(window.location.search).get("confirm") === "missed",
   );
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("fillinlist") !== "1") {
+      return;
+    }
+    onLoadFillInCandidates("S7F3A", 2)
+      .then(setFillInCandidates)
+      .catch(() => undefined);
+    // The URL parameter is fixed for the life of this screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   if (data.firstRun || !data.event) {
     return <FirstRun onAction={onAction} />;
   }
@@ -515,6 +538,18 @@ export function MissionControlView({
                         >
                           {decision.actionLabel}
                         </Button>
+                      ) : decision.kind === "Fill-in" ? (
+                        <Button
+                          variant="secondary"
+                          ariaLabel={`${decision.actionLabel}: ${decision.title}`}
+                          onClick={() => {
+                            setFillInTrack(decision.trackCode ?? "");
+                            setFillInRound(String(decision.roundNo ?? 2));
+                            setFillInOpen(true);
+                          }}
+                        >
+                          {decision.actionLabel}
+                        </Button>
                       ) : decision.kind === "Deadline" ||
                         decision.kind === "Extension" ? (
                         <Button
@@ -828,24 +863,55 @@ export function MissionControlView({
                 variant="primary"
                 disabled={!fillInChoice}
                 onClick={async () => {
+                  const dueAt = fillInDue ? fromDateTimeInput(fillInDue) : NaN;
                   await onAssignFillIn(
                     fillInTrack.trim().toUpperCase(),
                     Number(fillInRound),
                     fillInChoice,
+                    Number.isFinite(dueAt) ? dueAt : undefined,
                   );
                   setFillInOpen(false);
                   setFillInChoice("");
+                  setFillInDue("");
+                  setFillInList([]);
                   setFillInCandidates([]);
                 }}
               >
                 Assign fill-in
               </Button>
+              {onStartFillInList ? (
+                <Button
+                  variant="secondary"
+                  disabled={fillInList.length === 0}
+                  onClick={async () => {
+                    await onStartFillInList(
+                      fillInTrack.trim().toUpperCase(),
+                      Number(fillInRound),
+                      fillInList,
+                    );
+                    setFillInOpen(false);
+                    setFillInList([]);
+                    setFillInCandidates([]);
+                  }}
+                >
+                  Offer in list order
+                </Button>
+              ) : null}
             </>
           }
         >
           <p>
-            A fill-in covers a stranded track. The person must not own the
-            track and must not have seen it. The handoff cap applies.
+            A fill-in covers a stranded track. Dedicated fill-ins come first. A
+            participant can take one extra turn in the round, only when no
+            dedicated fill-in can. Each chain or list offer has a{" "}
+            {event.fillInClaimWindowHours}-hour claim window. A claim starts a{" "}
+            {event.fillInWindowHours}-hour edit window. The current flow is{" "}
+            {event.fillInFlow === "host_appoints"
+              ? "host appointment"
+              : event.fillInFlow === "auto_chain"
+                ? "automatic chain"
+                : "an ordered host list"}
+            . The bot checks eligibility again before each offer.
           </p>
           <Field
             label="Track code"
@@ -904,12 +970,108 @@ export function MissionControlView({
                   key={candidate.participantId}
                   value={candidate.participantId}
                 >
-                  {candidate.displayName} · seen {candidate.seen} · cap{" "}
-                  {candidate.cap}
+                  {candidate.displayName}
+                  {candidate.tier === "extra_turn"
+                    ? " · Participant (extra turn)"
+                    : ""}{" "}
+                  · edits {candidate.edits} · seen {candidate.seen}
                 </option>
               ))}
             </select>
           </Field>
+          <Field
+            label="Due time (optional)"
+            htmlFor="fill-in-due"
+            helpId="fill-in-due-help"
+            help="Your local time. Empty means the later of the round deadline and the fill-in edit window. A host due time is the edit deadline and the claim deadline for this appointment."
+          >
+            <input
+              id="fill-in-due"
+              className="input"
+              type="datetime-local"
+              aria-describedby="fill-in-due-help"
+              value={fillInDue}
+              onChange={(event) => setFillInDue(event.target.value)}
+            />
+          </Field>
+          {onStartFillInList ? (
+            <>
+              <Button
+                variant="secondary"
+                disabled={!fillInChoice || fillInList.includes(fillInChoice)}
+                onClick={() => setFillInList([...fillInList, fillInChoice])}
+              >
+                Add to offer list
+              </Button>
+              {fillInList.length === 0 ? (
+                <p id="fill-in-list">Offer list: empty.</p>
+              ) : (
+                <ul
+                  className="away-list"
+                  id="fill-in-list"
+                  role="list"
+                  aria-live="polite"
+                >
+                  {fillInList.map((id, index) => {
+                    const name =
+                      fillInCandidates.find(
+                        (candidate) => candidate.participantId === id,
+                      )?.displayName ?? id;
+                    return (
+                      <li key={id}>
+                        <span>
+                          {index + 1}. {name}
+                        </span>
+                        <div className="header-actions">
+                          <Button
+                            variant="quiet"
+                            ariaLabel={`Move ${name} up`}
+                            disabled={index === 0}
+                            onClick={() => {
+                              const next = [...fillInList];
+                              [next[index - 1], next[index]] = [
+                                next[index]!,
+                                next[index - 1]!,
+                              ];
+                              setFillInList(next);
+                            }}
+                          >
+                            Up
+                          </Button>
+                          <Button
+                            variant="quiet"
+                            ariaLabel={`Move ${name} down`}
+                            disabled={index === fillInList.length - 1}
+                            onClick={() => {
+                              const next = [...fillInList];
+                              [next[index], next[index + 1]] = [
+                                next[index + 1]!,
+                                next[index]!,
+                              ];
+                              setFillInList(next);
+                            }}
+                          >
+                            Down
+                          </Button>
+                          <Button
+                            variant="quiet"
+                            ariaLabel={`Remove ${name} from the offer list`}
+                            onClick={() =>
+                              setFillInList(
+                                fillInList.filter((entry) => entry !== id),
+                              )
+                            }
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </>
+          ) : null}
         </Dialog>
       ) : null}
 

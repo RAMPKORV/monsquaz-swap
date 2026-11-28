@@ -97,7 +97,7 @@ jobs:
         run: cargo test -p swap-plan-check
       - name: Verus proof
         if: steps.changed.outputs.run == 'true'
-        run: verus --no-cheating --time crates/swap-plan-check/verus/flat_plan_check.rs
+        run: verus --no-cheating --triggers-mode silent --time crates/swap-plan-check/verus/flat_plan_check.rs
       - name: Conformance against the Rust round checker
         if: steps.changed.outputs.run == 'true'
         env:
@@ -128,7 +128,7 @@ jobs:
       - name: Rust tests for the proof crate
         run: cargo test -p swap-plan-check
       - name: Verus proof
-        run: verus --no-cheating --time crates/swap-plan-check/verus/flat_plan_check.rs
+        run: verus --no-cheating --triggers-mode silent --time crates/swap-plan-check/verus/flat_plan_check.rs
       - name: Conformance against the Rust round checker
         env:
           VERUS: verus

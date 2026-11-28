@@ -17,8 +17,9 @@ A pure plan model for the classic swap planner:
 `check_plan` in the Rust crate takes the round-based model. The verified core
 takes the flat model. A small adapter flattens the round model for conformance.
 
-No database, no I/O, no async, no Discord, and no Tauri. No product crate
-imports this crate.
+The verified core has no database, I/O, async, Discord, or Tauri. The tooling
+around it does use std I/O: `corpus.rs` reads and writes files, and the Verus
+`main` parses the corpus. No product crate imports this crate.
 
 ## Verified core
 
@@ -36,13 +37,13 @@ The verified source is `crates/swap-plan-check/verus/flat_plan_check.rs`.
 | The counting argument does not use Hall's theorem | `lemma_map_size`, `lemma_len_subset` | proved |
 | No `assume`, `admit`, or `external_body` | `--no-cheating` | enforced |
 
-The proof has 51 verified functions and 0 errors. Observed proof time is
-about 0.7-0.9 s total and 0.4-0.5 s SMT on the pilot machine, with one thread.
+The proof has 52 verified functions and 0 errors. Observed proof time is
+about 0.65 s total and 0.38 s SMT on the pilot machine, with one thread.
 
 The Hall proof is direct. Let `T` be the certificate track subset and `N` the
-neighbor set. The verifier checks that `N` is a superset of the true
-neighborhood and that `|N| < |T|`. An injective holder function maps `T` into
-`N`. An injection from a finite set into a smaller set cannot exist.
+neighbor set. The certificate contract requires that `N` is a superset of the
+true neighborhood and that `|N| < |T|`. An injective holder function maps `T`
+into `N`. An injection from a finite set into a smaller set cannot exist.
 
 ### Not verified
 
@@ -54,6 +55,12 @@ neighborhood and that `|N| < |T|`. An injective holder function maps `T` into
 - The flattening adapter. It is ordinary Rust. The corpus tests it.
 
 ## Trust boundary
+
+`parse_plan` and `main` in `flat_plan_check.rs` are ordinary Rust and are not
+verified. They only decode the corpus. The flattening adapter is in the corpus
+tooling, not in the core. The corpus generator is not trusted; the independent
+oracle and conformance checks test it.
+
 
 | Item | Pin |
 |---|---|
@@ -72,21 +79,22 @@ a later integration decision.
 `verus/conformance.sh` compares the verified flat checker with the Rust round
 checker on the generated corpus:
 
-- 1,205 plans;
+- 1,203 plans;
 - rosters 2 to 12;
 - strict and flexible policies;
 - valid plans, repeats, own tracks, missing tracks, missing people, duplicate
   people, duplicate tracks, empty rounds, unknown ids, missing owners, capacity
   rejects, and Hall-infeasible plans;
-- 600 certificates.
+- capacity rejects for too many rounds, a round over 16 assignments, too many
+  active people, and too many active tracks;
 
 Result:
 
 ```text
-plans compared: 1205
+plans compared: 1203
 acceptance disagreements: 0
-reason-class differences: 120
-reason pairs: {(9, 8): 57, (10, 8): 63}
+reason-class differences: 110
+reason pairs: {(9, 8): 55, (10, 8): 55}
 conformance OK: no acceptance disagreement
 ```
 
@@ -97,7 +105,11 @@ pair where the round checker reports a duplicate participant or duplicate
 track. This is a known reason-ordering gap, not a soundness gap.
 
 The independent `HashSet` oracle in `tests/plan_check.rs` agrees with the Rust
-checker on all 1,205 plans. It does not call the checker.
+checker on all 1,203 plans. It does not call the checker.
+
+Certificates are **not** compared with a verified verifier. The Rust
+certificate verifier is tested against an independent `HashSet` oracle over all
+600 certificates. The executable certificate verifier is not verified.
 
 ## Mutations
 
@@ -113,8 +125,11 @@ each time. A mutation that verifies is a failed pilot.
 All four fail Verus. The incomplete-round mutation fails the loop invariant.
 The invalid-Hall mutation fails the counting theorem.
 
-`mutations/run.sh` changes the Rust checker in the same four ways. All four fail
-at least one Rust test.
+`mutations/run.sh` changes the Rust checker in four related cases. The proof
+and Rust sets are not identical: proof mutation 3 skips person coverage, while
+Rust mutation 3 skips the whole strict block. Proof mutation 4 drops the
+certificate count, while Rust mutation 4 drops the neighbor completeness check.
+Each mutation catches the property it targets.
 
 ## Local commands
 
@@ -123,7 +138,7 @@ cargo test -p swap-plan-check
 cargo fmt -p swap-plan-check -- --check
 cargo clippy -p swap-plan-check --all-targets -- -D warnings
 
-# Generate 1,205 plans and 600 certificates
+# Generate 1,203 plans and 600 certificates
 cargo run -p swap-plan-check --bin gen_corpus -- \
   --plans 1200 --certs 600 \
   --corpus target/plan-check/corpus.txt \
@@ -131,7 +146,7 @@ cargo run -p swap-plan-check --bin gen_corpus -- \
 
 # Verified core
 cd crates/swap-plan-check/verus
-/tmp/opencode/verus/verus --no-cheating --time flat_plan_check.rs
+/tmp/opencode/verus/verus --no-cheating --triggers-mode silent --time flat_plan_check.rs
 
 # Conformance and proof mutations
 VERUS=/tmp/opencode/verus/verus ./conformance.sh
@@ -159,20 +174,24 @@ The toolchain stays out of the product build. The job is a separate status and
 
 ## Integration plan for MSW-107
 
-1. Keep the Rust round checker as the current oracle.
-2. Move the Rust checker's internal representation to the flat core at the
-   boundary. The public API stays round-based. This makes the shipped checker
-   and the verified flat core the same algorithm.
-3. If the same source cannot compile under rustc and Verus, keep the verified
-   twin and the conformance adapter, and state the gap in the PR.
-4. Add the executable certificate verifier. The counting theorem is ready.
-   Port the Rust verifier to the flat representation and prove its
-   postcondition against `cert_ok`.
-5. Call the checker before lock only after the flat checker and the
-   certificate verifier pass the conformance and mutation gates.
+The refinement choice is **port, not ship the Verus binary**. Do not put Verus
+in the product build.
+
+1. Refactor `swap-plan-check::check_plan` to flatten the round input at the
+   boundary and call a flat checker with the same algorithm as
+   `check_flat_plan`. Keep the public `PlanInput` and `Result<(), PlanReject>`
+   API.
+2. Add the Rust certificate verifier to the same flat core. Prove the flat
+   verifier's postcondition against `cert_ok`, then compare it with the Rust
+   verifier on the 600-certificate corpus.
+3. Until step 2 lands, the shipped certificate verifier is the Rust code only.
+   Its verdict is checked by the independent oracle, not by a proof.
+4. Call the flat checker before lock only after the port and the certificate
+   verifier pass the conformance and mutation gates.
 
 Do not claim that the shipped Rust checker is verified. It is not. The flat
-twin is verified.
+twin is verified. The executable certificate verifier is the remaining proof
+step.
 
 ## Coverage matrix
 

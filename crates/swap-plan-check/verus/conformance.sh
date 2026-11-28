@@ -20,7 +20,7 @@ cargo run -q -p swap-plan-check --bin gen_corpus -- \
   --corpus target/plan-check/corpus.txt \
   --expected target/plan-check/expected.txt >/dev/null
 
-(cd "$here" && "$verus" --no-cheating --compile flat_plan_check.rs >/dev/null)
+(cd "$here" && "$verus" --no-cheating --triggers-mode silent --compile flat_plan_check.rs >/dev/null)
 "$here/flat_plan_check" target/plan-check/corpus.txt > "$out/verus.txt"
 grep '^PLAN ' target/plan-check/expected.txt > "$out/rust.txt"
 

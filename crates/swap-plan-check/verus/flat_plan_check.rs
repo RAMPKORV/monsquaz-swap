@@ -31,6 +31,7 @@ verus! {
 pub const MAX_PEOPLE: usize = 16;
 pub const MAX_TRACKS: usize = 16;
 pub const MAX_ROUNDS: usize = 16;
+pub const MAX_ASSIGNMENTS: usize = 16;
 pub const MAX_TOTAL: usize = 256;
 pub const NO_OWNER: u16 = 65535u16;
 
@@ -125,7 +126,7 @@ pub open spec fn capacity_ok(input: &FlatPlan) -> bool {
         r,
     ) <= input.assignments_len as int
     &&& forall|r: int| #[trigger] round_index(input, r) ==> round_start(input, r) < MAX_TOTAL
-    &&& forall|r: int| #[trigger] round_index(input, r) ==> round_len(input, r) <= MAX_TOTAL
+    &&& forall|r: int| #[trigger] round_index(input, r) ==> round_len(input, r) <= MAX_ASSIGNMENTS
     &&& (input.rounds_len == 0 ==> input.assignments_len == 0)
     &&& (input.rounds_len > 0 ==> round_start(input, 0) == 0)
     &&& forall|r: int| #[trigger] round_index(input, r) && r > 0 ==> round_start(input, r)
@@ -1027,7 +1028,7 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
             forall|k: int| #[trigger] round_below(k, r as int) ==> round_start(input, k) + round_len(input, k)
                 <= input.assignments_len as int,
             forall|k: int| #[trigger] round_below(k, r as int) ==> round_start(input, k) < MAX_TOTAL,
-            forall|k: int| #[trigger] round_below(k, r as int) ==> round_len(input, k) <= MAX_TOTAL,
+            forall|k: int| #[trigger] round_below(k, r as int) ==> round_len(input, k) <= MAX_ASSIGNMENTS,
             forall|k: int| #[trigger] round_below(k, r as int) && k > 0 ==> round_start(input, k) == round_start(input, k - 1)
                 + round_len(input, k - 1),
             (r > 0 ==> round_start(input, 0) == 0),
@@ -1038,11 +1039,11 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
         let len = input.round_lens[r];
         assert(round_start(input, r as int) == start as int);
         assert(round_len(input, r as int) == len as int);
-        if start >= MAX_TOTAL || len > MAX_TOTAL {
+        if start >= MAX_TOTAL || len > MAX_ASSIGNMENTS {
             return false;
         }
         assert(start < MAX_TOTAL);
-        assert(len <= MAX_TOTAL);
+        assert(len <= MAX_ASSIGNMENTS);
         if start + len > input.assignments_len {
             return false;
         }
@@ -1056,11 +1057,11 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
             let prev_len = input.round_lens[r - 1];
             assert(round_below(r as int - 1, r as int));
             assert(round_start(input, r as int - 1) < MAX_TOTAL);
-            assert(round_len(input, r as int - 1) <= MAX_TOTAL);
+            assert(round_len(input, r as int - 1) <= MAX_ASSIGNMENTS);
             assert(round_start(input, r as int - 1) == prev_start as int);
             assert(round_len(input, r as int - 1) == prev_len as int);
             assert(prev_start < MAX_TOTAL);
-            assert(prev_len <= MAX_TOTAL);
+            assert(prev_len <= MAX_ASSIGNMENTS);
             assert(prev_start + prev_len <= MAX_TOTAL + MAX_TOTAL);
             if start != prev_start + prev_len {
                 return false;
@@ -1083,7 +1084,7 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
             }
         }
         assert forall|k: int|
-            #[trigger] round_below(k, r as int + 1) implies round_len(input, k) <= MAX_TOTAL by {
+            #[trigger] round_below(k, r as int + 1) implies round_len(input, k) <= MAX_ASSIGNMENTS by {
             assert(round_below(k, r as int + 1));
             assert(0 <= k);
             if k < r as int {
@@ -1125,9 +1126,9 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
         assert(round_start(input, last as int) == start as int);
         assert(round_len(input, last as int) == len as int);
         assert(round_start(input, last as int) < MAX_TOTAL);
-        assert(round_len(input, last as int) <= MAX_TOTAL);
+        assert(round_len(input, last as int) <= MAX_ASSIGNMENTS);
         assert(start < MAX_TOTAL);
-        assert(len <= MAX_TOTAL);
+        assert(len <= MAX_ASSIGNMENTS);
         assert(start + len <= MAX_TOTAL + MAX_TOTAL);
         if start + len != input.assignments_len {
             return false;
@@ -1150,7 +1151,7 @@ fn capacity_ok_exec(input: &FlatPlan) -> (ok: bool)
         assert(round_below(k, r as int));
     }
     assert forall|k: int|
-        #[trigger] round_index(input, k) implies round_len(input, k) <= MAX_TOTAL by {
+        #[trigger] round_index(input, k) implies round_len(input, k) <= MAX_ASSIGNMENTS by {
         assert(0 <= k);
         assert(k < r as int);
         assert(round_below(k, r as int));
@@ -1516,16 +1517,10 @@ fn parse_plan(line: &str) -> Option<FlatPlan> {
     for i in 0..people_len.min(MAX_PEOPLE) {
         plan.active_people[i] = it.next()?.parse().ok()?;
     }
-    for _ in MAX_PEOPLE..people_len {
-        it.next()?;
-    }
     let tracks_len: usize = it.next()?.parse().ok()?;
     plan.active_tracks_len = tracks_len;
     for i in 0..tracks_len.min(MAX_TRACKS) {
         plan.active_tracks[i] = it.next()?.parse().ok()?;
-    }
-    for _ in MAX_TRACKS..tracks_len {
-        it.next()?;
     }
     for i in 0..MAX_TRACKS {
         plan.owners[i] = it.next()?.parse().ok()?;
@@ -1545,10 +1540,6 @@ fn parse_plan(line: &str) -> Option<FlatPlan> {
                 plan.tracks[pos] = track;
             }
             pos += 1;
-        }
-        for _ in MAX_TOTAL..round_len {
-            it.next()?;
-            it.next()?;
         }
     }
     plan.assignments_len = pos.min(MAX_TOTAL);

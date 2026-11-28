@@ -26,7 +26,7 @@ if old not in text:
     raise SystemExit(f"mutation pattern not found: {old}")
 path.write_text(text.replace(old, new, 1))
 PY
-  if (cd "$dir" && "$verus" --no-cheating flat_plan_check.rs >verus.log 2>&1); then
+  if (cd "$dir" && "$verus" --no-cheating --triggers-mode silent flat_plan_check.rs >verus.log 2>&1); then
     echo "PROOF MUTATION VERIFIED (failed pilot): $label"
     return 1
   fi

@@ -859,16 +859,17 @@ fn a_new_restore_request_replaces_an_expired_pending_invitation() {
     );
 }
 
-
 // scenario: The host marks a participant as left
 #[test]
 fn the_host_marks_a_participant_as_left() {
     let fixture = Fixture::started(3, EventSettings::default());
     leave_event(&fixture.db, EVENT, &user(0), LeaveActor::Host, T4).unwrap();
     assert_eq!(fixture.membership(&user(0)), Membership::Left);
-    assert!(fixture
-        .audit_actions()
-        .contains(&("Host".to_string(), "Participant left".to_string())));
+    assert!(
+        fixture
+            .audit_actions()
+            .contains(&("Host".to_string(), "Participant left".to_string()))
+    );
 }
 
 // scenario: A leaver keeps past credits
@@ -889,23 +890,14 @@ fn a_leaver_keeps_past_credits() {
         .find(|entry| entry.track_code == track)
         .unwrap()
         .credits;
-    assert!(credits
-        .iter()
-        .any(|credit| credit.participant_id == leaver));
+    assert!(credits.iter().any(|credit| credit.participant_id == leaver));
 }
 
 // scenario: A leaver who sends a file gets one direct answer
 #[tokio::test]
 async fn a_leaver_who_sends_a_file_gets_one_direct_answer() {
     let fixture = Fixture::started(3, EventSettings::default());
-    leave_event(
-        &fixture.db,
-        EVENT,
-        &user(0),
-        LeaveActor::Participant,
-        T4,
-    )
-    .unwrap();
+    leave_event(&fixture.db, EVENT, &user(0), LeaveActor::Participant, T4).unwrap();
     let discord = Arc::new(FakeDiscord::new());
     let (service, _db) = service(fixture.db, fixture.store, discord.clone(), T4 + 1);
     service

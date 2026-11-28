@@ -20,6 +20,11 @@ disagree, stop and decide which is wrong; record the decision.
 | **Handoff / assignment** | One participant's turn with one track. |
 | **Offer** | A claim-first notification with a track code and deadline; no file yet. |
 | **Claim** | The participant actively accepts the offer; the file is sent and the pair becomes "seen". |
+| **Claim reminder** | One DM before the claim window ends. It states the remaining time. A claim cancels it. |
+| **Expiry** | The claim window ends before a claim. The pair is not seen. |
+| **Expiry strike** | One recorded expiry for one participant in one event. A resume clears it. |
+| **Expiry cooldown** | A 24-hour period after an expiry. The queue sends no offer to the participant during the cooldown. |
+| **Re-offer** | An offer of the same track to the same participant after an expiry. The setting decides if and when. |
 | **Skip** | A deliberate pass. Pre-claim skip does not consume "seen"; claim-then-skip does. |
 | **Seen ledger** | Append-only set of `(track, participant)` pairs that may never repeat. |
 | **Pack** | Host-provided module template + samples. Instruments may be added; new samples are not allowed; slight derivatives of pack samples are allowed. |
@@ -176,13 +181,13 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 - Per-person queue; one claimed track per person at a time.
 - Claim-first everywhere: offer → claim → deliver. The 24h claim window starts
   at the offer. The claim reminder is a setting: 6h, 12h (default), none, or
-  custom. Validation refuses a reminder at or after the claim window. Decided,
-  building in MSW-086; the code sends a fixed 12h reminder.
+  custom. Validation refuses a reminder at or after the claim window. The bot
+  sends one reminder for each offer. A claim cancels it. A re-offer gets a new
+  reminder.
 - Ready gate: offer only to a participant who is Ready. A new participant is
   Ready. A paused participant must tap Ready (`/swap resume`) to resume.
 - Expiry protection is a preset (D-041). An expired offer never counts as
-  seen, and the app reports the missed exposure as a gap. The presets are
-  decided, building in MSW-084. The code applies only the default preset:
+  seen, and the app reports the missed exposure as a gap.
   - **strike + cooldown** (default): one active offer; the first expiry starts
     a 24-hour cooldown; the second expiry pauses the participant until
     `/swap resume` or a host action;
@@ -193,11 +198,12 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   - **none**: the participant stays Ready and can get a new offer in the next
     wave; the app never offers the same track again unless the re-offer
     setting allows it.
-- Not built yet (MSW-084): strikes reset when the participant resumes, and an
-  auto-pause alerts the host.
+- A resume clears the expiry strikes and the cooldown for that participant.
+  An auto-pause writes an audit entry and alerts the host.
 - Same-track re-offer after expiry is a setting: never (default), after
-  cooldown, last resort, or host. Decided, building in MSW-085; the code
-  applies "never".
+  cooldown, last resort, or host. The last-resort option uses the pair only
+  when no other eligible person can take the track. The host option opens a
+  decision. A host list and an automatic fill-in chain also obey the rule.
 - Dispatch default: deficit-ordered hybrid (most-constrained ready track, then
   the eligible person with the largest remaining quota, with anti-clustering
   and matching repair). Strict queues and an opportunistic pool are
@@ -211,12 +217,12 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   seeder, so the seeded track count equals the participant count. The app
   computes editors per track and warns when the value is fractional. Full
   exposure needs claims equal to tracks minus one.
-- Release: one daily window at 18:00 wall-clock time in the host IANA zone by
-  default (D-042). The release keeps its local time across DST. Decided,
-  building in MSW-087; the code reads the release time as UTC. Run two
-  dispatch waves inside the window (the start and two hours later). The host
-  can change the time; unclaimed offers shift, claimed assignments keep their
-  due date.
+- Release: one daily window at 18:00 wall-clock time in the stored host IANA
+  zone by default (D-042). The release keeps its local time across DST. A time
+  in a spring-forward gap moves forward by the gap width. An ambiguous time
+  uses the earlier offset. Run two dispatch waves inside the window (the start
+  and two hours later). The host can change the time; unclaimed offers shift,
+  claimed assignments keep their due date.
 - Deadline: 24h from claim by default. A claimed-but-missed track counts as
   seen. At the deadline, notify the host and show a decision card; target a 6h
   response. Do not auto-advance.

@@ -34,7 +34,6 @@ Feature: Async per-person queue
     Then the bot sends one claim reminder
     And the bot does not send another claim reminder
 
-  @pending
   Scenario: The Ready gate prevents a loop
     Given a participant with a first expired offer
     Then the queue waits for the cooldown
@@ -59,7 +58,6 @@ Feature: Async per-person queue
     Then the scheduler prefers the unfamiliar track
     And the scheduler does not use participant group labels
 
-  @pending
   Scenario: A daily window runs two dispatch waves
     Given a daily release window at 18:00 in the host IANA zone
     When the first wave runs
@@ -67,13 +65,36 @@ Feature: Async per-person queue
     When the second wave runs two hours later
     Then the bot sends offers for tracks that became ready after the first wave
 
-  @pending
   Scenario: The release time keeps its wall-clock time across a DST change
     Given a daily release window at 18:00 in the host IANA zone
     When the host zone changes from summer time to standard time
     Then the first wave still runs at 18:00 in the host IANA zone
 
-  @pending
+  Scenario: The release uses the stored host zone
+    Given an event with the host IANA zone Europe/Stockholm
+    When the host sets the release time to 18:00
+    Then the first wave runs at 17:00 UTC in winter
+    And the first wave runs at 16:00 UTC in summer
+
+  Scenario: A release time in the spring-forward gap moves forward
+    Given an event with the host IANA zone Europe/Stockholm
+    And a release time of 02:30 on the spring-forward day
+    When the app computes the first wave
+    Then the wave runs at 03:30 in the host IANA zone
+    And the wave runs at 01:30 UTC
+
+  Scenario: A release time in the fall-back overlap uses the earlier offset
+    Given an event with the host IANA zone Europe/Stockholm
+    And a release time of 02:30 on the fall-back day
+    When the app computes the first wave
+    Then the wave uses the earlier offset
+    And the wave runs at 00:30 UTC
+
+  Scenario: A changed host zone moves the next release
+    Given an event with the host IANA zone Europe/Stockholm
+    When the host creates a new event with the zone America/New_York
+    Then the next release uses the new zone
+
   Scenario: The second expiry pauses the participant and alerts the host
     Given an event with the strike and cooldown expiry preset
     And a participant with one expired offer
@@ -81,11 +102,90 @@ Feature: Async per-person queue
     Then the app pauses the participant
     And the app alerts the host
 
-  @pending
   Scenario: A resume resets the expiry strikes
-    Given a participant whom the app paused after two expired offers
+    Given a participant with one expired offer
     When the participant resumes
     Then the participant has zero expiry strikes
+    And the participant has no cooldown
+
+  Scenario: The queue skips a participant in cooldown and reports why
+    Given a participant with an active expiry cooldown
+    When the release wave runs
+    Then the queue sends no offer to the participant
+    And the queue reports the cooldown as the reason
+
+  Scenario: The cooldown-only preset never pauses a participant
+    Given an event with the cooldown-only expiry preset
+    And a participant with one expired offer
+    When a second offer to the participant expires
+    Then the participant stays ready
+    And the participant has a 24-hour cooldown
+
+  Scenario: The host-review preset opens a decision without an automatic pause
+    Given an event with the host-review expiry preset
+    When an offer expires
+    Then the app opens a host decision
+    And the participant stays ready
+    And the app sets no automatic cooldown
+
+  Scenario: The none preset has no automatic effect
+    Given an event with the none expiry preset
+    When an offer expires
+    Then the participant stays ready
+    And the app sets no cooldown
+    And the app pauses nobody
+
+  Scenario: An expired pair can return after the cooldown
+    Given an event with the after-cooldown re-offer setting
+    And an expired pair
+    When the cooldown ends and the release wave runs
+    Then the app can offer the same track to the same participant
+    And the queue reports the re-offer rule
+
+  Scenario: The last-resort rule uses the pair only when nobody else can take it
+    Given an event with the last-resort re-offer setting
+    And an expired pair
+    When another ready person can take the track
+    Then the app does not offer the pair
+    When no other person can take the track
+    Then the app can offer the pair
+
+  Scenario: The host decides a same-track re-offer
+    Given an event with the host-decides re-offer setting
+    When an offer expires
+    Then the app opens a host decision
+    When the host chooses to re-offer
+    Then the app offers the same track to the same participant
+
+  Scenario: A host re-offer is refused under the never rule
+    Given an event with the never re-offer setting
+    When the host tries to re-offer an expired pair
+    Then the app refuses the re-offer
+
+  Scenario: The default re-offer rule never returns an expired pair
+    Given an event with the default re-offer setting
+    And an expired pair
+    When the release wave runs again
+    Then the app does not offer the pair
+    And the app keeps the expired pair for the record
+
+  Scenario: A claim cancels the claim reminder
+    Given an offer with a claim reminder
+    When the participant claims
+    Then the bot sends no claim reminder for that offer
+    And the other offers keep their reminder
+
+  Scenario: A disabled claim reminder sends nothing
+    Given an event with no claim reminder
+    When the claim window nearly ends
+    Then the bot sends no claim reminder
+
+  Scenario: The claim reminder must be before the claim window
+    Given a claim window of 6 hours
+    When the host sets a 6-hour claim reminder
+    Then the app refuses the setting
+    When the host sets a 5-hour claim reminder
+    Then the app accepts the setting
 
   @pending
   Scenario: Exposure completeness is reported, not forced

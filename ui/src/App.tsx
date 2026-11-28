@@ -34,6 +34,7 @@ import {
   isDemoMode,
   createEvent,
   decideDeadline,
+  decideExpiry,
   decideExtension,
   decideLateSeed,
   dispatchAsyncWave,
@@ -636,7 +637,18 @@ export default function App() {
       return;
     }
     try {
-      if (decision.kind === "Extension" && decision.decisionId) {
+      if (decision.kind === "Expiry" && decision.decisionId) {
+        await decideExpiry(decision.decisionId, action);
+        setToast(
+          action === "reoffer"
+            ? "The same track is offered to the participant again."
+            : action === "pause"
+              ? "Participant paused until a resume or a host action."
+              : action === "cooldown"
+                ? "The participant has a 24-hour cooldown."
+                : "The expiry is closed with no change.",
+        );
+      } else if (decision.kind === "Extension" && decision.decisionId) {
         const status = await decideExtension(
           decision.decisionId,
           action === "approve",

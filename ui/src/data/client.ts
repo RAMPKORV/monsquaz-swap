@@ -712,6 +712,18 @@ export async function decideDeadline(
   });
 }
 
+/** Decide one expired offer (MSW-084, MSW-085). */
+export async function decideExpiry(
+  decisionId: string,
+  action: string,
+): Promise<void> {
+  if (isDemoMode()) {
+    await pause(300);
+    return;
+  }
+  return invoke<void>("host_decide_expiry", { decisionId, action });
+}
+
 let demoRevealState: RevealPackage | null = null;
 
 export function resetDemoReveal(): void {

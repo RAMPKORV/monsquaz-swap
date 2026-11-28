@@ -541,15 +541,15 @@ host review, none), re-offer options (never default, after cooldown, last
 resort, host), and the claim-reminder setting (6h, 12h, none, custom). Strikes
 reset on resume; auto-pause alerts the host.
 **Consequences:** more settings to test. Validation refuses a reminder at or
-after the claim window. Decided, building in MSW-084 (presets), MSW-085
-(re-offer), and MSW-086 (claim reminder).
+after the claim window. Built in MSW-084 (presets), MSW-085 (re-offer), and
+MSW-086 (claim reminder).
 
 ## D-042 — Async release time is wall-clock in the host zone
 
 **Date:** 2026-11-28.
 **Decision:** the async release time is HH:MM in the host IANA zone, not UTC.
-**Consequences:** the release keeps its local time across DST. Decided,
-building in MSW-087; the code still reads the release time as UTC.
+**Consequences:** the release keeps its local time across DST. Built in
+MSW-087: the event stores the host zone, and the anchor uses `chrono-tz`.
 
 ## D-043 — Verifiable commitment; no replan cap
 

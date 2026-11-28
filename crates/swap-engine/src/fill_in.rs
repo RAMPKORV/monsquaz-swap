@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use swap_core::{AssignmentStatus, Membership, Readiness, Role, RoundStatus, TrackState};
 use swap_db::{
-    AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, ParticipantRecord,
-    ParticipantRepo, PlanRepo, RoundRepo, SeenRepo, TrackRecord, TrackRepo,
+    AssignmentRecord, AssignmentRepo, AuditRepo, Connection, Db, ExpiredPairRepo,
+    ParticipantRecord, ParticipantRepo, PlanRepo, RoundRepo, SeenRepo, TrackRecord, TrackRepo,
 };
 
 use crate::delivery::enqueue_effect;
@@ -16,6 +16,7 @@ use crate::engine::{
     require_open_event,
 };
 use crate::ids::assignment_id;
+use crate::settings::{EventSettings, ReofferAfterExpiry};
 
 /// D-050 tiers. Tier 1 is a dedicated fill-in. Tier 2 is a seeded
 /// participant who takes an extra turn when no tier-1 person is eligible.
@@ -58,6 +59,9 @@ pub(crate) struct Slot {
     extra_turn_taken: HashSet<String>,
     active: HashSet<String>,
     edits: HashMap<String, usize>,
+    /// The same-track re-offer rule after an expiry (MSW-085).
+    reoffer: ReofferAfterExpiry,
+    now: i64,
 }
 
 impl Slot {
@@ -66,6 +70,8 @@ impl Slot {
         event_id: &str,
         track_code: &str,
         index: u32,
+        settings: &EventSettings,
+        now: i64,
     ) -> Result<Self, EngineError> {
         let track = TrackRepo::get(conn, event_id, track_code)?
             .ok_or_else(|| EngineError::TrackNotFound(track_code.to_string()))?;
@@ -119,17 +125,20 @@ impl Slot {
             extra_turn_taken,
             active,
             edits,
+            reoffer: settings.reoffer_after_expiry,
+            now,
         })
     }
 
     /// The tier of one person for this slot, or the reason why the person
     /// cannot take it. Both tiers need an active, ready person with no active
-    /// assignment, who does not own the track and has never seen it.
+    /// assignment, who does not own the track and has never seen it. The bool
+    /// is true when the pair comes back through the re-offer setting.
     fn tier(
         &self,
         conn: &Connection,
         participant: &ParticipantRecord,
-    ) -> Result<Result<FillInTier, &'static str>, EngineError> {
+    ) -> Result<Result<(FillInTier, bool), &'static str>, EngineError> {
         let user_id = participant.user_id.as_str();
         if participant.membership != Membership::Active {
             return Ok(Err("the person is not active"));
@@ -146,13 +155,30 @@ impl Slot {
         if SeenRepo::has(conn, &self.event_id, &self.track.code, user_id)? {
             return Ok(Err("the person has seen the track"));
         }
+        let mut reoffer = false;
+        if let Some(pair) = ExpiredPairRepo::get(conn, &self.event_id, &self.track.code, user_id)? {
+            let allowed = match self.reoffer {
+                ReofferAfterExpiry::Never => false,
+                ReofferAfterExpiry::AfterCooldown => {
+                    pair.cooldown_until.is_none_or(|until| until <= self.now)
+                }
+                ReofferAfterExpiry::LastResort => true,
+                // A host appointment, a host list, or a host chain is a host
+                // decision.
+                ReofferAfterExpiry::HostDecides => true,
+            };
+            if !allowed {
+                return Ok(Err("the person's offer for this track expired"));
+            }
+            reoffer = true;
+        }
         match participant.role {
             Role::FillIn => {
                 let seen = SeenRepo::list_for_participant(conn, &self.event_id, user_id)?.len();
                 if participant.max_handoffs > 0 && seen as u32 >= participant.max_handoffs {
                     return Ok(Err("the person reached the handoff cap"));
                 }
-                Ok(Ok(FillInTier::Volunteer))
+                Ok(Ok((FillInTier::Volunteer, reoffer)))
             }
             Role::Participant => {
                 // An extra turn does not count toward the handoff cap.
@@ -167,32 +193,42 @@ impl Slot {
                 if self.planned.contains(user_id) {
                     return Ok(Err("the plan gives the person this track"));
                 }
-                Ok(Ok(FillInTier::ExtraTurn))
+                Ok(Ok((FillInTier::ExtraTurn, reoffer)))
             }
         }
     }
 
     /// Every eligible person in rank order across both tiers. The chain uses
     /// this list so it can fall from tier 1 to tier 2 inside one offer budget
-    /// (D-064). Inside a tier: fewest edits, then a stable hash.
+    /// (D-064). Inside a tier: fewest edits, then a stable hash. Under the
+    /// last-resort rule, an expired pair shows only when no person without an
+    /// expired pair is eligible.
     pub(crate) fn ranked(&self, conn: &Connection) -> Result<Vec<FillInCandidate>, EngineError> {
         let mut candidates = Vec::new();
         for participant in ParticipantRepo::list_for_event(conn, &self.event_id)? {
-            let Ok(tier) = self.tier(conn, &participant)? else {
+            let Ok((tier, reoffer)) = self.tier(conn, &participant)? else {
                 continue;
             };
             let seen =
                 SeenRepo::list_for_participant(conn, &self.event_id, &participant.user_id)?.len();
-            candidates.push(FillInCandidate {
-                tier,
-                edits: self.edits.get(&participant.user_id).copied().unwrap_or(0),
-                participant_id: participant.user_id,
-                display_name: participant.display_name,
-                seen,
-                cap: participant.max_handoffs,
-            });
+            candidates.push((
+                FillInCandidate {
+                    tier,
+                    edits: self.edits.get(&participant.user_id).copied().unwrap_or(0),
+                    participant_id: participant.user_id,
+                    display_name: participant.display_name,
+                    seen,
+                    cap: participant.max_handoffs,
+                },
+                reoffer,
+            ));
         }
-        candidates.sort_by_cached_key(|candidate| {
+        if self.reoffer == ReofferAfterExpiry::LastResort
+            && candidates.iter().any(|(_, reoffer)| !reoffer)
+        {
+            candidates.retain(|(_, reoffer)| !reoffer);
+        }
+        candidates.sort_by_cached_key(|(candidate, _)| {
             (
                 candidate.tier,
                 candidate.edits,
@@ -205,7 +241,10 @@ impl Slot {
                 ),
             )
         });
-        Ok(candidates)
+        Ok(candidates
+            .into_iter()
+            .map(|(candidate, _)| candidate)
+            .collect())
     }
 
     /// The eligible people in rank order. Tier 2 shows only when no tier-1
@@ -255,6 +294,7 @@ pub fn fill_in_candidates(
     event_id: &str,
     track_code: &str,
     round_no: u32,
+    now: i64,
 ) -> Result<Vec<FillInCandidate>, EngineError> {
     let event = load_event(db, event_id)?;
     require_open_event(&event, "fill-in candidates")?;
@@ -262,7 +302,16 @@ pub fn fill_in_candidates(
         return Err(EngineError::RoundNotOpen { round: round_no });
     }
     open_round_deadline(db.conn(), event_id, round_no)?;
-    Slot::load(db.conn(), event_id, track_code, round_no - 2)?.candidates(db.conn())
+    let settings = parse_settings(&event)?;
+    Slot::load(
+        db.conn(),
+        event_id,
+        track_code,
+        round_no - 2,
+        &settings,
+        now,
+    )?
+    .candidates(db.conn())
 }
 
 /// Assign a stranded track to one eligible person in an open round. The host
@@ -304,7 +353,14 @@ pub fn assign_fill_in(
     ensure_stranded(&transaction, event_id, track_code, round_no - 2)?;
     let participant = ParticipantRepo::get(&transaction, event_id, user_id)?
         .ok_or_else(|| EngineError::ParticipantNotFound(user_id.to_string()))?;
-    let slot = Slot::load(&transaction, event_id, track_code, round_no - 2)?;
+    let slot = Slot::load(
+        &transaction,
+        event_id,
+        track_code,
+        round_no - 2,
+        &settings,
+        now,
+    )?;
     slot.tier(&transaction, &participant)?
         .map_err(|reason| EngineError::FillInNotEligible(reason.to_string()))?;
     if !slot

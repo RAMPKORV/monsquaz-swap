@@ -214,6 +214,15 @@ lifecycle model, not a trace-conformance check. The pinned TLC JSON
 counterexample is the fallback trace artifact. NDJSON trace validation (MSW-106)
 replaces ITF replay until a pinned converter is justified.
 
+## Async gap
+
+`SwapClaim.tla` models the default `reoffer_after_expiry = never` rule. The
+after-cooldown, last-resort, and host-decides options are not modeled. The
+expiry protection presets, the claim reminder, and the zoned release are also
+not modeled. `SwapAsync.tla` (MSW-038) is the planned model. The async Gherkin
+scenarios and Rust tests are the current evidence. Do not claim formal coverage
+for these rules.
+
 ## Discord transport
 
 There is no official Discord bot emulator. The repository tests the transport in

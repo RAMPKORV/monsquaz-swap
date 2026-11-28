@@ -3,6 +3,14 @@ import type { PeopleData, PersonRow } from "../types";
 import { Button, Dialog, EmptyState, Field, PageHeader, Skeleton, StatusPill } from "../components";
 import { Icon } from "../icons";
 
+function formatCooldown(at: number, timezone?: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: timezone || undefined,
+  }).format(at * 1000);
+}
+
 export function PeopleView({
   data,
   onAction,
@@ -366,6 +374,20 @@ export function PeopleView({
                     >
                       {row.status}
                     </StatusPill>
+                    {row.expiryStrikes > 0 ? (
+                      <small className="muted">
+                        {row.expiryStrikes}{" "}
+                        {row.expiryStrikes === 1
+                          ? "expired offer"
+                          : "expired offers"}
+                        {row.cooldownUntil
+                          ? ` · cooldown until ${formatCooldown(
+                              row.cooldownUntil,
+                              timezone,
+                            )}`
+                          : ""}
+                      </small>
+                    ) : null}
                   </td>
                   <td>
                     <span className="cell-label">Seed track</span>

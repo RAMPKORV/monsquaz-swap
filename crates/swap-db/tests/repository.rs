@@ -492,3 +492,82 @@ fn a_restore_can_be_asked_again_in_the_same_second() {
             .is_some()
     );
 }
+
+#[test]
+fn expiry_state_and_expired_pairs_round_trip() {
+    let db = Db::open_in_memory().unwrap();
+    seed_event(&db);
+    let state = swap_db::ExpiryStateRecord {
+        event_id: "evt-1".to_string(),
+        participant_id: "alice".to_string(),
+        strikes: 2,
+        cooldown_until: Some(9_000),
+        paused_at: Some(8_000),
+        updated_at: 8_000,
+    };
+    swap_db::ExpiryStateRepo::upsert(db.conn(), &state).unwrap();
+    assert_eq!(
+        swap_db::ExpiryStateRepo::get(db.conn(), "evt-1", "alice")
+            .unwrap()
+            .unwrap(),
+        state
+    );
+    assert_eq!(
+        swap_db::ExpiryStateRepo::list_for_event(db.conn(), "evt-1")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(swap_db::ExpiryStateRepo::reset(db.conn(), "evt-1", "alice").unwrap());
+    assert!(
+        swap_db::ExpiryStateRepo::get(db.conn(), "evt-1", "alice")
+            .unwrap()
+            .is_none()
+    );
+
+    let pair = swap_db::ExpiredPairRecord {
+        event_id: "evt-1".to_string(),
+        track_code: "T01".to_string(),
+        participant_id: "alice".to_string(),
+        expiries: 1,
+        last_expired_at: 7_000,
+        cooldown_until: None,
+        last_assignment_id: Some("a-1".to_string()),
+    };
+    swap_db::ExpiredPairRepo::record(db.conn(), &pair).unwrap();
+    swap_db::ExpiredPairRepo::record(db.conn(), &pair).unwrap();
+    let stored = swap_db::ExpiredPairRepo::get(db.conn(), "evt-1", "T01", "alice")
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.expiries, 2);
+    assert!(
+        swap_db::ExpiredPairRepo::set_cooldown(db.conn(), "evt-1", "T01", "alice", Some(9_000))
+            .unwrap()
+    );
+    let stored = swap_db::ExpiredPairRepo::get(db.conn(), "evt-1", "T01", "alice")
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.cooldown_until, Some(9_000));
+    assert_eq!(
+        swap_db::ExpiredPairRepo::list_for_participant(db.conn(), "evt-1", "alice")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn a_claim_reminder_is_marked_once_per_offer() {
+    let db = Db::open_in_memory().unwrap();
+    seed_event(&db);
+    TrackRepo::insert(db.conn(), &track("evt-1", "T02", "bob")).unwrap();
+    AssignmentRepo::insert(
+        db.conn(),
+        &assignment("a-1", "evt-1", "T02", "alice", AssignmentStatus::Offered),
+    )
+    .unwrap();
+    assert!(!AssignmentRepo::claim_reminder_sent(db.conn(), "a-1").unwrap());
+    assert!(AssignmentRepo::mark_claim_reminder(db.conn(), "a-1", 5_000).unwrap());
+    assert!(!AssignmentRepo::mark_claim_reminder(db.conn(), "a-1", 5_001).unwrap());
+    assert!(AssignmentRepo::claim_reminder_sent(db.conn(), "a-1").unwrap());
+}

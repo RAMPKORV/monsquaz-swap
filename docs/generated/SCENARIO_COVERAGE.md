@@ -2,17 +2,17 @@
 
 > <!-- GENERATED FILE — run `node scripts/trace-scenarios.mjs`; do not edit by hand. -->
 
-Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
+Total: 224 scenarios. Mapped: 113. Pending: 111. Exempt: 0.
 
 | Feature | Scenarios | Mapped | Pending | Exempt |
 |---|---|---|---|---|
 | `anonymity.feature` | 14 | 4 | 10 | 0 |
-| `async_queue.feature` | 17 | 3 | 14 | 0 |
+| `async_queue.feature` | 33 | 24 | 9 | 0 |
 | `core_invariants.feature` (cucumber) | 6 | 6 | 0 | 0 |
 | `deadlines_and_extensions.feature` | 14 | 3 | 11 | 0 |
 | `delivery.feature` | 10 | 3 | 7 | 0 |
 | `files.feature` | 10 | 1 | 9 | 0 |
-| `fill_ins.feature` | 22 | 21 | 1 | 0 |
+| `fill_ins.feature` | 24 | 23 | 1 | 0 |
 | `groups.feature` | 12 | 5 | 7 | 0 |
 | `join_and_seed.feature` | 33 | 21 | 12 | 0 |
 | `ops.feature` | 16 | 4 | 12 | 0 |
@@ -41,12 +41,7 @@ Total: 206 scenarios. Mapped: 90. Pending: 116. Exempt: 0.
 
 - An offer does not deliver a file (pending)
 - A claim delivers the file and starts the deadline (pending)
-- The Ready gate prevents a loop (pending)
 - The host starts and stops the queue explicitly (pending)
-- A daily window runs two dispatch waves (pending)
-- The release time keeps its wall-clock time across a DST change (pending)
-- The second expiry pauses the participant and alerts the host (pending)
-- A resume resets the expiry strikes (pending)
 - Exposure completeness is reported, not forced (pending)
 - A small async event uses N-1 rounds (pending)
 - A large async event uses a capped length (pending)

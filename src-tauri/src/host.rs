@@ -12,17 +12,19 @@ use tauri::{AppHandle, Manager, State};
 use swap_core::{EventState, Membership, Role, RoundStatus};
 use swap_db::{
     AssignmentRepo, AuditRepo, AvailabilityRepo, Db, DeadlineRepo, EventRecord, EventRepo,
-    LateSeedRepo, MetaRepo, PackRepo, ParticipantRepo, PlanRepo, RestoreRepo, RoundRepo, TrackRepo,
+    ExpiryStateRepo, LateSeedRepo, MetaRepo, PackRepo, ParticipantRepo, PlanRepo, RestoreRepo,
+    RoundRepo, TrackRepo,
 };
 use swap_engine::{
-    CreditEntry, EngineError, EventSettings, FillInFlow, LeaveActor, Mode, TrackCredits,
-    accept_late_seed, add_availability, add_track_comment, assign_fill_in, async_coverage,
-    create_event, dispatch_async_wave, edit_plan_assignment, extend_seed_deadline,
-    fill_in_candidates, generate_schedule, leave_event, lock_roster, move_round_deadline,
-    next_async_release, open_round, open_seed_round, pending_late_seeds, plan_edit_candidates,
-    redact_track_comment, reject_late_seed, remove_availability, reopen_seed_round,
-    repair_group_schedule, request_restore, reveal_package, reveal_with_channel, reveal_zip,
-    set_track_title, start_async_event, start_event_with_channel, upload_pack, verify_commitment,
+    CreditEntry, EngineError, EventSettings, ExpiryProtection, FillInFlow, LeaveActor, Mode,
+    ReofferAfterExpiry, TrackCredits, accept_late_seed, add_availability, add_track_comment,
+    assign_fill_in, async_coverage, create_event, decide_expiry, dispatch_async_wave,
+    edit_plan_assignment, extend_seed_deadline, fill_in_candidates, generate_schedule, leave_event,
+    lock_roster, move_round_deadline, next_async_release, open_round, open_seed_round,
+    pending_late_seeds, plan_edit_candidates, redact_track_comment, reject_late_seed,
+    remove_availability, reopen_seed_round, repair_group_schedule, request_restore, reveal_package,
+    reveal_with_channel, reveal_zip, set_track_title, start_async_event, start_event_with_channel,
+    upload_pack, verify_commitment,
 };
 
 #[cfg(feature = "e2e")]
@@ -282,6 +284,8 @@ struct DecisionDto {
     /// The stranded track and its round, for a fill-in decision.
     track_code: Option<String>,
     round_no: Option<u32>,
+    /// The host can re-offer the expired pair (MSW-085).
+    can_reoffer: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,6 +445,16 @@ pub struct EventDraftDto {
     async_claims_per_participant: Option<u32>,
     async_release_time: String,
     async_late_seeds: bool,
+    /// The host IANA zone for the release wall-clock time (MSW-087).
+    #[serde(default)]
+    host_timezone: String,
+    /// `None` disables the claim reminder (MSW-086).
+    #[serde(default)]
+    claim_reminder_hours: Option<i64>,
+    #[serde(default)]
+    expiry_protection: ExpiryProtection,
+    #[serde(default)]
+    reoffer_after_expiry: ReofferAfterExpiry,
     #[serde(default)]
     fill_in_window_hours: Option<i64>,
     #[serde(default)]
@@ -490,6 +504,10 @@ struct PersonRowDto {
     /// The bot asked a person who left to come back, and the person has not
     /// answered yet (D-051).
     restore_pending: bool,
+    /// The number of expired offers since the last resume (MSW-084).
+    expiry_strikes: u32,
+    /// The end of the expiry cooldown, in UTC seconds, when one is active.
+    cooldown_until: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -636,13 +654,17 @@ fn default_draft() -> EventDraftDto {
         async_claims_per_participant: None,
         async_release_time: "18:00".to_string(),
         async_late_seeds: false,
+        host_timezone: "Europe/Stockholm".to_string(),
+        claim_reminder_hours: Some(12),
+        expiry_protection: ExpiryProtection::StrikeCooldown,
+        reoffer_after_expiry: ReofferAfterExpiry::Never,
         fill_in_window_hours: Some(24),
         fill_in_claim_window_hours: Some(6),
         fill_in_flow: Some(FillInFlow::HostAppoints),
     }
 }
 
-fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
+fn draft_from(event: &EventRecord, settings: &EventSettings, host_timezone: &str) -> EventDraftDto {
     EventDraftDto {
         name: event.name.clone(),
         mode: match settings.mode {
@@ -689,6 +711,13 @@ fn draft_from(event: &EventRecord, settings: &EventSettings) -> EventDraftDto {
             .clone()
             .unwrap_or_else(|| "18:00".to_string()),
         async_late_seeds: settings.async_late_seeds.unwrap_or(false),
+        host_timezone: settings
+            .host_timezone
+            .clone()
+            .unwrap_or_else(|| host_timezone.to_string()),
+        claim_reminder_hours: settings.claim_reminder_secs.map(|secs| secs / 3600),
+        expiry_protection: settings.expiry_protection,
+        reoffer_after_expiry: settings.reoffer_after_expiry,
         fill_in_window_hours: Some(settings.fill_in_window_secs / 3600),
         fill_in_claim_window_hours: Some(settings.fill_in_claim_window_secs / 3600),
         fill_in_flow: Some(settings.fill_in_flow),
@@ -870,15 +899,18 @@ fn summary(db: &Db, event: &EventRecord) -> Result<EventSummaryDto, String> {
 #[tauri::command]
 pub fn host_event_setup(app: AppHandle) -> Result<SetupDataDto, String> {
     let db = open_db(&app)?;
-    setup_data(&db)
+    let host_settings = read_settings(&app).unwrap_or_default();
+    setup_data(&db, &host_settings.timezone)
 }
 
-fn setup_data(db: &Db) -> Result<SetupDataDto, String> {
+fn setup_data(db: &Db, host_timezone: &str) -> Result<SetupDataDto, String> {
     let Some(event) = current_event(db)? else {
+        let mut draft = default_draft();
+        draft.host_timezone = host_timezone.to_string();
         return Ok(SetupDataDto {
             first_run: true,
             event: None,
-            draft: default_draft(),
+            draft,
             warnings: Vec::new(),
         });
     };
@@ -886,7 +918,7 @@ fn setup_data(db: &Db) -> Result<SetupDataDto, String> {
     Ok(SetupDataDto {
         first_run: false,
         event: Some(summary(db, &event)?),
-        draft: draft_from(&event, &settings),
+        draft: draft_from(&event, &settings, host_timezone),
         warnings: Vec::new(),
     })
 }
@@ -1032,45 +1064,54 @@ fn people_data(db: &Db) -> Result<PeopleDataDto, String> {
         .into_iter()
         .filter(|request| now_secs() <= request.requested_at + swap_engine::RESTORE_REQUEST_SECS)
         .collect();
+    let expiry_states =
+        ExpiryStateRepo::list_for_event(db.conn(), &event.id).map_err(|error| error.to_string())?;
     let rows = participants
         .into_iter()
-        .map(|participant| PersonRowDto {
-            restore_pending: restores
+        .map(|participant| {
+            let expiry = expiry_states
                 .iter()
-                .any(|restore| restore.user_id == participant.user_id),
-            away: availability
-                .iter()
-                .filter(|range| range.participant_id == participant.user_id)
-                .map(|range| AwayDto {
-                    id: range.id.clone(),
-                    starts_at: range.starts_at,
-                    ends_at: range.ends_at,
-                    note: range.note.clone(),
-                })
-                .collect(),
-            id: participant.user_id.clone(),
-            display_name: participant.display_name,
-            role: match participant.role {
-                Role::Participant => "Seed",
-                Role::FillIn => "Fill-in",
+                .find(|state| state.participant_id == participant.user_id);
+            PersonRowDto {
+                restore_pending: restores
+                    .iter()
+                    .any(|restore| restore.user_id == participant.user_id),
+                away: availability
+                    .iter()
+                    .filter(|range| range.participant_id == participant.user_id)
+                    .map(|range| AwayDto {
+                        id: range.id.clone(),
+                        starts_at: range.starts_at,
+                        ends_at: range.ends_at,
+                        note: range.note.clone(),
+                    })
+                    .collect(),
+                id: participant.user_id.clone(),
+                display_name: participant.display_name,
+                role: match participant.role {
+                    Role::Participant => "Seed",
+                    Role::FillIn => "Fill-in",
+                }
+                .to_string(),
+                status: if participant.membership == Membership::Left {
+                    "Left"
+                } else if participant.readiness == swap_core::Readiness::Paused {
+                    "Paused"
+                } else {
+                    "Ready"
+                }
+                .to_string(),
+                seed_track: tracks
+                    .iter()
+                    .find(|track| track.owner_id == participant.user_id)
+                    .map(|track| track.code.clone()),
+                timezone: participant.timezone,
+                max_handoffs: participant.max_handoffs,
+                joined: String::new(),
+                delivery_risk: false,
+                expiry_strikes: expiry.map(|state| state.strikes).unwrap_or(0),
+                cooldown_until: expiry.and_then(|state| state.cooldown_until),
             }
-            .to_string(),
-            status: if participant.membership == Membership::Left {
-                "Left"
-            } else if participant.readiness == swap_core::Readiness::Paused {
-                "Paused"
-            } else {
-                "Ready"
-            }
-            .to_string(),
-            seed_track: tracks
-                .iter()
-                .find(|track| track.owner_id == participant.user_id)
-                .map(|track| track.code.clone()),
-            timezone: participant.timezone,
-            max_handoffs: participant.max_handoffs,
-            joined: String::new(),
-            delivery_risk: false,
         })
         .collect();
     Ok(PeopleDataDto {
@@ -1539,6 +1580,11 @@ fn create_host_event(db: &Db, draft: EventDraftDto) -> Result<EventSummaryDto, S
         async_release_time: Some(draft.async_release_time),
         async_wave_offset_secs: 2 * 60 * 60,
         async_late_seeds: Some(draft.async_late_seeds),
+        host_timezone: (!draft.host_timezone.trim().is_empty())
+            .then(|| draft.host_timezone.clone()),
+        claim_reminder_secs: draft.claim_reminder_hours.map(|hours| hours * 3600),
+        expiry_protection: draft.expiry_protection,
+        reoffer_after_expiry: draft.reoffer_after_expiry,
         quiet_hours_start: draft.quiet_hours_start,
         quiet_hours_end: draft.quiet_hours_end,
         fill_in_window_secs: draft.fill_in_window_hours.unwrap_or(24) * 3600,
@@ -1693,11 +1739,13 @@ pub fn host_fill_in_candidates(
 ) -> Result<Vec<FillInCandidateDto>, String> {
     let db = open_db(&app)?;
     let event = current_event(&db)?.ok_or_else(|| "there is no event".to_string())?;
-    Ok(fill_in_candidates(&db, &event.id, &track_code, round_no)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(FillInCandidateDto::from)
-        .collect())
+    Ok(
+        fill_in_candidates(&db, &event.id, &track_code, round_no, now_secs())
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(FillInCandidateDto::from)
+            .collect(),
+    )
 }
 
 #[tauri::command]
@@ -2166,6 +2214,19 @@ pub fn host_decide_deadline(
 }
 
 #[tauri::command]
+pub fn host_decide_expiry(
+    app: AppHandle,
+    decision_id: String,
+    action: String,
+) -> Result<(), String> {
+    let db = open_db(&app)?;
+    decide_expiry(&db, &decision_id, &action, now_secs()).map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
+    app.state::<crate::live_runtime::LiveRuntime>().wake();
+    Ok(())
+}
+
+#[tauri::command]
 pub fn host_plan_edit_candidates(
     app: AppHandle,
     round: u32,
@@ -2579,6 +2640,7 @@ fn mission_control_with_health(
             extensions_used: None,
             track_code: None,
             round_no: None,
+            can_reoffer: false,
         });
     }
     if let Ok(open) = swap_db::HostDecisionRepo::list_open(db.conn(), &event.id) {
@@ -2616,17 +2678,18 @@ fn mission_control_with_health(
                 let round_no = assignment
                     .map(|assignment| assignment.round + 2)
                     .unwrap_or(2);
-                let next: Vec<String> = fill_in_candidates(db, &event.id, &track_code, round_no)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .take(3)
-                    .map(|candidate| match candidate.tier {
-                        swap_engine::FillInTier::Volunteer => candidate.display_name,
-                        swap_engine::FillInTier::ExtraTurn => {
-                            format!("{} (extra turn)", candidate.display_name)
-                        }
-                    })
-                    .collect();
+                let next: Vec<String> =
+                    fill_in_candidates(db, &event.id, &track_code, round_no, now_secs())
+                        .unwrap_or_default()
+                        .into_iter()
+                        .take(3)
+                        .map(|candidate| match candidate.tier {
+                            swap_engine::FillInTier::Volunteer => candidate.display_name,
+                            swap_engine::FillInTier::ExtraTurn => {
+                                format!("{} (extra turn)", candidate.display_name)
+                            }
+                        })
+                        .collect();
                 (
                     "Fill-in",
                     format!("Track {track_code} needs a fill-in"),
@@ -2635,6 +2698,18 @@ fn mission_control_with_health(
                     } else {
                         format!("Next eligible: {}.", next.join(", "))
                     },
+                )
+            } else if decision.kind == "expiry" {
+                (
+                    "Expiry",
+                    format!(
+                        "{} did not claim track {track_code}",
+                        participant
+                            .map(|participant| participant.display_name.as_str())
+                            .unwrap_or("A participant")
+                    ),
+                    "The offer expired and the pair is not seen. Pause the participant, set a cooldown, ignore the expiry, or re-offer when the setting allows."
+                        .to_string(),
                 )
             } else {
                 (
@@ -2668,6 +2743,8 @@ fn mission_control_with_health(
                 extensions_used,
                 track_code: assignment.map(|assignment| assignment.track_code.clone()),
                 round_no: assignment.map(|assignment| assignment.round + 2),
+                can_reoffer: decision.kind == "expiry"
+                    && settings_json.reoffer_after_expiry == ReofferAfterExpiry::HostDecides,
             });
         }
     }
@@ -2760,11 +2837,15 @@ fn mission_control_with_health(
             EventFactDto {
                 label: "Release".to_string(),
                 value: format!(
-                    "{} UTC, two waves",
+                    "{} {}, two waves",
                     settings_json
                         .async_release_time
                         .as_deref()
-                        .unwrap_or("18:00")
+                        .unwrap_or("18:00"),
+                    settings_json
+                        .host_timezone
+                        .as_deref()
+                        .unwrap_or(&settings.timezone)
                 ),
             },
         );
@@ -3266,6 +3347,49 @@ mod tests {
     }
 
     #[test]
+    fn the_async_expiry_settings_round_trip_through_the_host_dto() {
+        let (db, _directory) = test_db("async-expiry-settings");
+        let draft = EventDraftDto {
+            name: "Async Settings".to_string(),
+            mode: "Async".to_string(),
+            host_timezone: "America/New_York".to_string(),
+            claim_reminder_hours: Some(6),
+            expiry_protection: ExpiryProtection::HostReview,
+            reoffer_after_expiry: ReofferAfterExpiry::HostDecides,
+            async_release_time: "21:30".to_string(),
+            ..default_draft()
+        };
+        let created = create_host_event(&db, draft).unwrap();
+        let event = EventRepo::get(db.conn(), &created.id).unwrap().unwrap();
+        let settings: EventSettings = serde_json::from_str(&event.settings_json).unwrap();
+        assert_eq!(settings.host_timezone.as_deref(), Some("America/New_York"));
+        assert_eq!(settings.claim_reminder_secs, Some(6 * 3_600));
+        assert_eq!(settings.expiry_protection, ExpiryProtection::HostReview);
+        assert_eq!(
+            settings.reoffer_after_expiry,
+            ReofferAfterExpiry::HostDecides
+        );
+
+        let setup = setup_data(&db, "Europe/Stockholm").unwrap();
+        assert_eq!(setup.draft.host_timezone, "America/New_York");
+        assert_eq!(setup.draft.claim_reminder_hours, Some(6));
+        assert_eq!(setup.draft.expiry_protection, ExpiryProtection::HostReview);
+        assert_eq!(
+            setup.draft.reoffer_after_expiry,
+            ReofferAfterExpiry::HostDecides
+        );
+
+        let bad = EventDraftDto {
+            name: "Bad Reminder".to_string(),
+            mode: "Async".to_string(),
+            claim_window_hours: 6,
+            claim_reminder_hours: Some(6),
+            ..default_draft()
+        };
+        assert!(create_host_event(&db, bad).is_err());
+    }
+
+    #[test]
     fn the_setup_people_and_plan_commands_read_the_same_event() {
         let (db, directory) = test_db("event-round-trip");
         let draft = EventDraftDto {
@@ -3279,7 +3403,7 @@ mod tests {
         assert_eq!(created.name, "Test Rotation");
         assert_eq!(created.rounds, 3);
 
-        let setup = setup_data(&db).unwrap();
+        let setup = setup_data(&db, "Europe/Stockholm").unwrap();
         assert!(!setup.first_run);
         assert_eq!(setup.event.as_ref().unwrap().name, "Test Rotation");
         assert_eq!(setup.draft.name, "Test Rotation");
@@ -3532,7 +3656,7 @@ mod tests {
             ..default_draft()
         };
         assert!(create_host_event(&db, draft).is_err());
-        assert!(setup_data(&db).unwrap().first_run);
+        assert!(setup_data(&db, "Europe/Stockholm").unwrap().first_run);
         drop(db);
         fs::remove_dir_all(directory).unwrap();
     }

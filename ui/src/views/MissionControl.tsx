@@ -551,7 +551,8 @@ export function MissionControlView({
                           {decision.actionLabel}
                         </Button>
                       ) : decision.kind === "Deadline" ||
-                        decision.kind === "Extension" ? (
+                        decision.kind === "Extension" ||
+                        decision.kind === "Expiry" ? (
                         <Button
                           variant="secondary"
                           ariaLabel={`${decision.actionLabel}: ${decision.title}`}
@@ -710,6 +711,48 @@ export function MissionControlView({
                     Approve
                   </Button>
                 </>
+              ) : selectedDecision.kind === "Expiry" ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "ignore");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Ignore
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      onDecision(selectedDecision, "cooldown");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Cooldown 24 hours
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="dialog__danger-action"
+                    onClick={() => {
+                      onDecision(selectedDecision, "pause");
+                      setSelectedDecision(null);
+                    }}
+                  >
+                    Pause participant
+                  </Button>
+                  {selectedDecision.canReoffer ? (
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        onDecision(selectedDecision, "reoffer");
+                        setSelectedDecision(null);
+                      }}
+                    >
+                      Re-offer the track
+                    </Button>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <Button
@@ -765,6 +808,13 @@ export function MissionControlView({
                   uses extension {(selectedDecision.extensionsUsed ?? 0) + 1} of
                   2. Refusing keeps the deadline. The participant is notified
                   either way.
+                </p>
+              ) : selectedDecision.kind === "Expiry" ? (
+                <p className="dialog__meta">
+                  The offer expired and the pair does not count as seen. Pause
+                  stops new offers until a resume. Cooldown waits 24 hours.
+                  Re-offer sends the same track again and keeps the expiry rule.
+                  Every action writes an audit entry.
                 </p>
               ) : (
                 <p className="dialog__meta">

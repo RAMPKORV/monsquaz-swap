@@ -2,9 +2,9 @@ use swap_core::{
     AssignmentStatus, EventState, Membership, Readiness, Role, TrackState, album_order,
 };
 use swap_db::{
-    AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo, FileRepo,
-    HostDecisionRepo, MetaRepo, PackRecord, PackRepo, ParticipantRepo, PlanRepo, PrivacyRepo,
-    RoundRepo, SeenRepo, TrackRepo,
+    AssignmentRepo, AuditRepo, Db, DeadlineRepo, DeliveryRepo, DmCursorRepo, EventRepo,
+    ExpiryStateRepo, FileRepo, HostDecisionRepo, MetaRepo, PackRecord, PackRepo, ParticipantRepo,
+    PlanRepo, PrivacyRepo, RoundRepo, SeenRepo, TrackRepo,
 };
 use swap_engine::{
     DeliveryPreparer, Effect, EngineError, EventSettings, JoinRequest, Mode, PassthroughPreparer,
@@ -2314,12 +2314,10 @@ fn async_dispatch_offers_without_files_and_expiry_pauses_without_seen() {
         .unwrap();
     assert_eq!(participant.readiness, Readiness::Ready);
     assert!(
-        MetaRepo::get(
-            fixture.db.conn(),
-            &format!("async-cooldown:{}:{}", EVENT, expired.0)
-        )
-        .unwrap()
-        .is_some()
+        ExpiryStateRepo::get(fixture.db.conn(), EVENT, &expired.0)
+            .unwrap()
+            .and_then(|state| state.cooldown_until)
+            .is_some()
     );
     participant.updated_at = T3 + 48 * 60 * 60 + 3;
     ParticipantRepo::upsert(fixture.db.conn(), &participant).unwrap();
@@ -3732,6 +3730,7 @@ fn async_coverage_reports_exposed_pairs_and_expired_gaps() {
     let fixture = async_fixture(EventSettings {
         mode: Mode::Async,
         claim_window_secs: 100,
+        claim_reminder_secs: None,
         round_window_secs: 86_400,
         ..EventSettings::default()
     });
@@ -3866,7 +3865,7 @@ fn a_fill_in_covers_a_stranded_track_and_keeps_the_invariants() {
         },
     )
     .unwrap();
-    let candidates = fill_in_candidates(&fixture.db, EVENT, &track_code, 2).unwrap();
+    let candidates = fill_in_candidates(&fixture.db, EVENT, &track_code, 2, T4).unwrap();
     assert!(candidates.iter().any(|c| c.participant_id == "user-fill"));
     let candidate = candidates
         .iter()

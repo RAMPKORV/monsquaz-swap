@@ -97,12 +97,12 @@ Feature: Host operations and recovery
     And the app records the restore
 
   Scenario: The app makes a backup before an event state transition
-    Given a backup folder that the host selected
+    Given a backup folder that the host chose
     And an event in the signup state
     When the host locks the roster
-    Then the app writes a backup of the signup state before the event changes state
-    And the backup contains a database snapshot and a manifest
-    And the backup contains every file that the database refers to
+    Then the app writes a backup record of the signup state before the event changes state
+    And the backup record contains the event data
+    And the backup record contains every stored track file
 
   Scenario: A failed backup stops the transition
     Given a backup folder that the app cannot write to
@@ -110,25 +110,42 @@ Feature: Host operations and recovery
     When the host locks the roster
     Then the app refuses the transition
     And the event stays in the signup state
-    And the app tells the host that the backup failed
+    And the app shows the last backup failure
+    And the app does not change the event state
 
   Scenario: The app makes a daily backup
-    Given a backup folder that the host selected
+    Given a backup folder that the host chose
     And no daily backup from the last 24 hours
     When the daily backup timer runs
     Then the app writes a daily backup
+    And the app writes daily backups only while the app runs
 
   Scenario: The host makes a backup on request
-    Given a backup folder that the host selected
-    When the host selects back up now
+    Given a backup folder that the host chose
+    When the host chooses Back up now
     Then the app writes a manual backup
 
-  Scenario: The host selects a backup folder
+  Scenario: The app shows the last backup failure
+    Given a failed automatic backup
+    When the host opens the backup status
+    Then the app shows Attention
+    And the app shows the failure time and the error code
+    And the app does not show On
+    And the app says that the event state did not change
+
+  Scenario: The restore wizard starts without a backup folder
     Given an installation with no backup folder
-    When the host selects a folder outside the app data folder
+    When the host opens the restore wizard
+    Then the app asks the host to choose a folder
+    And the footer offers Choose folder
+
+  Scenario: The host chooses a backup folder
+    Given an installation with no backup folder
+    When the host chooses a folder outside the app data folder
     Then the app stores the folder
     And the app shows the folder name
     And the app refuses a folder inside the app data folder
+    And the app refuses a cloud-synced folder
 
   Scenario: The app shows the backup history
     Given a backup folder with three complete backups
@@ -140,18 +157,18 @@ Feature: Host operations and recovery
     Given a backup folder that contains a file from an earlier backup
     When the app writes a new backup
     Then the app does not copy that file again
-    And the new manifest refers to that file
+    And the new backup record refers to that file
 
   Scenario: A partial backup never looks complete
-    Given a backup that stops before the app writes the manifest
+    Given a backup that stops before the app writes the backup record
     When the host opens the restore wizard
     Then the app does not show the partial backup
     And the next backup removes the partial backup
 
   Scenario: Retention removes old backups
-    Given 21 transition backups and 15 daily backups
+    Given 21 state-change and manual backups and 15 daily backups
     When the app writes a new backup
-    Then the app keeps the newest 20 transition backups
+    Then the app keeps the newest 20 state-change and manual backups
     And the app keeps the newest 14 daily backups
     And the app removes each file that no kept backup refers to
 
@@ -162,78 +179,89 @@ Feature: Host operations and recovery
 
   Scenario: The restore wizard checks the backup
     Given a backup folder
-    When the host selects a backup to restore
-    Then the app checks the manifest format
-    And the app checks the database hash
-    And the app runs the database integrity check
+    When the host chooses a backup to restore
+    Then the app checks the backup record
+    And the app runs the integrity check
     And the app checks that every file exists and matches its hash
     And the app shows the events, the event states, and the backup time
+    And the app shows the time in the event timezone
 
   Scenario: The restore wizard refuses a damaged backup
-    Given a backup with a file that does not match its hash
-    When the host selects the backup
+    Given a backup with a damaged file
+    When the host chooses the backup
     Then the app refuses the restore
-    And the app does not change the current data
+    And the app does not change the event data
+    And the app shows an error code
+    And the app tells the host to choose another backup
 
   Scenario: The restore wizard warns about an old backup
-    Given a current database with audit entries after the backup time
-    When the host selects the backup
-    Then the app warns that the backup is older than the current data
+    Given event data with audit entries after the backup time
+    When the host chooses the backup
+    Then the app warns that the backup is older than the event data
+    And the app says that a participant can receive a track again
 
   Scenario: The host must type a confirmation to restore
     Given a checked backup
     When the host types a word other than RESTORE
     Then the app refuses the restore
-    And the app does not change the current data
+    And the app does not change the event data
+    And the app shows a confirmation error
 
-  Scenario: A restore keeps the replaced database
-    Given a current database and a checked backup
+  Scenario: A restore keeps the replaced event data
+    Given current event data and a checked backup
     When the host confirms the restore
-    Then the app moves the current database to a pre-restore folder
-    And the app installs the backup database and its files
+    Then the app moves the current event data to a recovery folder
+    And the app installs the backup record and its files
     And the app records the restore in the audit log
+    And the app offers Open recovery folder
 
-  Scenario: The host enters the bot token after a restore
+  Scenario: A restore keeps the bot token
     Given a completed restore
     When the restore wizard finishes
-    Then the app asks the host for the bot token
-    And the app stores the token in the operating system keychain
+    Then the bot token stays in the operating system keychain
+    And the app offers Reconnect bot
+    And the app offers Add bot token when no token exists
 
   Scenario: A backup never contains the bot token
     Given a bot token in the keychain
     When the app writes a backup
     Then no file in the backup folder contains the bot token
 
-  Scenario: A second machine refuses to start the bot
-    Given a writer lock from another machine with a heartbeat less than 5 minutes old
+  Scenario: A second computer refuses to start the bot
+    Given a bot lock from another computer with a check time less than 5 minutes old
     When the app tries to start the bot
     Then the app refuses to start the bot
-    And the app tells the host that another machine runs the event
+    And the app tells the host that another computer holds the bot lock
+    And the app says that the bot lock clears 5 minutes after the last check
 
-  Scenario: A stale writer lock does not block the bot
-    Given a writer lock from another machine with a heartbeat 5 minutes old or older
+  Scenario: A stale bot lock does not block the bot
+    Given a bot lock from another computer with a check time 5 minutes old or older
     When the app tries to start the bot
     Then the app starts the bot
-    And the app records its own machine in the writer lock
+    And the app records this computer in the bot lock
 
-  Scenario: The host takes over the event
-    Given a writer lock from another machine with a recent heartbeat
+  Scenario: The host takes over the bot lock
+    Given a bot lock from another computer with a recent check time
     When the host types TAKE OVER
-    Then the app records this machine in the writer lock
+    Then the app records this computer in the bot lock
+    And the app records the takeover for every event in the data folder
     And the app records the takeover in the audit log
-    And the app can start the bot
+    And the app can start the bot after the host chooses Reconnect bot
 
-  Scenario: A machine that lost the writer lock stops the bot
-    Given a running bot on this machine
-    And a newer writer lock from another machine in the backup folder
-    When the heartbeat timer runs
+  Scenario: A computer that lost the bot lock stops the bot
+    Given a running bot on this computer
+    And a newer bot lock from another computer in the backup folder
+    When the bot lock timer runs
     Then the app stops the bot
-    And the app tells the host that another machine took over
+    And the app tells the host that another computer took over
+    And the app clears the lost-lock message when this computer holds the bot lock again
 
-  Scenario: The host purges the backups
-    Given a backup folder with backups
+  Scenario: The host deletes every backup
+    Given a backup folder with backups for two events
     When the host types PURGE
-    Then the app removes every backup and every backup file from the folder
+    Then the app removes every backup and every backup file for every event
+    And the app keeps the current event data
+    And the app records the deletion in the audit log
 
   @pending
   Scenario: The audit log records an override

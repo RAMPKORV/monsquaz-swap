@@ -38,6 +38,7 @@ export function CommandPalette({
       { id: "plan", label: "Go to schedule planner", hint: "Event tools", icon: "shuffle", run: () => onNavigate("plan") },
       { id: "audit", label: "Go to audit log", hint: "Records", icon: "audit", run: () => onNavigate("audit") },
       { id: "settings", label: "Go to settings", hint: "Connection and storage", icon: "settings", aliases: ["notifications", "appearance", "theme", "retention"], run: () => onNavigate("settings") },
+      { id: "backups", label: "Go to backups", hint: "Backup folder and restore", icon: "download", aliases: ["backup", "restore", "delete backups"], run: () => onAction("Open backups") },
       { id: "theme", label: "Toggle light and dark theme", hint: "Appearance", icon: "sun", run: onToggleTheme },
       { id: "connection", label: "Test the bot connection", hint: "Host action", icon: "refresh", run: () => onAction("Test connection") },
     ],

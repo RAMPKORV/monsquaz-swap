@@ -24,6 +24,10 @@ disagree, stop and decide which is wrong; record the decision.
 | **Seen ledger** | Append-only set of `(track, participant)` pairs that may never repeat. |
 | **Pack** | Host-provided module template + samples. Instruments may be added; new samples are not allowed; slight derivatives of pack samples are allowed. |
 | **Reveal** | The host-triggered publication of titles, credits, schedule, comments, and the album. |
+| **Backup record** | A local copy of the event data, the stored track files, and the audit log. A backup record never holds the bot token. |
+| **Backup folder** | The host-chosen folder that holds backup records. The folder must be outside the app data folder. |
+| **Restore** | The host action that replaces the current event data with a backup record. |
+| **Bot lock** | The single-computer claim that stops two computers from running the bot for the same data folder. The lock clears 5 minutes after the last check. |
 
 ## Hard invariants
 

@@ -227,6 +227,15 @@ export function demoMissionControl(scenario: Scenario): MissionControl {
 
   const mission = baseMission();
 
+  if (new URLSearchParams(window.location.search).get("bot") === "0") {
+    mission.bot = {
+      status: "Not configured",
+      label: "No bot connected",
+      detail: "Add the bot token in Settings to send offers and collect files.",
+      lastSeen: null,
+    };
+  }
+
   if (scenario === "async") {
     mission.event = {
       ...mission.event!,
@@ -742,6 +751,16 @@ const defaultSettings: HostSettings = {
 };
 
 export function demoSettings(scenario: Scenario): HostSettings {
+  if (new URLSearchParams(window.location.search).get("bot") === "0") {
+    return {
+      ...defaultSettings,
+      botConfigured: false,
+      botIdentity: "",
+      tokenStorage: "none",
+      gateway: undefined,
+      theme: "system",
+    };
+  }
   if (scenario === "empty") {
     return {
       ...defaultSettings,
@@ -1772,7 +1791,17 @@ export function demoRevealPackage(scenario: Scenario): RevealPackage {
   };
 }
 
-export type BackupScenario = "default" | "empty" | "long" | "foreign";
+export type BackupScenario =
+  | "default"
+  | "empty"
+  | "long"
+  | "foreign"
+  | "locked"
+  | "last-failure"
+  | "error";
+
+const longBackupEvent =
+  "Midwinter Relay: Twelve Producers, One Long Night (Deluxe Edition)";
 
 export function demoBackupStatus(
   scenario: BackupScenario = "default",
@@ -1796,7 +1825,7 @@ export function demoBackupStatus(
   });
   const folderName =
     scenario === "long"
-      ? "The studio USB drive with the long label"
+      ? "Samsung_T9_Shield_Backups_2026_11_28_Night_Shift_Vol_2"
       : "Swap backups";
   const manual = [
     backup("demo-manual", "manual", 25 * 60, "active"),
@@ -1806,44 +1835,83 @@ export function demoBackupStatus(
   ];
   const long = [
     ...manual,
-    backup("demo-draft", "transition", 8 * 86_400, "draft", longEventName),
-    backup("demo-seed", "transition", 10 * 86_400, "signup", longEventName),
+    backup("demo-draft", "transition", 8 * 86_400, "draft", longBackupEvent),
+    backup("demo-seed", "transition", 10 * 86_400, "signup", longBackupEvent),
     backup(
       "demo-lock",
       "transition",
       12 * 86_400,
       "schedule_review",
-      longEventName,
+      longBackupEvent,
     ),
-    backup("demo-round", "transition", 14 * 86_400, "active", longEventName),
-    backup("demo-pause", "transition", 18 * 86_400, "paused", longEventName),
+    backup("demo-round", "transition", 14 * 86_400, "active", longBackupEvent),
+    backup("demo-pause", "transition", 18 * 86_400, "paused", longBackupEvent),
     backup(
       "demo-archive",
       "transition",
       21 * 86_400,
       "archived",
-      longEventName,
+      longBackupEvent,
     ),
+    {
+      id: "demo-incomplete",
+      kind: "transition",
+      createdAt: 0,
+      complete: false,
+      events: [],
+    },
   ];
-  const backups = scenario === "empty" ? [] : scenario === "long" ? long : manual;
+  const backups =
+    scenario === "empty" || scenario === "error"
+      ? []
+      : scenario === "long"
+        ? long
+        : manual;
+  const folderError =
+    scenario === "error"
+      ? {
+          code: "MSW-BACKUP-001",
+          message:
+            "The app cannot read the backup folder. Connect the drive, then choose Retry. If the folder moved, choose Change folder. The app does not change the event state while the backup fails.",
+          detail: "The folder is not readable.",
+        }
+      : null;
+  const lastFailure =
+    scenario === "last-failure"
+      ? {
+          at: now - 1_200,
+          code: "MSW-BACKUP-003",
+          message:
+            "The app could not write the backup. The app did not change the event state. Connect the drive, then choose Back up now.",
+          detail: "No space left on the drive.",
+        }
+      : null;
+  const writer =
+    scenario === "foreign"
+      ? {
+          state: "foreign" as const,
+          heartbeatAt: now - 42,
+          lostLockAt: null,
+        }
+      : scenario === "locked"
+        ? {
+            state: "foreign" as const,
+            heartbeatAt: now - 600,
+            lostLockAt: now - 540,
+          }
+        : {
+            state: "own" as const,
+            heartbeatAt: now - 120,
+            lostLockAt: null,
+          };
   return {
     folderName: scenario === "empty" ? null : folderName,
+    folderError,
+    lastFailure,
+    checkedAt: now - 15,
     keepTransition: 20,
     keepDaily: 14,
     backups,
-    writer:
-      scenario === "foreign"
-        ? {
-            state: "foreign",
-            machine: "a91c3f07",
-            heartbeatAt: now - 42,
-            lostLock: null,
-          }
-        : {
-            state: "own",
-            machine: "4f2a9c1e",
-            heartbeatAt: now - 120,
-            lostLock: null,
-          },
+    writer,
   };
 }

@@ -18,6 +18,7 @@ import type {
   EventSummary,
   FillInCandidate,
   GuildOption,
+  HostProblem,
   HostSettings,
   LateSeed,
   MissionControl,
@@ -52,12 +53,56 @@ import {
 
 export class HostError extends Error {
   readonly code: string;
+  readonly detail: string | null;
 
-  constructor(message: string, code: string) {
+  constructor(message: string, code: string, detail: string | null = null) {
     super(message);
     this.name = "HostError";
     this.code = code;
+    this.detail = detail;
   }
+}
+
+export function describeHostError(
+  error: unknown,
+  fallbackCode = "MSW-UI-001",
+): HostProblem {
+  if (error && typeof error === "object") {
+    const candidate = error as Partial<HostProblem>;
+    if (
+      typeof candidate.code === "string" &&
+      typeof candidate.message === "string"
+    ) {
+      return {
+        code: candidate.code,
+        message: candidate.message,
+        detail:
+          typeof candidate.detail === "string" ? candidate.detail : null,
+      };
+    }
+  }
+  if (error instanceof HostError) {
+    return {
+      code: error.code,
+      message: error.message,
+      detail: error.detail,
+    };
+  }
+  if (typeof error === "string") {
+    const match = /^(MSW-[A-Z]+-\d{3}):\s*([\s\S]+)$/.exec(error.trim());
+    if (match) {
+      return { code: match[1], message: match[2], detail: null };
+    }
+    return { code: fallbackCode, message: error, detail: null };
+  }
+  if (error instanceof Error) {
+    return { code: fallbackCode, message: error.message, detail: null };
+  }
+  return {
+    code: fallbackCode,
+    message: "The command failed.",
+    detail: null,
+  };
 }
 
 export function isDemoMode(): boolean {
@@ -1099,30 +1144,35 @@ function demoEventSummary(
 // Backups, the restore wizard, and the single-writer guard. The main process
 // keeps every folder path; the UI receives display names and opaque ids.
 
-function demoBackupScenario(): "default" | "empty" | "long" | "foreign" {
+function demoBackupScenario():
+  | "default"
+  | "empty"
+  | "long"
+  | "foreign"
+  | "locked"
+  | "last-failure"
+  | "error" {
   const value = new URLSearchParams(window.location.search).get("backup");
-  return value === "empty" || value === "long" || value === "foreign"
+  return value === "empty" ||
+    value === "long" ||
+    value === "foreign" ||
+    value === "locked" ||
+    value === "last-failure" ||
+    value === "error"
     ? value
     : "default";
 }
 
 export async function loadBackupStatus(): Promise<BackupStatus> {
   if (isDemoMode()) {
-    const scenario = demoBackupScenario();
     const state = new URLSearchParams(window.location.search).get("backup");
-    if (state === "error") {
-      throw new HostError(
-        "The backup folder is not readable. Select the folder again.",
-        "MSW-BACKUP-001",
-      );
-    }
     if (state === "loading") {
       return new Promise<BackupStatus>(() => {
         // A deliberate non-resolving promise for the loading review state.
       });
     }
     await pause(120);
-    return demoBackupStatus(scenario);
+    return demoBackupStatus(demoBackupScenario());
   }
   return invoke<BackupStatus>("host_backup_status");
 }
@@ -1130,8 +1180,9 @@ export async function loadBackupStatus(): Promise<BackupStatus> {
 export async function chooseBackupFolder(): Promise<BackupStatus> {
   if (isDemoMode()) {
     await pause(200);
-    const scenario = demoBackupScenario();
-    return demoBackupStatus(scenario === "empty" ? "default" : scenario);
+    return demoBackupStatus(
+      demoBackupScenario() === "long" ? "long" : "default",
+    );
   }
   return invoke<BackupStatus>("host_backup_choose_folder");
 }
@@ -1150,9 +1201,12 @@ export async function purgeBackups(confirmation: string): Promise<BackupStatus> 
   if (isDemoMode()) {
     await pause(200);
     if (confirmation.trim() !== "PURGE") {
-      throw new HostError("Type PURGE to confirm.", "MSW-BACKUP-004");
+      throw new HostError(
+        "Type PURGE in capital letters to continue.",
+        "MSW-BACKUP-004",
+      );
     }
-    return { ...demoBackupStatus(), backups: [] };
+    return { ...demoBackupStatus(), backups: [], lastFailure: null };
   }
   return invoke<BackupStatus>("host_backup_purge", { confirmation });
 }
@@ -1161,38 +1215,64 @@ export async function takeOverWriter(confirmation: string): Promise<BackupStatus
   if (isDemoMode()) {
     await pause(200);
     if (confirmation.trim() !== "TAKE OVER") {
-      throw new HostError("Type TAKE OVER to confirm.", "MSW-BACKUP-005");
+      throw new HostError(
+        "Type TAKE OVER in capital letters to continue.",
+        "MSW-BACKUP-004",
+      );
     }
     return {
       ...demoBackupStatus(),
       writer: {
         state: "own",
-        machine: "4f2a9c1e",
         heartbeatAt: Math.floor(Date.now() / 1000),
-        lostLock: null,
+        lostLockAt: null,
       },
     };
   }
   return invoke<BackupStatus>("host_writer_takeover", { confirmation });
 }
 
+export async function revealBackupFolder(): Promise<void> {
+  if (isDemoMode()) {
+    await pause(120);
+    return;
+  }
+  return invoke<void>("host_backup_reveal_folder");
+}
+
+export async function openRecoveryFolder(): Promise<void> {
+  if (isDemoMode()) {
+    await pause(120);
+    return;
+  }
+  return invoke<void>("host_open_recovery_folder");
+}
+
 export async function loadRestoreSource(): Promise<RestoreSource> {
   if (isDemoMode()) {
     await pause(120);
-    const empty =
-      new URLSearchParams(window.location.search).get("restore") === "empty";
-    const status = empty ? demoBackupStatus("empty") : demoBackupStatus();
-    return {
-      folderName: empty ? "Swap backups" : status.folderName,
-      backups: empty ? [] : status.backups,
-    };
+    const state = new URLSearchParams(window.location.search).get("restore");
+    if (state === "nofolder") {
+      return { folderName: null, backups: [] };
+    }
+    if (state === "empty") {
+      return { folderName: "Swap backups", backups: [] };
+    }
+    if (state === "dense") {
+      const status = demoBackupStatus("long");
+      return { folderName: status.folderName, backups: status.backups };
+    }
+    const status = demoBackupStatus();
+    return { folderName: status.folderName, backups: status.backups };
   }
   return invoke<RestoreSource>("host_restore_source");
 }
 
 export async function chooseRestoreFolder(): Promise<RestoreSource> {
   if (isDemoMode()) {
-    return loadRestoreSource();
+    await pause(100);
+    const status = demoBackupStatus();
+    return { folderName: status.folderName, backups: status.backups };
   }
   return invoke<RestoreSource>("host_restore_choose_folder");
 }
@@ -1200,10 +1280,12 @@ export async function chooseRestoreFolder(): Promise<RestoreSource> {
 export async function previewRestore(id: string): Promise<RestorePreview> {
   if (isDemoMode()) {
     await pause(260);
-    if (new URLSearchParams(window.location.search).get("restore") === "error") {
+    const state = new URLSearchParams(window.location.search).get("restore");
+    if (state === "error") {
       throw new HostError(
-        "The backup is damaged. The file S7F3A.it does not match its hash. The app did not change the current data.",
+        "The app cannot use this backup. One file is damaged. The app did not change the event data. Choose another backup, then choose Check backup.",
         "MSW-BACKUP-002",
+        "The file S7F3A.it is damaged.",
       );
     }
     const backup = demoBackupStatus().backups.find((item) => item.id === id);
@@ -1214,7 +1296,8 @@ export async function previewRestore(id: string): Promise<RestorePreview> {
       appVersion: "0.1.1",
       files: 31,
       events: backup?.events ?? [],
-      staleness: "older",
+      staleness:
+        state === "same" ? "same" : state === "newer" ? "newer" : "older",
       newerEntries: 4,
     };
   }
@@ -1228,7 +1311,10 @@ export async function restoreBackup(
   if (isDemoMode()) {
     await pause(400);
     if (confirmation.trim() !== "RESTORE") {
-      throw new HostError("Type RESTORE to confirm.", "MSW-BACKUP-003");
+      throw new HostError(
+        "Type RESTORE in capital letters to continue.",
+        "MSW-BACKUP-004",
+      );
     }
     const preview = await previewRestore(id);
     return { events: preview.events, keptPrevious: true };

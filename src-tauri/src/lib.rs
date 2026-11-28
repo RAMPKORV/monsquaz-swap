@@ -199,11 +199,13 @@ pub fn run() {
             backup_host::host_backup_set_retention,
             backup_host::host_backup_now,
             backup_host::host_backup_purge,
+            backup_host::host_backup_reveal_folder,
             backup_host::host_writer_takeover,
             backup_host::host_restore_choose_folder,
             backup_host::host_restore_source,
             backup_host::host_restore_preview,
-            backup_host::host_restore
+            backup_host::host_restore,
+            backup_host::host_open_recovery_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building Monsquaz Swap");

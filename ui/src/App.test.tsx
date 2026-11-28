@@ -518,6 +518,19 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens backups from the command palette", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.click(screen.getByRole("option", { name: /go to backups/i }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Backups and restore" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens the command palette with Ctrl K and navigates", async () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });

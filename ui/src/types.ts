@@ -498,15 +498,27 @@ export type BackupItem = {
   events: BackupEvent[];
 };
 
+export type HostProblem = {
+  code: string;
+  message: string;
+  detail: string | null;
+};
+
+export type BackupFailure = HostProblem & {
+  at: number;
+};
+
 export type WriterStatus = {
   state: "free" | "own" | "foreign";
-  machine: string | null;
   heartbeatAt: number | null;
-  lostLock: string | null;
+  lostLockAt: number | null;
 };
 
 export type BackupStatus = {
   folderName: string | null;
+  folderError: HostProblem | null;
+  lastFailure: BackupFailure | null;
+  checkedAt: number;
   keepTransition: number;
   keepDaily: number;
   backups: BackupItem[];

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type {
   BackupItem,
   BackupStatus,
+  HostProblem,
   RestoreDone,
   RestorePreview,
   RestoreSource,
@@ -12,18 +13,21 @@ import {
   backupNow,
   chooseBackupFolder,
   chooseRestoreFolder,
+  describeHostError,
   isDemoMode,
   loadBackupStatus,
   loadRestoreSource,
+  openRecoveryFolder,
   previewRestore,
   purgeBackups,
   restoreBackup,
+  revealBackupFolder,
   takeOverWriter,
 } from "../data/client";
 import { formatDateTime } from "../i18n";
 
 const kindLabel: Record<string, string> = {
-  transition: "State change",
+  transition: "Before state change",
   daily: "Daily",
   manual: "Manual",
 };
@@ -37,14 +41,6 @@ const stateLabel: Record<string, string> = {
   reveal: "Reveal",
   archived: "Archived",
 };
-
-function message(error: unknown): string {
-  return typeof error === "string"
-    ? error
-    : error instanceof Error
-      ? error.message
-      : "The command failed.";
-}
 
 function eventsText(item: { events: { name: string; state: string }[] }) {
   if (item.events.length === 0) {
@@ -63,6 +59,12 @@ function eventCount(count: number): string {
   return `${count} ${count === 1 ? "event" : "events"}`;
 }
 
+function focusById(id: string) {
+  window.requestAnimationFrame(() => {
+    document.getElementById(id)?.focus();
+  });
+}
+
 /** Keep Enter in a dialog field from submitting the settings form. */
 function stopEnter(event: React.KeyboardEvent<HTMLInputElement>) {
   if (event.key === "Enter") {
@@ -70,20 +72,61 @@ function stopEnter(event: React.KeyboardEvent<HTMLInputElement>) {
   }
 }
 
+function ProblemView({
+  problem,
+  tone = "error",
+}: {
+  problem: HostProblem;
+  tone?: "error" | "warning";
+}) {
+  if (tone === "warning") {
+    return (
+      <div className="warning warning--warn" role="status">
+        <Icon name="alert" size={18} />
+        <div>
+          <p>{problem.message}</p>
+          <p className="problem-detail">
+            Error code <code>{problem.code}</code>
+          </p>
+          {problem.detail ? (
+            <p className="problem-detail">Technical detail: {problem.detail}</p>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="field-error" role="alert">
+      <p>{problem.message}</p>
+      <p className="error-code">
+        Error code <code>{problem.code}</code>
+      </p>
+      {problem.detail ? (
+        <p className="problem-detail">Technical detail: {problem.detail}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function BackupCard({
   timezone,
+  tokenConfigured,
   onEnterToken,
   onRestored,
+  onBotStatus,
 }: {
   timezone: string;
+  tokenConfigured: boolean;
   onEnterToken: () => void;
   onRestored: () => void;
+  onBotStatus: () => void;
 }) {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
   const [restored, setRestored] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<HostProblem | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<"restore" | "purge" | "takeover" | null>(
     () => {
@@ -101,12 +144,12 @@ export function BackupCard({
       .then((next) => {
         if (!cancelled) {
           setStatus(next);
-          setError(null);
+          setProblem(null);
         }
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(message(reason));
+          setProblem(describeHostError(reason));
         }
       })
       .finally(() => {
@@ -134,61 +177,137 @@ export function BackupCard({
         content.getBoundingClientRect().top +
         content.scrollTop -
         16;
-      content.scrollTo({ top, behavior: "instant" });
+      if (typeof content.scrollTo === "function") {
+        content.scrollTo({ top, behavior: "instant" });
+      } else {
+        content.scrollTop = top;
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  async function run(action: () => Promise<BackupStatus>) {
+  async function apply(action: () => Promise<BackupStatus>): Promise<BackupStatus> {
     setBusy(true);
-    setError(null);
+    setProblem(null);
+    setNotice(null);
     try {
-      setStatus(await action());
+      const next = await action();
+      setStatus(next);
+      return next;
     } catch (reason) {
-      setError(message(reason));
+      const next = describeHostError(reason);
+      setProblem(next);
+      loadBackupStatus().then(setStatus).catch(() => undefined);
+      throw next;
     } finally {
       setBusy(false);
     }
   }
 
+  async function run(action: () => Promise<BackupStatus>) {
+    try {
+      return await apply(action);
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleChooseFolder() {
+    const previous = status?.folderName ?? null;
+    const next = await run(chooseBackupFolder);
+    if (!next) {
+      return;
+    }
+    if (next.folderName !== previous) {
+      setNotice("Backup folder changed.");
+    }
+    focusById("backup-folder-button");
+  }
+
+  async function handleBackupNow() {
+    if (!(await run(backupNow))) {
+      return;
+    }
+    setNotice("Backup written.");
+    focusById("backup-now-button");
+  }
+
+  async function handleCheckLock() {
+    if (!(await run(loadBackupStatus))) {
+      return;
+    }
+    setNotice("Bot lock checked.");
+    focusById("check-bot-lock");
+  }
+
+  async function handleRevealFolder() {
+    setProblem(null);
+    try {
+      await revealBackupFolder();
+    } catch (reason) {
+      setProblem(describeHostError(reason));
+    }
+  }
+
   const backups = status?.backups ?? [];
+  const complete = backups.filter((item) => item.complete);
+  const incomplete = backups.length - complete.length;
+  const folderError = status?.folderError ?? null;
+  const lastFailure = status?.lastFailure ?? null;
   const writer = status?.writer;
-  const lockLost = Boolean(writer?.lostLock);
+  const lostLockAt = writer?.lostLockAt ?? null;
   const foreign = writer?.state === "foreign";
-  const heartbeat = writer?.heartbeatAt
-    ? formatDateTime(writer.heartbeatAt, timezone)
-    : null;
-  const writerTone = loading
-    ? ("muted" as const)
-    : !writer
-      ? ("warn" as const)
-      : lockLost || foreign
-        ? ("danger" as const)
-        : writer.state === "own"
-          ? ("ok" as const)
-          : ("muted" as const);
   const writerLabel = loading
     ? "Loading"
     : !writer
       ? "Unknown"
-      : lockLost
-        ? "Lock lost"
-        : foreign
-          ? "Another machine"
-          : writer.state === "own"
-            ? "This machine"
-            : "Free";
-  const writerHelp = loading
-    ? "The app checks which machine holds the writer lock."
+      : lostLockAt
+        ? "Another computer took over"
+        : writer.state === "own"
+          ? "This computer"
+          : writer.state === "foreign"
+            ? "Another computer"
+            : "No computer";
+  const writerTone = loading
+    ? ("muted" as const)
     : !writer
-      ? "The app could not read the writer lock. Retry the request."
-      : lockLost
-        ? writer.lostLock
-        : foreign
-          ? `Machine ${writer.machine ?? "unknown"} sent a heartbeat ${heartbeat ?? "recently"}. The bot stays off here until you take over.`
-          : writer.state === "own"
-            ? `This machine holds the writer lock.${heartbeat ? ` The last heartbeat was ${heartbeat}.` : ""}`
-            : "No machine holds the writer lock. The bot can start on this machine.";
+      ? ("warn" as const)
+      : foreign || lostLockAt
+        ? ("danger" as const)
+        : ("muted" as const);
+  const writerHelp = loading
+    ? "The app checks which computer holds the bot lock."
+    : !writer
+      ? "The app could not read the bot lock. Choose Check bot lock."
+      : lostLockAt
+        ? `Another computer took over at ${formatDateTime(lostLockAt, timezone)}. The bot stopped on this computer. Do not take over unless you stopped the bot on the other computer.`
+        : writer.state === "own"
+          ? `This computer can run the bot. This does not mean the bot is online. Checked at ${formatDateTime(status?.checkedAt ?? 0, timezone)}.`
+          : writer.state === "foreign"
+            ? `Another computer checked in at ${formatDateTime(writer.heartbeatAt ?? 0, timezone)}. The bot stays off on this computer while the other computer checks in. The lock clears 5 minutes after the last check. Choose Take over only if you stopped the bot on that computer. Then choose Reconnect bot to start the bot.`
+            : `No computer holds the bot lock. The bot can start on this computer. Checked at ${formatDateTime(status?.checkedAt ?? 0, timezone)}.`;
+  const statusTone = loading
+    ? ("muted" as const)
+    : folderError
+      ? ("danger" as const)
+      : problem && !status
+        ? ("danger" as const)
+        : lastFailure || lostLockAt
+          ? ("warn" as const)
+          : status?.folderName
+            ? ("ok" as const)
+            : ("warn" as const);
+  const statusLabel = loading
+    ? "Loading"
+    : folderError
+      ? "Folder error"
+      : problem && !status
+        ? "Error"
+        : lastFailure || lostLockAt
+          ? "Attention"
+          : status?.folderName
+            ? "On"
+            : "Not set up";
 
   function closeRestore() {
     setDialog(null);
@@ -196,6 +315,7 @@ export function BackupCard({
     if (restored) {
       setRestored(false);
       onRestored();
+      focusById("backups-title");
     }
   }
 
@@ -217,38 +337,36 @@ export function BackupCard({
     >
       <div className="card__header">
         <div>
-          <h2 id="backups-title">Backups and restore</h2>
+          <h2 id="backups-title" tabIndex={-1}>
+            Backups and restore
+          </h2>
           <p className="card__subtitle">
-            The app backs up before each event state change and once a day.
-            Backups hold participant data. Backups never hold the bot token.
-            Times show in {timezone}.
+            A backup record holds participant data, stored track files, and the
+            audit log. The app backs up before each event state change and once
+            a day while the app runs. Backups never hold the bot token. Do not
+            use a cloud-synced folder. Times show in {timezone}.
           </p>
         </div>
-        <StatusPill
-          tone={
-            loading
-              ? "muted"
-              : error && !status
-                ? "danger"
-                : status?.folderName
-                  ? "ok"
-                  : "warn"
-          }
-        >
-          {loading
-            ? "Loading"
-            : error && !status
-              ? "Error"
-              : status?.folderName
-                ? "On"
-                : "Not set up"}
-        </StatusPill>
+        <StatusPill tone={statusTone}>{statusLabel}</StatusPill>
       </div>
 
-      {error ? (
-        <p className="field-error" role="alert">
-          {error}
+      {notice ? (
+        <p className="save-state" role="status">
+          <Icon name="check" size={16} />
+          {notice}
         </p>
+      ) : null}
+
+      {folderError ? <ProblemView problem={folderError} /> : null}
+      {problem && !folderError ? <ProblemView problem={problem} /> : null}
+      {lastFailure && !folderError && !problem ? (
+        <ProblemView
+          problem={{
+            ...lastFailure,
+            message: `The last backup failed at ${formatDateTime(lastFailure.at, timezone)}. ${lastFailure.message}`,
+          }}
+          tone="warning"
+        />
       ) : null}
 
       <div className="channel-map">
@@ -256,38 +374,63 @@ export function BackupCard({
           <div>
             <span className="field-label">Backup folder</span>
             <span className="field-help">
-              {status?.folderName
-                ? "The app writes to the selected folder. Keep one copy off this machine."
-                : "Select a folder on another disk or a USB drive."}{" "}
+              {loading
+                ? "The app reads the backup folder."
+                : folderError
+                  ? "The app cannot read the chosen folder."
+                  : status?.folderName
+                    ? "The app writes to the chosen folder. Keep one copy off this computer."
+                    : "Choose a folder on another disk or a USB drive."}{" "}
               The app keeps the newest {status?.keepTransition ?? 20}{" "}
-              state-change backups and the newest {status?.keepDaily ?? 14}{" "}
-              daily backups.
+              state-change and manual backups and the newest{" "}
+              {status?.keepDaily ?? 14} daily backups.
             </span>
           </div>
           <span className="channel-map__value">
             {loading ? (
               <Skeleton width="128px" height={14} />
-            ) : error && !status ? (
+            ) : folderError ? (
               "Unavailable"
             ) : (
-              status?.folderName ?? "No folder selected"
+              status?.folderName ?? "No folder chosen"
             )}
           </span>
         </div>
-        <div className="channel-map__row">
-          <div>
-            <span className="field-label">Bot machine</span>
-            <span className="field-help">{writerHelp}</span>
+        {!folderError ? (
+          <div className="channel-map__row">
+            <div>
+              <span className="field-label">Bot lock</span>
+              <span className="field-help">{writerHelp}</span>
+            </div>
+            <div className="bot-lock">
+              <StatusPill tone={writerTone} icon="lock">
+                {writerLabel}
+              </StatusPill>
+              {!loading ? (
+                <button
+                  id="check-bot-lock"
+                  type="button"
+                  className="link-button"
+                  disabled={busy}
+                  onClick={handleCheckLock}
+                >
+                  Check bot lock
+                </button>
+              ) : null}
+            </div>
           </div>
-          <StatusPill tone={writerTone}>{writerLabel}</StatusPill>
-        </div>
+        ) : null}
       </div>
 
       <div className="backup-history">
         <div className="backup-history__head">
           <h3 id="backup-history-title">Backup history</h3>
-          {!loading && status ? (
-            <span>{backupCount(backups.length)}</span>
+          {!loading && status && !folderError ? (
+            <span>
+              {incomplete > 0
+                ? `${complete.length} complete, ${incomplete} incomplete`
+                : backupCount(backups.length)}
+            </span>
           ) : null}
         </div>
         {loading ? (
@@ -302,70 +445,98 @@ export function BackupCard({
               </div>
             ))}
           </div>
-        ) : error && !status ? (
+        ) : folderError ? (
           <p className="backup-history__empty">
-            The app could not read the backup folder. Select Retry.
+            The app cannot show the backups until it reads the folder.
           </p>
         ) : !status?.folderName ? (
           <p className="backup-history__empty">
-            Select a backup folder. The app writes the first backup when you
-            select Back up now.
+            No backups yet. Choose a folder, then choose Back up now.
           </p>
         ) : backups.length === 0 ? (
           <p className="backup-history__empty">
-            No backup yet. Select Back up now to write the first backup.
+            No backups in this folder. Choose Back up now to write the first
+            backup.
           </p>
         ) : (
-          <ul
-            className="backup-history__list"
-            aria-labelledby="backup-history-title"
-          >
-            {backups.map((item) => (
-              <li className="backup-history__row" key={item.id}>
-                <div className="backup-history__copy">
-                  <span className="field-label">
-                    {kindLabel[item.kind] ?? item.kind}
-                    {item.complete ? "" : " · Incomplete"}
+          <>
+            {incomplete > 0 ? (
+              <p className="backup-history__note">
+                The app did not finish an incomplete backup. It cannot restore
+                it. The next backup replaces it.
+              </p>
+            ) : null}
+            <ul
+              className="backup-history__list"
+              role="list"
+              aria-labelledby="backup-history-title"
+            >
+              {backups.map((item) => (
+                <li className="backup-history__row" key={item.id}>
+                  <div className="backup-history__copy">
+                    <span className="field-label">
+                      {kindLabel[item.kind] ?? item.kind}
+                      {item.complete ? "" : " · Incomplete"}
+                    </span>
+                    <span className="field-help">{eventsText(item)}</span>
+                  </div>
+                  <span className="backup-history__time">
+                    {item.complete
+                      ? formatDateTime(item.createdAt, timezone)
+                      : "Not written"}
                   </span>
-                  <span className="field-help">{eventsText(item)}</span>
-                </div>
-                <span className="backup-history__time">
-                  {item.complete
-                    ? formatDateTime(item.createdAt, timezone)
-                    : "Not written"}
-                </span>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
       <div className="settings-header-actions backup-card__actions">
         <Button
-          variant="secondary"
+          id="backup-folder-button"
+          variant={
+            !status?.folderName && !folderError && !(problem && !status)
+              ? "primary"
+              : "secondary"
+          }
           icon="folder"
           disabled={busy || loading}
-          onClick={() => run(chooseBackupFolder)}
+          onClick={handleChooseFolder}
         >
           {status?.folderName ? "Change folder" : "Choose folder"}
         </Button>
         <Button
-          variant="secondary"
+          id="backup-now-button"
+          variant={lastFailure ? "primary" : "secondary"}
           icon="download"
-          disabled={busy || loading || !status?.folderName}
-          onClick={() => run(backupNow)}
+          disabled={busy || loading || !status?.folderName || Boolean(folderError)}
+          onClick={handleBackupNow}
         >
           Back up now
         </Button>
-        <Button
-          variant="secondary"
-          icon="refresh"
-          disabled={busy || loading}
-          onClick={() => setDialog("restore")}
-        >
-          Restore from a backup
-        </Button>
-        {foreign || lockLost ? (
+        {!folderError && status?.folderName ? (
+          <Button
+            variant="secondary"
+            icon="folder"
+            disabled={busy || loading}
+            onClick={handleRevealFolder}
+          >
+            Reveal backup folder
+          </Button>
+        ) : null}
+        {!folderError ? (
+          <Button
+            id="restore-open-button"
+            variant="secondary"
+            icon="refresh"
+            disabled={busy || loading}
+            onClick={() => setDialog("restore")}
+          >
+            Restore from a backup
+          </Button>
+        ) : null}
+        {!folderError && (foreign || lostLockAt) ? (
           <Button
             variant="danger"
             icon="lock"
@@ -375,9 +546,10 @@ export function BackupCard({
             Take over
           </Button>
         ) : null}
-        {error && !status ? (
+        {(folderError || (problem && !status)) ? (
           <Button
-            variant="secondary"
+            id="backup-retry-button"
+            variant="primary"
             icon="refresh"
             disabled={busy || loading}
             onClick={() => setReload((value) => value + 1)}
@@ -385,52 +557,68 @@ export function BackupCard({
             Retry
           </Button>
         ) : null}
-        <Button
-          variant="danger"
-          icon="trash"
-          disabled={busy || loading || backups.length === 0}
-          onClick={() => setDialog("purge")}
-        >
-          Delete all backups
-        </Button>
+        {backups.length > 0 && !foreign && !lostLockAt && !folderError ? (
+          <Button
+            variant="danger"
+            icon="trash"
+            disabled={busy || loading}
+            onClick={() => setDialog("purge")}
+          >
+            Delete all backups
+          </Button>
+        ) : null}
       </div>
 
       {dialog === "restore" ? (
         <RestoreWizard
           timezone={timezone}
-          onRestored={() => setRestored(true)}
+          tokenConfigured={tokenConfigured}
+          returnFocusId={restored ? "backups-title" : undefined}
+          onRestored={() => {
+            setRestored(true);
+            onBotStatus();
+          }}
           onClose={closeRestore}
           onEnterToken={finishRestoreWithToken}
         />
       ) : null}
       {dialog === "purge" ? (
         <TypedConfirm
-          title="Delete every backup?"
+          title="Delete all backups?"
           word="PURGE"
-          action="Delete backups"
+          action="Delete all backups"
+          returnFocusId="backups-title"
           onClose={() => setDialog(null)}
-          onConfirm={(word) => run(() => purgeBackups(word))}
+          onSuccess={() => setNotice("All backups deleted.")}
+          onConfirm={async (word) => {
+            await apply(() => purgeBackups(word));
+          }}
         >
           <p>
-            This deletes every backup and every backup file in{" "}
-            {status?.folderName ?? "the backup folder"}. Use it after a
-            participant asks for deletion, so old backups do not keep their
-            data. The current event data stays. This cannot be undone.
+            This deletes {backupCount(backups.length)} in{" "}
+            {status?.folderName ?? "the backup folder"} for every event,
+            including backups for other events. The current event data stays.
+            You cannot undo this.
           </p>
         </TypedConfirm>
       ) : null}
       {dialog === "takeover" ? (
         <TypedConfirm
-          title="Run the event on this machine?"
+          title="Run the event on this computer?"
           word="TAKE OVER"
           action="Take over"
+          returnFocusId="backups-title"
           onClose={() => setDialog(null)}
-          onConfirm={(word) => run(() => takeOverWriter(word))}
+          onSuccess={() => setNotice("This computer now holds the bot lock.")}
+          onConfirm={async (word) => {
+            await apply(() => takeOverWriter(word));
+          }}
         >
           <p>
-            Stop the bot on machine {writer?.machine ?? "the other machine"}{" "}
-            first. Two bots for one event send duplicate messages. The app
-            records the takeover in the audit log.
+            Stop the bot on the other computer first. Two bots for the same
+            event send duplicate messages. The app records the takeover for
+            every event in this data folder. Then choose Reconnect bot to start
+            the bot.
           </p>
         </TypedConfirm>
       ) : null}
@@ -443,34 +631,65 @@ function TypedConfirm({
   word,
   action,
   children,
+  returnFocusId,
   onClose,
+  onSuccess,
   onConfirm,
 }: {
   title: string;
   word: string;
   action: string;
   children: React.ReactNode;
+  returnFocusId: string;
   onClose: () => void;
-  onConfirm: (word: string) => void;
+  onSuccess: () => void;
+  onConfirm: (word: string) => Promise<void>;
 }) {
   const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<HostProblem | null>(null);
+  const matches = typed.trim() === word;
+
+  function requestClose() {
+    if (!busy) {
+      onClose();
+    }
+  }
+
+  async function submit() {
+    if (!matches || busy) {
+      return;
+    }
+    setBusy(true);
+    setProblem(null);
+    try {
+      await onConfirm(typed.trim());
+      onClose();
+      onSuccess();
+    } catch (reason) {
+      setProblem(describeHostError(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Dialog
       title={title}
       labelledBy="typed-confirm-title"
-      onClose={onClose}
+      describedBy="typed-confirm-instructions"
+      onClose={requestClose}
+      closeDisabled={busy}
+      returnFocusId={returnFocusId}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" disabled={busy} onClick={requestClose}>
             Cancel
           </Button>
           <Button
             variant="danger"
-            disabled={typed.trim() !== word}
-            onClick={() => {
-              onClose();
-              onConfirm(typed.trim());
-            }}
+            disabled={busy || !matches}
+            onClick={submit}
           >
             {action}
           </Button>
@@ -478,40 +697,59 @@ function TypedConfirm({
       }
     >
       {children}
-      <p className="dialog__warning">
-        Type <code>{word}</code> to continue.
+      {problem ? <ProblemView problem={problem} /> : null}
+      <p className="dialog__warning" id="typed-confirm-instructions">
+        Type <code>{word}</code> in capital letters to continue.
       </p>
-      <Field label={`Type ${word} to confirm`} htmlFor="typed-confirm">
+      <Field label="Confirmation" htmlFor="typed-confirm">
         <input
           id="typed-confirm"
           className="input"
           value={typed}
           autoComplete="off"
-          onKeyDown={stopEnter}
+          aria-invalid={typed.length > 0 && !matches}
+          aria-describedby={
+            typed.length > 0 && !matches ? "typed-confirm-hint" : undefined
+          }
+          onKeyDown={(event) => {
+            stopEnter(event);
+            if (event.key === "Enter" && matches) {
+              void submit();
+            }
+          }}
           onChange={(event) => setTyped(event.target.value)}
         />
       </Field>
+      {typed.length > 0 && !matches ? (
+        <p className="field-error" id="typed-confirm-hint" role="alert">
+          Type {word} in capital letters.
+        </p>
+      ) : null}
     </Dialog>
   );
 }
 
 const stalenessText: Record<RestorePreview["staleness"], string> = {
   none: "This computer has no event data. The restore adds the backup.",
-  same: "The backup matches the data on this computer.",
+  same: "The backup matches the event data on this computer.",
   older:
-    "This backup is older than the data on this computer. The restore removes the newer changes from the active database.",
+    "This backup is older than the event data on this computer. The restore removes claims and submissions after the backup. A participant can receive a track that they already had. Restore only if you must.",
   newer: "This backup has changes that this computer does not have.",
   diverged:
-    "This backup comes from a different history than the data on this computer.",
+    "This backup comes from a different history. The record of who had which track can be wrong. A participant can receive a track that they already had. Restore only if you must.",
 };
 
 function RestoreWizard({
   timezone,
+  tokenConfigured,
+  returnFocusId,
   onClose,
   onRestored,
   onEnterToken,
 }: {
   timezone: string;
+  tokenConfigured: boolean;
+  returnFocusId?: string;
   onClose: () => void;
   onRestored: () => void;
   onEnterToken: () => void;
@@ -522,8 +760,13 @@ function RestoreWizard({
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [done, setDone] = useState<RestoreDone | null>(null);
   const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"folder" | "preview" | "restore" | null>(
+    null,
+  );
+  const [problem, setProblem] = useState<HostProblem | null>(null);
+  const [recoveryProblem, setRecoveryProblem] = useState<HostProblem | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -546,7 +789,7 @@ function RestoreWizard({
           return;
         }
         setSelected(first.id);
-        setBusy(true);
+        setBusy("preview");
         try {
           const checked = await previewRestore(first.id);
           if (cancelled) {
@@ -554,6 +797,7 @@ function RestoreWizard({
           }
           setPreview(checked);
           if (step === "done") {
+            setBusy("restore");
             const result = await restoreBackup(first.id, "RESTORE");
             if (!cancelled) {
               setDone(result);
@@ -562,14 +806,14 @@ function RestoreWizard({
           }
         } finally {
           if (!cancelled) {
-            setBusy(false);
+            setBusy(null);
           }
         }
       } catch (reason) {
         if (!cancelled) {
-          setError(message(reason));
+          setProblem(describeHostError(reason));
           setLoading(false);
-          setBusy(false);
+          setBusy(null);
         }
       }
     }
@@ -577,20 +821,28 @@ function RestoreWizard({
     return () => {
       cancelled = true;
     };
-    // The wizard reads its demo stage once. Host data arrives from the call.
   }, []);
+
+  const complete: BackupItem[] =
+    source?.backups.filter((item) => item.complete) ?? [];
 
   useEffect(() => {
     if (done) {
       document.getElementById("restore-add-token")?.focus();
     } else if (preview) {
       document.getElementById("restore-confirm")?.focus();
+    } else if (source && complete.length === 0) {
+      document.getElementById("restore-choose-folder")?.focus();
     } else if (source) {
-      document
-        .querySelector<HTMLInputElement>('input[name="restore-backup"]')
-        ?.focus();
+      const checked = document.querySelector<HTMLInputElement>(
+        'input[name="restore-backup"]:checked',
+      );
+      (checked ??
+        document.querySelector<HTMLInputElement>(
+          'input[name="restore-backup"]',
+        ))?.focus();
     }
-  }, [source, preview, done]);
+  }, [source, preview, done, complete.length]);
 
   function requestClose() {
     if (!busy) {
@@ -598,20 +850,44 @@ function RestoreWizard({
     }
   }
 
-  async function step<T>(action: () => Promise<T>, apply: (value: T) => void) {
-    setBusy(true);
-    setError(null);
+  async function step<T>(
+    phase: "folder" | "preview" | "restore",
+    action: () => Promise<T>,
+    apply: (value: T) => void,
+  ) {
+    setBusy(phase);
+    setProblem(null);
     try {
       apply(await action());
     } catch (reason) {
-      setError(message(reason));
+      setProblem(describeHostError(reason));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
-  const complete: BackupItem[] =
-    source?.backups.filter((item) => item.complete) ?? [];
+  async function chooseFolder() {
+    await step("folder", chooseRestoreFolder, (next) => {
+      setSource(next);
+      setSelected(null);
+      setPreview(null);
+      setTyped("");
+    });
+  }
+
+  async function submitRestore() {
+    if (!preview || typed.trim() !== "RESTORE") {
+      return;
+    }
+    await step(
+      "restore",
+      () => restoreBackup(preview.id, typed.trim()),
+      (result) => {
+        setDone(result);
+        onRestored();
+      },
+    );
+  }
 
   const footer = done ? (
     <>
@@ -624,14 +900,14 @@ function RestoreWizard({
         icon="bot"
         onClick={onEnterToken}
       >
-        Add bot token
+        {tokenConfigured ? "Reconnect bot" : "Add bot token"}
       </Button>
     </>
   ) : preview ? (
     <>
       <Button
         variant="secondary"
-        disabled={busy}
+        disabled={busy !== null}
         onClick={() => {
           setPreview(null);
           setTyped("");
@@ -641,62 +917,100 @@ function RestoreWizard({
       </Button>
       <Button
         variant="danger"
-        disabled={busy || typed.trim() !== "RESTORE"}
-        onClick={() =>
-          step(
-            () => restoreBackup(preview.id, typed.trim()),
-            (result) => {
-              setDone(result);
-              onRestored();
-            },
-          )
-        }
+        disabled={busy !== null || typed.trim() !== "RESTORE"}
+        onClick={submitRestore}
       >
         Restore
       </Button>
     </>
   ) : (
     <>
-      <Button variant="secondary" disabled={busy} onClick={requestClose}>
+      <Button variant="secondary" disabled={busy !== null} onClick={requestClose}>
         Cancel
       </Button>
-      <Button
-        variant="primary"
-        disabled={loading || busy || !selected}
-        onClick={() =>
-          selected ? step(() => previewRestore(selected), setPreview) : undefined
-        }
-      >
-        Check backup
-      </Button>
+      {source && complete.length > 0 ? (
+        <Button
+          variant="primary"
+          disabled={busy !== null || loading || !selected}
+          describedBy={!selected ? "restore-check-help" : undefined}
+          onClick={() =>
+            selected
+              ? step("preview", () => previewRestore(selected), setPreview)
+              : undefined
+          }
+        >
+          Check backup
+        </Button>
+      ) : (
+        <Button
+          id="restore-choose-folder"
+          variant="primary"
+          icon="folder"
+          disabled={busy !== null || loading}
+          onClick={chooseFolder}
+        >
+          {source?.folderName ? "Choose another folder" : "Choose folder"}
+        </Button>
+      )}
     </>
   );
+
+  const previewWarning =
+    preview &&
+    (preview.staleness === "older" || preview.staleness === "diverged");
+  const doneKind =
+    preview?.kind === "transition"
+      ? "state-change"
+      : preview
+        ? (kindLabel[preview.kind] ?? preview.kind)
+        : null;
 
   return (
     <Dialog
       title={done ? "Backup restored" : "Restore from a backup"}
       labelledBy="restore-title"
+      describedBy="restore-instructions"
       onClose={requestClose}
+      closeDisabled={busy !== null}
+      returnFocusId={returnFocusId}
       footer={footer}
     >
-      {error ? (
-        <p className="field-error" role="alert">
-          {error}
+      {problem ? <ProblemView problem={problem} /> : null}
+      {done ? (
+        <p id="restore-instructions">The restore is complete.</p>
+      ) : loading ? (
+        <p role="status" id="restore-instructions">
+          The app reads the backup folder.
         </p>
+      ) : (
+        <p id="restore-instructions">
+          The app checks the backup before it changes anything. The bot stops
+          during the restore. Times show in {timezone}.
+        </p>
+      )}
+      {busy === "folder" ? <p role="status">The app reads the folder.</p> : null}
+      {busy === "preview" ? (
+        <p role="status">The app checks the backup. This can take a minute.</p>
       ) : null}
-      {loading ? (
-        <p role="status">Reading the backup folder.</p>
-      ) : null}
-      {busy ? (
-        <p role="status">Checking the backup files. This can take a minute.</p>
+      {busy === "restore" ? (
+        <p role="status">The app restores the backup. Do not close the app.</p>
       ) : null}
 
       {done ? (
         <>
-          <p>
-            The app restored {eventCount(done.events.length)}. The bot is off.
+          <p role="status">
+            {eventCount(done.events.length)} restored
+            {preview
+              ? ` from the ${doneKind} backup at ${formatDateTime(preview.createdAt, timezone)}`
+              : ""}
+            . The bot is off.
           </p>
-          {done.events.length > 0 ? (
+          {done.events.length === 1 ? (
+            <p>
+              {done.events[0].name} (
+              {stateLabel[done.events[0].state] ?? done.events[0].state})
+            </p>
+          ) : done.events.length > 1 ? (
             <ul className="restore-events">
               {done.events.map((event) => (
                 <li key={`${event.name}-${event.state}`}>
@@ -705,106 +1019,156 @@ function RestoreWizard({
               ))}
             </ul>
           ) : null}
+          {tokenConfigured ? (
+            <p>
+              The app stopped the bot. Choose Reconnect bot to start the bot.
+              The bot token stays in the operating system keychain.
+            </p>
+          ) : (
+            <p>
+              This computer has no bot token. Add the token to connect the bot.
+            </p>
+          )}
           <p>
-            Backups never hold the bot token. Add the token again to connect
-            the bot.
-            {done.keptPrevious
-              ? " The app kept the replaced database in the pre-restore folder of the app data folder."
-              : ""}
+            If the bot does not start, go to Bot lock. Stop the bot on the
+            other computer, then choose Take over.
           </p>
+          {done.keptPrevious ? (
+            <p>
+              The app kept the replaced event data in a recovery folder.{" "}
+              <button
+                type="button"
+                className="link-button"
+                onClick={async () => {
+                  setRecoveryProblem(null);
+                  try {
+                    await openRecoveryFolder();
+                  } catch (reason) {
+                    setRecoveryProblem(describeHostError(reason));
+                  }
+                }}
+              >
+                Open recovery folder
+              </button>
+            </p>
+          ) : null}
+          {recoveryProblem ? <ProblemView problem={recoveryProblem} /> : null}
         </>
       ) : preview ? (
         <>
           <p>
             {kindLabel[preview.kind] ?? preview.kind} backup from{" "}
-            {formatDateTime(preview.createdAt, timezone)}. The check passed for
-            the database and {preview.files}{" "}
-            {preview.files === 1 ? "file" : "files"}. The backup was written by
-            app version {preview.appVersion}.
+            {formatDateTime(preview.createdAt, timezone)} ({timezone}). The
+            check passed for the event data and {preview.files}{" "}
+            {preview.files === 1 ? "file" : "files"}. The app version was{" "}
+            {preview.appVersion}.
           </p>
           <p>Events: {eventsText(preview)}.</p>
-          {preview.staleness === "older" || preview.staleness === "diverged" ? (
+          {previewWarning ? (
             <div
               className={`warning warning--${
                 preview.staleness === "diverged" ? "danger" : "warn"
               }`}
-              role="alert"
+              role="status"
             >
               <Icon name="alert" size={18} />
               <div>
                 <p>
                   {stalenessText[preview.staleness]}
                   {preview.staleness === "older"
-                    ? ` The current data has ${preview.newerEntries} newer audit ${preview.newerEntries === 1 ? "entry" : "entries"}.`
+                    ? ` The current event data has ${preview.newerEntries} newer audit ${preview.newerEntries === 1 ? "entry" : "entries"}.`
                     : ""}
                 </p>
               </div>
             </div>
           ) : (
-            <p>{stalenessText[preview.staleness]}</p>
+            <p role="status">{stalenessText[preview.staleness]}</p>
           )}
           <p className="dialog__warning">
             The app stops the bot and replaces the event data. The app keeps the
-            replaced database in a pre-restore folder. Type <code>RESTORE</code>{" "}
-            to continue.
+            replaced event data in a recovery folder. Type{" "}
+            <code>RESTORE</code> in capital letters to continue.
           </p>
-          <Field label="Type RESTORE to confirm" htmlFor="restore-confirm">
+          <Field label="Confirmation" htmlFor="restore-confirm">
             <input
               id="restore-confirm"
               className="input"
               value={typed}
               autoComplete="off"
-              onKeyDown={stopEnter}
+              aria-invalid={typed.length > 0 && typed.trim() !== "RESTORE"}
+              aria-describedby={
+                typed.length > 0 && typed.trim() !== "RESTORE"
+                  ? "restore-confirm-hint"
+                  : undefined
+              }
+              onKeyDown={(event) => {
+                stopEnter(event);
+                if (event.key === "Enter" && typed.trim() === "RESTORE") {
+                  void submitRestore();
+                }
+              }}
               onChange={(event) => setTyped(event.target.value)}
             />
           </Field>
+          {typed.length > 0 && typed.trim() !== "RESTORE" ? (
+            <p className="field-error" id="restore-confirm-hint" role="alert">
+              Type RESTORE in capital letters.
+            </p>
+          ) : null}
         </>
       ) : (
         <>
-          <p>
-            The app checks the backup before it changes anything. The bot stops
-            during the restore. Times show in {timezone}.
-          </p>
-          <p>
-            Folder: {source?.folderName ?? "No folder selected"}.{" "}
-            <button
-              type="button"
-              className="link-button"
-              disabled={busy}
-              onClick={() =>
-                step(chooseRestoreFolder, (next) => {
-                  setSource(next);
-                  setSelected(null);
-                })
-              }
-            >
-              Choose another folder
-            </button>
-          </p>
+          {source?.folderName ? (
+            <>
+              <p>
+                Folder: {source.folderName}.{" "}
+                {complete.length > 0 ? (
+                  <button
+                    type="button"
+                    className="link-button"
+                    disabled={busy !== null}
+                    onClick={chooseFolder}
+                  >
+                    Choose another folder
+                  </button>
+                ) : null}
+              </p>
+              <p className="field-help">
+                Choose a different restore folder. This does not change the
+                backup folder.
+              </p>
+            </>
+          ) : null}
           {complete.length === 0 ? (
             <p>
-              No complete backup is in this folder. The app does not list a
-              backup without a manifest.
+              {source?.folderName
+                ? "This folder has no complete backup. Choose another folder. If the backup is on another computer, copy the folder to this computer first. The app lists only backups it can check."
+                : "No backup folder is selected. Choose a folder."}
             </p>
           ) : (
-            <fieldset className="restore-options">
-              <legend className="field-label">Backup</legend>
-              {complete.map((item) => (
-                <label key={item.id} className="restore-option">
-                  <input
-                    type="radio"
-                    name="restore-backup"
-                    value={item.id}
-                    checked={selected === item.id}
-                    onChange={() => setSelected(item.id)}
-                  />
-                  <span>
-                    {formatDateTime(item.createdAt, timezone)} ·{" "}
-                    {kindLabel[item.kind] ?? item.kind} · {eventsText(item)}
-                  </span>
-                </label>
-              ))}
-            </fieldset>
+            <>
+              <p className="field-help" id="restore-check-help">
+                Choose a backup to check.
+              </p>
+              <fieldset className="restore-options">
+                <legend className="field-label">Backup</legend>
+                {complete.map((item) => (
+                  <label key={item.id} className="restore-option">
+                    <input
+                      type="radio"
+                      name="restore-backup"
+                      value={item.id}
+                      checked={selected === item.id}
+                      onChange={() => setSelected(item.id)}
+                    />
+                    <span>
+                      {formatDateTime(item.createdAt, timezone)} ·{" "}
+                      {kindLabel[item.kind] ?? item.kind} · {eventsText(item)}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            </>
           )}
         </>
       )}

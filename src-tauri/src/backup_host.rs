@@ -6,7 +6,7 @@
 //! crosses IPC.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use swap_db::backup::{
@@ -14,26 +14,146 @@ use swap_db::backup::{
     Staleness,
 };
 use swap_db::writer::{self, WriterState};
-use swap_db::{Db, TransitionHook};
+use swap_db::{AuditRepo, Db, MetaRepo, TransitionHook};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 const CONFIG_FILE: &str = "backup.json";
 const MACHINE_ID_FILE: &str = "machine-id";
 const DB_FILE: &str = "monsquaz.db";
 const BLOB_DIR: &str = "files";
+const PRE_RESTORE_DIR: &str = "pre-restore";
 
-/// Process state: the folder that the restore wizard reads from, and the
-/// message after this machine lost the writer lock.
+pub(crate) const CODE_FOLDER: &str = "MSW-BACKUP-001";
+pub(crate) const CODE_DAMAGED: &str = "MSW-BACKUP-002";
+pub(crate) const CODE_WRITE: &str = "MSW-BACKUP-003";
+pub(crate) const CODE_CONFIRM: &str = "MSW-BACKUP-004";
+pub(crate) const CODE_BOT_LOCK: &str = "MSW-BACKUP-005";
+
+/// A command error for the host UI: host copy, a stable code, and technical
+/// detail that stays secondary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostError {
+    pub code: String,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+impl HostError {
+    fn folder(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_FOLDER.to_string(),
+            message: "The app cannot read the backup folder. Connect the drive, then choose Retry. If the folder moved, choose Change folder. The app does not change the event state while the backup fails.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn damaged(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_DAMAGED.to_string(),
+            message: "The app cannot use this backup. One file is damaged. The app did not change the event data. Choose another backup, then choose Check backup.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn write(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_WRITE.to_string(),
+            message: "The app could not write the backup. The app did not change the event state. Connect the drive, then choose Back up now.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn restore(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_WRITE.to_string(),
+            message: "The app could not restore the backup. The app did not change the event data. Check the free space, then choose Restore again.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn purge(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_WRITE.to_string(),
+            message: "The app could not delete every backup. Connect the drive, then choose Delete backups again.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn confirmation(word: &str) -> Self {
+        Self {
+            code: CODE_CONFIRM.to_string(),
+            message: format!("Type {word} in capital letters to continue."),
+            detail: None,
+        }
+    }
+
+    fn bot_lock(detail: impl Into<String>) -> Self {
+        Self {
+            code: CODE_BOT_LOCK.to_string(),
+            message: "The app could not use the bot lock. Stop the bot on the other computer, then choose Take over.".to_string(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn no_folder() -> Self {
+        Self {
+            code: CODE_FOLDER.to_string(),
+            message: "No backup folder is selected. Choose a folder first.".to_string(),
+            detail: None,
+        }
+    }
+}
+
+impl std::fmt::Display for HostError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+/// The last automatic or manual backup failure, kept in process memory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupFailureDto {
+    pub at: i64,
+    pub code: String,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+type FailureSink = Arc<Mutex<Option<BackupFailureDto>>>;
+
+/// Process state: the folder that the restore wizard reads from, the time this
+/// computer lost the bot lock, and the last backup failure.
 #[derive(Default)]
 pub struct BackupRuntime {
     restore_source: Mutex<Option<PathBuf>>,
-    lost_lock: Mutex<Option<String>>,
+    lost_lock_at: Mutex<Option<i64>>,
+    last_failure: FailureSink,
 }
 
 impl BackupRuntime {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub(crate) fn failure_sink(&self) -> FailureSink {
+        self.last_failure.clone()
+    }
+}
+
+fn record_failure(sink: &FailureSink, at: i64, error: &HostError) {
+    *sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(BackupFailureDto {
+        at,
+        code: error.code.clone(),
+        message: error.message.clone(),
+        detail: error.detail.clone(),
+    });
+}
+
+fn clear_failure(sink: &FailureSink) {
+    *sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,15 +209,17 @@ pub struct BackupItemDto {
 pub struct WriterDto {
     /// `free`, `own`, or `foreign`.
     state: String,
-    machine: Option<String>,
     heartbeat_at: Option<i64>,
-    lost_lock: Option<String>,
+    lost_lock_at: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupStatusDto {
     folder_name: Option<String>,
+    folder_error: Option<HostError>,
+    last_failure: Option<BackupFailureDto>,
+    checked_at: i64,
     keep_transition: usize,
     keep_daily: usize,
     backups: Vec<BackupItemDto>,
@@ -138,7 +260,7 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .app_data_dir()
         .map_err(|_| "the app data folder is not available".to_string())?;
     std::fs::create_dir_all(&directory)
-        .map_err(|error| format!("the app data folder is not writable: {error}"))?;
+        .map_err(|_| "the app data folder is not writable".to_string())?;
     Ok(directory)
 }
 
@@ -185,6 +307,58 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| "Selected folder".to_string())
 }
 
+fn map_folder_error(error: backup::BackupError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        backup::BackupError::Confirmation(word) => HostError::confirmation(word),
+        other => HostError::folder(redact(other, data, folder)),
+    }
+}
+
+fn map_create_error(error: backup::BackupError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        backup::BackupError::Confirmation(word) => HostError::confirmation(word),
+        other => HostError::write(redact(other, data, folder)),
+    }
+}
+
+fn map_preview_error(error: backup::BackupError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        backup::BackupError::Confirmation(word) => HostError::confirmation(word),
+        backup::BackupError::NotFound | backup::BackupError::InvalidId => {
+            HostError::folder("The backup is no longer in the folder.")
+        }
+        backup::BackupError::Io(error) => HostError::folder(redact(error, data, folder)),
+        other => HostError::damaged(redact(other, data, folder)),
+    }
+}
+
+fn map_restore_error(error: backup::BackupError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        backup::BackupError::Confirmation(word) => HostError::confirmation(word),
+        backup::BackupError::NotFound | backup::BackupError::InvalidId => {
+            HostError::folder("The backup is no longer in the folder.")
+        }
+        backup::BackupError::Io(error) => HostError::restore(redact(error, data, folder)),
+        backup::BackupError::Db(error) => HostError::restore(redact(error, data, folder)),
+        backup::BackupError::Sqlite(error) => HostError::restore(redact(error, data, folder)),
+        other => HostError::damaged(redact(other, data, folder)),
+    }
+}
+
+fn map_purge_error(error: backup::BackupError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        backup::BackupError::Confirmation(word) => HostError::confirmation(word),
+        other => HostError::purge(redact(other, data, folder)),
+    }
+}
+
+fn map_writer_error(error: writer::WriterError, data: &Path, folder: Option<&Path>) -> HostError {
+    match error {
+        writer::WriterError::Confirmation => HostError::confirmation(writer::TAKEOVER_CONFIRMATION),
+        other => HostError::bot_lock(redact(other, data, folder)),
+    }
+}
+
 fn events(manifest: &Manifest) -> Vec<BackupEventDto> {
     manifest
         .events
@@ -224,7 +398,7 @@ fn run_backup(
     db: &Db,
     kind: BackupKind,
     now: i64,
-) -> Result<Option<BackupOutcome>, String> {
+) -> Result<Option<BackupOutcome>, HostError> {
     let config = read_config(data);
     let Some(root) = config.root() else {
         return Ok(None);
@@ -242,16 +416,26 @@ fn run_backup(
         config.retention(),
     )
     .map(Some)
-    .map_err(|error| redact(error, data, config.folder.as_deref()))
+    .map_err(|error| map_create_error(error, data, config.folder.as_deref()))
 }
 
 /// The pre-transition backup hook for a host command database handle. `None`
 /// when the host has not selected a backup folder.
-pub(crate) fn transition_hook(data: &Path) -> Option<TransitionHook> {
+pub(crate) fn transition_hook(data: &Path, failures: FailureSink) -> Option<TransitionHook> {
     read_config(data).folder.as_ref()?;
     let data = data.to_path_buf();
     Some(Box::new(move |db: &Db, _event_id: &str| {
-        run_backup(&data, db, BackupKind::Transition, crate::host::now_secs()).map(|_| ())
+        let now = crate::host::now_secs();
+        match run_backup(&data, db, BackupKind::Transition, now) {
+            Ok(_) => {
+                clear_failure(&failures);
+                Ok(())
+            }
+            Err(error) => {
+                record_failure(&failures, now, &error);
+                Err(format!("{}: {}", error.code, error.message))
+            }
+        }
     }))
 }
 
@@ -265,18 +449,14 @@ pub(crate) fn claim_writer(data: &Path, now: i64) -> Result<(), String> {
     match writer::heartbeat(db.conn(), root.as_deref(), &me, now)
         .map_err(|error| redact(error, data, config.folder.as_deref()))?
     {
-        WriterState::Foreign(lock) => Err(foreign_message(&lock, now)),
+        WriterState::Foreign(_) => Err(foreign_message()),
         WriterState::Free | WriterState::Own => Ok(()),
     }
 }
 
-fn foreign_message(lock: &writer::WriterLock, now: i64) -> String {
-    let minutes = ((now - lock.heartbeat_at).max(0) + 59) / 60;
+fn foreign_message() -> String {
     format!(
-        "Another machine ({}) ran this event {} minute{} ago. The bot stays off on this machine. Type TAKE OVER in Settings to run the event here.",
-        lock.machine_label(),
-        minutes,
-        if minutes == 1 { "" } else { "s" }
+        "{CODE_BOT_LOCK}: Another computer holds the bot lock. The app keeps the bot off on this computer. The lock clears 5 minutes after the last check. Choose Take over in Settings only if you stopped the bot on that computer. Then choose Reconnect bot to start the bot."
     )
 }
 
@@ -284,37 +464,53 @@ fn foreign_message(lock: &writer::WriterLock, now: i64) -> String {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct TickOutcome {
     pub daily: bool,
-    pub lost_lock: Option<String>,
+    pub lost_lock_at: Option<i64>,
 }
 
 /// One timer tick: write the heartbeat while the bot runs, and take the daily
 /// backup when the newest daily backup is 24 hours old or older.
-pub(crate) fn tick(data: &Path, bot_running: bool, now: i64) -> Result<TickOutcome, String> {
+pub(crate) fn tick(
+    data: &Path,
+    bot_running: bool,
+    now: i64,
+    failures: &FailureSink,
+) -> Result<TickOutcome, HostError> {
     let mut outcome = TickOutcome::default();
     let config = read_config(data);
     let db_path = data.join(DB_FILE);
     if !db_path.exists() {
         return Ok(outcome);
     }
-    let db = Db::open(&db_path).map_err(|error| redact(error, data, None))?;
+    let db = Db::open(&db_path).map_err(|error| HostError::write(redact(error, data, None)))?;
     if bot_running {
-        let me = machine_id(data)?;
+        let me = machine_id(data).map_err(HostError::bot_lock)?;
         let root = config.root();
-        if let WriterState::Foreign(lock) = writer::heartbeat(db.conn(), root.as_deref(), &me, now)
-            .map_err(|error| redact(error, data, config.folder.as_deref()))?
+        if let WriterState::Foreign(_) = writer::heartbeat(db.conn(), root.as_deref(), &me, now)
+            .map_err(|error| map_writer_error(error, data, config.folder.as_deref()))?
         {
-            outcome.lost_lock = Some(format!(
-                "Machine {} took over this event. The bot stopped on this machine.",
-                lock.machine_label()
-            ));
+            outcome.lost_lock_at = Some(now);
         }
     }
     if let Some(root) = config.root() {
-        let last = backup::last_backup_at(&root, BackupKind::Daily)
-            .map_err(|error| redact(error, data, config.folder.as_deref()))?;
+        let last = match backup::last_backup_at(&root, BackupKind::Daily) {
+            Ok(last) => last,
+            Err(error) => {
+                let error = map_create_error(error, data, config.folder.as_deref());
+                record_failure(failures, now, &error);
+                return Err(error);
+            }
+        };
         if last.is_none_or(|last| now - last >= DAILY_INTERVAL_SECS) {
-            run_backup(data, &db, BackupKind::Daily, now)?;
-            outcome.daily = true;
+            match run_backup(data, &db, BackupKind::Daily, now) {
+                Ok(_) => {
+                    clear_failure(failures);
+                    outcome.daily = true;
+                }
+                Err(error) => {
+                    record_failure(failures, now, &error);
+                    return Err(error);
+                }
+            }
         }
     }
     Ok(outcome)
@@ -334,11 +530,13 @@ pub fn spawn_timer(app: AppHandle) {
             #[cfg(not(feature = "live"))]
             let running = false;
             let now = crate::host::now_secs();
+            let failures = app.state::<BackupRuntime>().failure_sink();
             let result =
-                tauri::async_runtime::spawn_blocking(move || tick(&data, running, now)).await;
+                tauri::async_runtime::spawn_blocking(move || tick(&data, running, now, &failures))
+                    .await;
             match result {
                 Ok(Ok(outcome)) => {
-                    if let Some(message) = outcome.lost_lock {
+                    if let Some(at) = outcome.lost_lock_at {
                         #[cfg(feature = "live")]
                         {
                             let live = app.state::<crate::live_runtime::LiveRuntime>();
@@ -346,11 +544,10 @@ pub fn spawn_timer(app: AppHandle) {
                                 eprintln!("the bot did not stop after a takeover: {error}");
                             }
                         }
-                        eprintln!("{message}");
                         *app.state::<BackupRuntime>()
-                            .lost_lock
+                            .lost_lock_at
                             .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(message);
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(at);
                     }
                 }
                 Ok(Err(error)) => eprintln!("backup timer: {error}"),
@@ -360,50 +557,67 @@ pub fn spawn_timer(app: AppHandle) {
     });
 }
 
-fn status(app: &AppHandle, runtime: &BackupRuntime) -> Result<BackupStatusDto, String> {
-    let data = data_dir(app)?;
+fn status(app: &AppHandle, runtime: &BackupRuntime) -> Result<BackupStatusDto, HostError> {
+    let data = data_dir(app).map_err(HostError::write)?;
     let config = read_config(&data);
-    let redact_error = |error: backup::BackupError| redact(error, &data, config.folder.as_deref());
+    let now = crate::host::now_secs();
+    let mut folder_error = None;
     let backups = match config.root() {
-        Some(root) => items(&root).map_err(redact_error)?,
+        Some(root) => match items(&root) {
+            Ok(backups) => backups,
+            Err(error) => {
+                folder_error = Some(map_folder_error(error, &data, config.folder.as_deref()));
+                Vec::new()
+            }
+        },
         None => Vec::new(),
     };
-    let me = machine_id(&data)?;
-    let db = Db::open(data.join(DB_FILE)).map_err(|error| redact(error, &data, None))?;
-    let state = writer::check(
-        db.conn(),
-        config.root().as_deref(),
-        &me,
-        crate::host::now_secs(),
-    )
-    .map_err(|error| redact(error, &data, config.folder.as_deref()))?;
-    let lost_lock = runtime
-        .lost_lock
+    let me = machine_id(&data).map_err(HostError::bot_lock)?;
+    let db = Db::open(data.join(DB_FILE))
+        .map_err(|error| HostError::write(redact(error, &data, None)))?;
+    let state = writer::check(db.conn(), config.root().as_deref(), &me, now)
+        .map_err(|error| map_writer_error(error, &data, config.folder.as_deref()))?;
+    let mut lost_lock_at = *runtime
+        .lost_lock_at
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let writer = match state {
+        WriterState::Free => {
+            lost_lock_at = None;
+            WriterDto {
+                state: "free".to_string(),
+                heartbeat_at: None,
+                lost_lock_at: None,
+            }
+        }
+        WriterState::Own => {
+            lost_lock_at = None;
+            WriterDto {
+                state: "own".to_string(),
+                heartbeat_at: None,
+                lost_lock_at: None,
+            }
+        }
+        WriterState::Foreign(lock) => WriterDto {
+            state: "foreign".to_string(),
+            heartbeat_at: Some(lock.heartbeat_at),
+            lost_lock_at,
+        },
+    };
+    *runtime
+        .lost_lock_at
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = lost_lock_at;
+    let last_failure = runtime
+        .last_failure
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    let writer = match state {
-        WriterState::Free => WriterDto {
-            state: "free".to_string(),
-            machine: None,
-            heartbeat_at: None,
-            lost_lock,
-        },
-        WriterState::Own => WriterDto {
-            state: "own".to_string(),
-            machine: Some(me.chars().take(8).collect()),
-            heartbeat_at: None,
-            lost_lock,
-        },
-        WriterState::Foreign(lock) => WriterDto {
-            state: "foreign".to_string(),
-            machine: Some(lock.machine_label()),
-            heartbeat_at: Some(lock.heartbeat_at),
-            lost_lock,
-        },
-    };
     Ok(BackupStatusDto {
         folder_name: config.folder.as_deref().map(folder_name),
+        folder_error,
+        last_failure,
+        checked_at: now,
         keep_transition: config.keep_transition,
         keep_daily: config.keep_daily,
         backups,
@@ -430,14 +644,16 @@ async fn pick_folder(app: &AppHandle) -> Result<Option<PathBuf>, String> {
 }
 
 /// Refuse a backup folder inside the app data folder: a backup there does not
-/// survive the loss of this machine's data.
-fn check_folder(data: &Path, folder: &Path) -> Result<(), String> {
+/// survive the loss of this computer's data.
+fn check_folder(data: &Path, folder: &Path) -> Result<(), HostError> {
     let canonical = folder
         .canonicalize()
-        .map_err(|_| "the selected folder is not readable".to_string())?;
+        .map_err(|_| HostError::folder("The selected folder is not readable."))?;
     let data = data.canonicalize().unwrap_or_else(|_| data.to_path_buf());
     if canonical.starts_with(&data) {
-        return Err("Select a folder outside the app data folder.".to_string());
+        return Err(HostError::folder(
+            "The app data folder does not survive a disk loss. Choose another folder.",
+        ));
     }
     Ok(())
 }
@@ -446,7 +662,7 @@ fn check_folder(data: &Path, folder: &Path) -> Result<(), String> {
 pub fn host_backup_status(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
-) -> Result<BackupStatusDto, String> {
+) -> Result<BackupStatusDto, HostError> {
     status(&app, &runtime)
 }
 
@@ -454,13 +670,15 @@ pub fn host_backup_status(
 pub async fn host_backup_choose_folder(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
-) -> Result<BackupStatusDto, String> {
-    if let Some(folder) = pick_folder(&app).await? {
-        let data = data_dir(&app)?;
+) -> Result<BackupStatusDto, HostError> {
+    let folder = pick_folder(&app).await.map_err(HostError::folder)?;
+    if let Some(folder) = folder {
+        let data = data_dir(&app).map_err(HostError::write)?;
         check_folder(&data, &folder)?;
         let mut config = read_config(&data);
         config.folder = Some(folder);
-        write_config(&data, &config)?;
+        write_config(&data, &config).map_err(HostError::folder)?;
+        clear_failure(&runtime.failure_sink());
     }
     status(&app, &runtime)
 }
@@ -471,18 +689,22 @@ pub fn host_backup_set_retention(
     runtime: State<'_, BackupRuntime>,
     keep_transition: usize,
     keep_daily: usize,
-) -> Result<BackupStatusDto, String> {
+) -> Result<BackupStatusDto, HostError> {
     if !(1..=365).contains(&keep_transition) || !(1..=365).contains(&keep_daily) {
-        return Err("Keep between 1 and 365 backups of each kind.".to_string());
+        return Err(HostError {
+            code: CODE_FOLDER.to_string(),
+            message: "Keep between 1 and 365 backups of each kind.".to_string(),
+            detail: None,
+        });
     }
-    let data = data_dir(&app)?;
+    let data = data_dir(&app).map_err(HostError::write)?;
     let mut config = read_config(&data);
     config.keep_transition = keep_transition;
     config.keep_daily = keep_daily;
-    write_config(&data, &config)?;
+    write_config(&data, &config).map_err(HostError::write)?;
     if let Some(root) = config.root() {
         backup::prune(&root, config.retention())
-            .map_err(|error| redact(error, &data, config.folder.as_deref()))?;
+            .map_err(|error| map_create_error(error, &data, config.folder.as_deref()))?;
     }
     status(&app, &runtime)
 }
@@ -491,16 +713,31 @@ pub fn host_backup_set_retention(
 pub async fn host_backup_now(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
-) -> Result<BackupStatusDto, String> {
-    let data = data_dir(&app)?;
+) -> Result<BackupStatusDto, HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
+    if read_config(&data).folder.is_none() {
+        return Err(HostError::no_folder());
+    }
+    let failures = runtime.failure_sink();
     let worker = data.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let db = Db::open(worker.join(DB_FILE)).map_err(|error| redact(error, &worker, None))?;
-        run_backup(&worker, &db, BackupKind::Manual, crate::host::now_secs())?
-            .ok_or_else(|| "Select a backup folder first.".to_string())
+    let now = crate::host::now_secs();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let db = Db::open(worker.join(DB_FILE))
+            .map_err(|error| HostError::write(redact(error, &worker, None)))?;
+        match run_backup(&worker, &db, BackupKind::Manual, now)? {
+            Some(_) => {
+                clear_failure(&failures);
+                Ok(())
+            }
+            None => Err(HostError::no_folder()),
+        }
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| HostError::write(error.to_string()))?;
+    if let Err(error) = &result {
+        record_failure(&runtime.failure_sink(), now, error);
+    }
+    result?;
     status(&app, &runtime)
 }
 
@@ -509,14 +746,34 @@ pub fn host_backup_purge(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
     confirmation: String,
-) -> Result<BackupStatusDto, String> {
-    let data = data_dir(&app)?;
+) -> Result<BackupStatusDto, HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
     let config = read_config(&data);
-    let root = config
-        .root()
-        .ok_or_else(|| "Select a backup folder first.".to_string())?;
+    let root = config.root().ok_or_else(HostError::no_folder)?;
+    let count = items(&root)
+        .map_err(|error| map_folder_error(error, &data, config.folder.as_deref()))?
+        .len();
     backup::purge(&root, &confirmation)
-        .map_err(|error| redact(error, &data, config.folder.as_deref()))?;
+        .map_err(|error| map_purge_error(error, &data, config.folder.as_deref()))?;
+    if let Ok(db) = Db::open(data.join(DB_FILE))
+        && let Ok(Some(event_id)) = MetaRepo::get(db.conn(), "host.current_event")
+    {
+        let label = config
+            .folder
+            .as_deref()
+            .map(folder_name)
+            .unwrap_or_else(|| "the backup folder".to_string());
+        let _ = AuditRepo::insert(
+            db.conn(),
+            &event_id,
+            crate::host::now_secs(),
+            "Host",
+            "Every backup deleted",
+            Some(&label),
+            &serde_json::json!({ "backups": count }).to_string(),
+        );
+    }
+    clear_failure(&runtime.failure_sink());
     status(&app, &runtime)
 }
 
@@ -525,11 +782,12 @@ pub fn host_writer_takeover(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
     confirmation: String,
-) -> Result<BackupStatusDto, String> {
-    let data = data_dir(&app)?;
+) -> Result<BackupStatusDto, HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
     let config = read_config(&data);
-    let me = machine_id(&data)?;
-    let db = Db::open(data.join(DB_FILE)).map_err(|error| redact(error, &data, None))?;
+    let me = machine_id(&data).map_err(HostError::bot_lock)?;
+    let db = Db::open(data.join(DB_FILE))
+        .map_err(|error| HostError::bot_lock(redact(error, &data, None)))?;
     writer::take_over(
         db.conn(),
         config.root().as_deref(),
@@ -537,15 +795,15 @@ pub fn host_writer_takeover(
         crate::host::now_secs(),
         &confirmation,
     )
-    .map_err(|error| redact(error, &data, config.folder.as_deref()))?;
+    .map_err(|error| map_writer_error(error, &data, config.folder.as_deref()))?;
     *runtime
-        .lost_lock
+        .lost_lock_at
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     status(&app, &runtime)
 }
 
-fn restore_root(data: &Path, runtime: &BackupRuntime) -> Result<(PathBuf, PathBuf), String> {
+fn restore_root(data: &Path, runtime: &BackupRuntime) -> Result<(PathBuf, PathBuf), HostError> {
     let chosen = runtime
         .restore_source
         .lock()
@@ -553,7 +811,7 @@ fn restore_root(data: &Path, runtime: &BackupRuntime) -> Result<(PathBuf, PathBu
         .clone();
     let folder = chosen
         .or_else(|| read_config(data).folder)
-        .ok_or_else(|| "Select the folder that holds the backups.".to_string())?;
+        .ok_or_else(HostError::no_folder)?;
     Ok((backup::backup_root(&folder), folder))
 }
 
@@ -561,8 +819,9 @@ fn restore_root(data: &Path, runtime: &BackupRuntime) -> Result<(PathBuf, PathBu
 pub async fn host_restore_choose_folder(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
-) -> Result<RestoreSourceDto, String> {
-    if let Some(folder) = pick_folder(&app).await? {
+) -> Result<RestoreSourceDto, HostError> {
+    let folder = pick_folder(&app).await.map_err(HostError::folder)?;
+    if let Some(folder) = folder {
         *runtime
             .restore_source
             .lock()
@@ -575,19 +834,53 @@ pub async fn host_restore_choose_folder(
 pub fn host_restore_source(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
-) -> Result<RestoreSourceDto, String> {
-    let data = data_dir(&app)?;
+) -> Result<RestoreSourceDto, HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
     let Ok((root, folder)) = restore_root(&data, &runtime) else {
         return Ok(RestoreSourceDto {
             folder_name: None,
             backups: Vec::new(),
         });
     };
-    let backups = items(&root).map_err(|error| redact(error, &data, Some(&folder)))?;
+    let backups = items(&root).map_err(|error| map_folder_error(error, &data, Some(&folder)))?;
     Ok(RestoreSourceDto {
         folder_name: Some(folder_name(&folder)),
         backups,
     })
+}
+
+fn newest_recovery_dir(data: &Path) -> Option<PathBuf> {
+    let parent = data.join(PRE_RESTORE_DIR);
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(parent)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .collect();
+    dirs.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    dirs.into_iter().next()
+}
+
+#[tauri::command]
+pub fn host_backup_reveal_folder(app: AppHandle) -> Result<(), HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
+    let folder = read_config(&data).folder.ok_or_else(HostError::no_folder)?;
+    app.opener()
+        .reveal_item_in_dir(&folder)
+        .map_err(|error| HostError::folder(redact(error, &data, Some(&folder))))
+}
+
+#[tauri::command]
+pub fn host_open_recovery_folder(app: AppHandle) -> Result<(), HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
+    let folder = newest_recovery_dir(&data).ok_or_else(|| HostError {
+        code: CODE_FOLDER.to_string(),
+        message: "There is no recovery folder yet. Restore a backup first.".to_string(),
+        detail: None,
+    })?;
+    app.opener()
+        .open_path(folder.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|error| HostError::folder(redact(error, &data, Some(&folder))))
 }
 
 fn preview(data: &Path, root: &Path, id: &str) -> Result<RestorePreviewDto, backup::BackupError> {
@@ -625,14 +918,14 @@ pub async fn host_restore_preview(
     app: AppHandle,
     runtime: State<'_, BackupRuntime>,
     id: String,
-) -> Result<RestorePreviewDto, String> {
-    let data = data_dir(&app)?;
+) -> Result<RestorePreviewDto, HostError> {
+    let data = data_dir(&app).map_err(HostError::write)?;
     let (root, folder) = restore_root(&data, &runtime)?;
     tauri::async_runtime::spawn_blocking(move || {
-        preview(&data, &root, &id).map_err(|error| redact(error, &data, Some(&folder)))
+        preview(&data, &root, &id).map_err(|error| map_preview_error(error, &data, Some(&folder)))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| HostError::write(error.to_string()))?
 }
 
 #[tauri::command]
@@ -641,20 +934,20 @@ pub async fn host_restore(
     runtime: State<'_, BackupRuntime>,
     id: String,
     confirmation: String,
-) -> Result<RestoreDoneDto, String> {
+) -> Result<RestoreDoneDto, HostError> {
     if confirmation.trim() != backup::RESTORE_CONFIRMATION {
-        return Err(format!("Type {} to confirm.", backup::RESTORE_CONFIRMATION));
+        return Err(HostError::confirmation(backup::RESTORE_CONFIRMATION));
     }
-    let data = data_dir(&app)?;
+    let data = data_dir(&app).map_err(HostError::write)?;
     let (root, folder) = restore_root(&data, &runtime)?;
     // The restore replaces the database file: stop the only long-lived
-    // connection first. The bot starts again only after the host enters the
-    // token and the writer guard passes.
+    // connection first. The token stays in the keychain, and the bot starts
+    // again only after the host reconnects and the bot lock passes.
     #[cfg(feature = "live")]
     app.state::<crate::live_runtime::LiveRuntime>()
         .stop()
         .await
-        .map_err(|error| format!("the bot did not stop, so the restore did not start: {error}"))?;
+        .map_err(|error| HostError::restore(error.to_string()))?;
     let now = crate::host::now_secs();
     let report = tauri::async_runtime::spawn_blocking(move || {
         backup::restore_backup(
@@ -666,10 +959,14 @@ pub async fn host_restore(
             &data.join(BLOB_DIR),
             now,
         )
-        .map_err(|error| redact(error, &data, Some(&folder)))
+        .map_err(|error| map_restore_error(error, &data, Some(&folder)))
     })
     .await
-    .map_err(|error| error.to_string())??;
+    .map_err(|error| HostError::restore(error.to_string()))??;
+    *runtime
+        .lost_lock_at
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     Ok(RestoreDoneDto {
         events: events(&report.manifest),
         kept_previous: report.pre_restore_dir.is_some(),
@@ -724,6 +1021,10 @@ mod tests {
         .unwrap();
     }
 
+    fn failure_sink() -> FailureSink {
+        Arc::new(Mutex::new(None))
+    }
+
     fn files_under(path: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         for entry in std::fs::read_dir(path).unwrap().flatten() {
@@ -740,7 +1041,7 @@ mod tests {
     fn no_folder_means_no_hook_and_no_backup() {
         let dir = tempfile::tempdir().unwrap();
         let data = data_with_event(dir.path());
-        assert!(transition_hook(&data).is_none());
+        assert!(transition_hook(&data, failure_sink()).is_none());
         let db = Db::open(data.join(DB_FILE)).unwrap();
         assert!(
             run_backup(&data, &db, BackupKind::Manual, T0)
@@ -754,13 +1055,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let data = data_with_event(dir.path());
         select_folder(&data, &dir.path().join("usb"));
-        assert!(tick(&data, false, T0).unwrap().daily);
+        assert!(tick(&data, false, T0, &failure_sink()).unwrap().daily);
         assert!(
-            !tick(&data, false, T0 + DAILY_INTERVAL_SECS - 1)
+            !tick(&data, false, T0 + DAILY_INTERVAL_SECS - 1, &failure_sink(),)
                 .unwrap()
                 .daily
         );
-        assert!(tick(&data, false, T0 + DAILY_INTERVAL_SECS).unwrap().daily);
+        assert!(
+            tick(&data, false, T0 + DAILY_INTERVAL_SECS, &failure_sink(),)
+                .unwrap()
+                .daily
+        );
     }
 
     #[test]
@@ -781,14 +1086,75 @@ mod tests {
             writer::TAKEOVER_CONFIRMATION,
         )
         .unwrap();
-        let outcome = tick(&data, true, T0 + 60).unwrap();
-        assert!(outcome.lost_lock.unwrap().contains("bbbbbbbb"));
+        let outcome = tick(&data, true, T0 + 60, &failure_sink()).unwrap();
+        assert_eq!(outcome.lost_lock_at, Some(T0 + 60));
         let error = claim_writer(&data, T0 + 61).unwrap_err();
-        assert!(error.contains("TAKE OVER"));
+        assert!(error.contains("Take over"));
         // After the stale window the guard lets this machine start again.
         claim_writer(&data, T0 + 30 + writer::STALE_AFTER_SECS).unwrap();
     }
 
+    fn select_file_as_folder(data: &Path, folder: &Path) {
+        std::fs::write(folder, b"not a folder").unwrap();
+        write_config(
+            data,
+            &BackupConfig {
+                folder: Some(folder.to_path_buf()),
+                ..BackupConfig::default()
+            },
+        )
+        .unwrap();
+    }
+
+    // scenario: A failed backup stops the transition
+    #[test]
+    fn a_failed_transition_backup_is_kept_for_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = data_with_event(dir.path());
+        let sink = failure_sink();
+        select_file_as_folder(&data, &dir.path().join("usb"));
+        let hook = transition_hook(&data, sink.clone()).unwrap();
+        let db = Db::open(data.join(DB_FILE)).unwrap();
+        let error = hook(&db, "evt-1").unwrap_err();
+        assert!(error.starts_with("MSW-BACKUP-003"), "{error}");
+        let failure = sink
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .expect("a failure is recorded");
+        assert_eq!(failure.code, CODE_WRITE);
+        assert!(failure.message.contains("did not change the event state"));
+
+        // A later successful transition clears the failure.
+        let usb = dir.path().join("usb");
+        std::fs::remove_file(&usb).unwrap();
+        select_folder(&data, &usb);
+        hook(&db, "evt-1").unwrap();
+        assert!(
+            sink.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_failed_daily_backup_is_kept_for_the_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = data_with_event(dir.path());
+        let sink = failure_sink();
+        select_file_as_folder(&data, &dir.path().join("usb"));
+        let error = tick(&data, false, T0, &sink).unwrap_err();
+        assert_eq!(error.code, CODE_WRITE);
+        assert_eq!(
+            sink.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_ref()
+                .map(|failure| failure.code.as_str()),
+            Some(CODE_WRITE)
+        );
+    }
+
+    // scenario: The host chooses a backup folder
     #[test]
     fn a_folder_inside_the_app_data_folder_is_refused() {
         let dir = tempfile::tempdir().unwrap();
@@ -799,6 +1165,43 @@ mod tests {
         let outside = dir.path().join("usb");
         std::fs::create_dir_all(&outside).unwrap();
         check_folder(&data, &outside).unwrap();
+    }
+
+    #[test]
+    fn command_errors_use_stable_codes_and_host_copy() {
+        let data = Path::new("/home/host/data");
+        let folder = Path::new("/media/usb");
+        let confirmation = map_preview_error(
+            backup::BackupError::Confirmation("RESTORE"),
+            data,
+            Some(folder),
+        );
+        assert_eq!(confirmation.code, CODE_CONFIRM);
+        assert!(confirmation.message.contains("capital letters"));
+        assert!(!confirmation.message.contains('/'));
+
+        let damaged = map_preview_error(
+            backup::BackupError::BlobMismatch("S7F3A.it".to_string()),
+            data,
+            Some(folder),
+        );
+        assert_eq!(damaged.code, CODE_DAMAGED);
+        assert!(damaged.message.contains("One file is damaged"));
+        assert!(damaged.detail.unwrap_or_default().contains("S7F3A.it"));
+
+        let write = map_create_error(
+            backup::BackupError::Io(std::io::Error::other("no space")),
+            data,
+            Some(folder),
+        );
+        assert_eq!(write.code, CODE_WRITE);
+        assert!(write.message.contains("did not change the event state"));
+        assert!(!write.detail.unwrap_or_default().contains("/home/host"));
+
+        let json = serde_json::to_value(HostError::damaged("detail")).unwrap();
+        assert_eq!(json["code"], CODE_DAMAGED);
+        assert!(json["message"].as_str().unwrap().contains("One file"));
+        assert_eq!(json["detail"], "detail");
     }
 
     #[test]
@@ -813,6 +1216,17 @@ mod tests {
         assert!(!message.contains("/home/host"));
         assert!(!message.contains("/media/usb"));
         assert!(message.contains("the app data folder"));
+    }
+
+    #[test]
+    fn the_newest_recovery_folder_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let earlier = data.join(PRE_RESTORE_DIR).join("100");
+        let later = data.join(PRE_RESTORE_DIR).join("200");
+        std::fs::create_dir_all(&earlier).unwrap();
+        std::fs::create_dir_all(&later).unwrap();
+        assert_eq!(newest_recovery_dir(&data), Some(later));
     }
 
     #[test]
@@ -837,7 +1251,11 @@ mod tests {
             .unwrap()
             .unwrap();
         claim_writer(&data, T0).unwrap();
-        assert!(tick(&data, true, T0 + DAILY_INTERVAL_SECS).unwrap().daily);
+        assert!(
+            tick(&data, true, T0 + DAILY_INTERVAL_SECS, &failure_sink())
+                .unwrap()
+                .daily
+        );
 
         let files = files_under(&usb);
         assert!(files.len() >= 4, "{files:?}");

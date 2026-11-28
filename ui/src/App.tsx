@@ -27,6 +27,7 @@ import type {
 } from "./types";
 import {
   exportAuditCsv,
+  describeHostError,
   HostError,
   initialDialog,
   initialScenario,
@@ -290,6 +291,17 @@ export default function App() {
   }, [view]);
 
   useEffect(() => {
+    if (status !== "ready" || view !== "settings") {
+      return;
+    }
+    if (new URLSearchParams(window.location.search).get("focus") !== "backups") {
+      return;
+    }
+    const timer = window.setTimeout(focusBackups, 0);
+    return () => window.clearTimeout(timer);
+  }, [status, view]);
+
+  useEffect(() => {
     document.body.classList.toggle(
       "no-scroll",
       dialogOpen || botDialogOpen || paletteOpen,
@@ -342,11 +354,40 @@ export default function App() {
     setReloadToken((value) => value + 1);
   }
 
+  function focusBackups() {
+    const target = document.getElementById("backups-title");
+    const content = document.getElementById("main");
+    if (!target || !content) {
+      return false;
+    }
+    const top =
+      target.getBoundingClientRect().top -
+      content.getBoundingClientRect().top +
+      content.scrollTop -
+      16;
+    if (typeof content.scrollTo === "function") {
+      content.scrollTo({ top, behavior: "instant" });
+    } else {
+      content.scrollTop = top;
+    }
+    target.focus();
+    return true;
+  }
+
   async function notify(label: string) {
     if (label === "Set up Round 1") {
       const heading = document.getElementById("seed-round-title");
       heading?.scrollIntoView({ block: "start" });
       setToast("Choose the pack and the seed deadline, then open Round 1.");
+      return;
+    }
+    if (label === "Open backups") {
+      setView("settings");
+      window.setTimeout(() => {
+        if (!focusBackups()) {
+          window.setTimeout(focusBackups, 80);
+        }
+      }, 0);
       return;
     }
     if (label === "Open event setup" || label === "Start setup") {
@@ -453,11 +494,10 @@ export default function App() {
   }
 
   function errorDetail(error: unknown) {
-    return typeof error === "string"
-      ? error
-      : error instanceof Error
-        ? error.message
-        : "The command failed.";
+    const problem = describeHostError(error, "");
+    return problem.code
+      ? `${problem.message} (${problem.code})`
+      : problem.message;
   }
 
   async function handleGeneratePlan() {
@@ -815,6 +855,32 @@ export default function App() {
     }
   }
 
+  async function refreshBotStatus() {
+    try {
+      const next = await loadSettings(scenario);
+      setSettings((current) =>
+        current
+          ? {
+              ...current,
+              botConfigured: next.botConfigured,
+              botIdentity: next.botIdentity,
+              tokenStorage: next.tokenStorage,
+              keychainError: next.keychainError,
+              gateway: next.gateway,
+              guildId: next.guildId,
+              guildName: next.guildName,
+              announcementChannelId: next.announcementChannelId,
+              announcementChannelName: next.announcementChannelName,
+              revealChannelId: next.revealChannelId,
+              revealChannelName: next.revealChannelName,
+            }
+          : next,
+      );
+    } catch {
+      // The restore already refreshed the backup status. Keep the last settings.
+    }
+  }
+
   function resetSettings() {
     if (!originalSettings) {
       return;
@@ -985,6 +1051,7 @@ export default function App() {
             reloadView();
           }
         }}
+        onBotStatus={refreshBotStatus}
         onDiscard={resetSettings}
         onTestNotification={async () => {
           try {

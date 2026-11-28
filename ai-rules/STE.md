@@ -88,7 +88,13 @@ Use these exact terms. The full definitions are in `ai-rules/DOMAIN.md`.
 | submit | upload, send back (use "submit" for the completed edit) |
 | skip | pass, decline (use "skip" for the recorded turn) |
 | reveal | launch, release (use "release stream" for the external show) |
+| computer | machine |
+| backup record, backup folder | snapshot, manifest, dump |
+| bot lock | writer lock, heartbeat lock |
 | seen ledger | history, touch log |
+
+**Backup is not a fill-in.** A fill-in covers a turn. A backup record is a local
+copy of data. Do not use "backup" for a fill-in.
 
 ## Examples
 

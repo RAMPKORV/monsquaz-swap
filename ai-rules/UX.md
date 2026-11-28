@@ -20,7 +20,7 @@ what to do, when, and what is private. Clarity wins over cleverness.
 
 **Offer (DM):**
 > Track `S7F3A` is yours if you want it.
-> Claim within 12h; the deadline starts when you claim.
+> Claim within 24h; the deadline starts when you claim.
 > [Claim] [Not now]
 
 **After claim:**
@@ -29,7 +29,8 @@ what to do, when, and what is private. Clarity wins over cleverness.
 
 **Reminder:**
 > 6h left on `S7F3A`. [Still working] [Need +6h] [Skip]
-> Quiet hours respected; this is the only nudge before the deadline.
+> Quiet hours respected. You get a nudge at 50%, 80%, and 95% of the time,
+> and one at the deadline.
 
 **Deadline passed:**
 > The deadline passed on `S7F3A`. The host has been notified.
@@ -123,55 +124,9 @@ and consistent. It must not look like a generated admin template.
 - Every loading state avoids layout shift.
 - Every error state keeps the user's work and offers a fix.
 
-### Screenshot matrix
+### Screenshots, review waves, and reject list
 
-Capture every view in these states:
-
-| State | Required |
-|---|---|
-| Empty / first run | yes |
-| Loading / skeleton | yes |
-| Populated with realistic data | yes |
-| Error / permission denied | yes |
-| Long content / long names | yes |
-| Dense table / many rows | yes |
-| 1280×800 | yes |
-| 1024×700 minimum | yes |
-| 200% zoom | yes |
-| Dark and light | yes |
-
-Views: setup wizard, mission control, event wizard, participant manager,
-schedule planner (matrix + graph), round board, file browser, audit log, reveal
-presenter, export, settings, logs, dry run.
-
-Store curated screenshots under `docs/ui/screens/`. Name them by view and state.
-Use a deterministic seed and sample data.
-
-### Review waves
-
-Run at least three independent reviews for a major UI milestone:
-
-1. **Visual design:** alignment, spacing, hierarchy, density, consistency,
-   typography, color, overflow, responsive behavior.
-2. **UX and copy:** task clarity, next action, jargon, empty/error states,
-   destructive confirmations, first-time host.
-3. **Accessibility:** contrast, focus order, keyboard, screen-reader labels,
-   color-only status, zoom, motion.
-
-Use fresh subagents with no memory of building the UI. Give them the screenshots
-and the user tasks. Record findings in the tracker. Fix every must-fix and
-re-capture. Repeat until no must-fix remains.
-
-### Reject list
-
-- Misaligned labels or inputs.
-- Inconsistent gaps between sections.
-- Crowded tables with no detail view.
-- More than one primary button per screen.
-- Placeholder or fake data in a review screenshot.
-- A modal inside a modal.
-- Scrollbars inside scrollbars.
-- A chart or graph that does not explain itself.
-- A playful visual that hides the next action.
-- A screen that only works at one width.
-
+`docs/UI_REVIEW.md` owns the screenshot matrix, the view list, the review
+waves, the finding format, and the reject list. Do not copy them here.
+`ai-rules/DESIGN.md` owns the deterministic design gate. The skill
+`ai-rules/skills/design-review/SKILL.md` explains how to run the waves.

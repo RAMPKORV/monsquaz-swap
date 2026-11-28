@@ -1,7 +1,9 @@
 # UI review plan
 
 The host UI must be beautiful, calm, and easy to understand. It must not look
-like a generic generated admin panel. This file is the review contract.
+like a generic generated admin panel. This file is the review contract. It is
+the single owner of the screenshot matrix, the review waves, the finding format,
+and the reject list. `ai-rules/UX.md` owns the voice, copy, and layout rules.
 
 ## Screenshot inventory
 
@@ -24,9 +26,13 @@ Capture each view in the required states. Use realistic sample data.
 | Logs | n/a | yes | yes | yes | yes | yes |
 | Dry run | yes | yes | yes | yes | yes | yes |
 
+Capture every state at 1280×800 and at the 1024×700 minimum. Use a
+deterministic seed and sample data. Store curated screenshots under
+`docs/ui/screens/` and name them by view and state.
+
 Also capture:
 
-- light theme for every populated view;
+- dark and light theme for every populated view;
 - 200% zoom for the mission control, planner, participant table, and reveal;
 - the reveal presenter in stream-safe mode;
 - a destructive confirmation;
@@ -49,7 +55,9 @@ gate can pass a layout with a weak hierarchy.
 ## Review waves
 
 Each wave uses a fresh reviewer with no memory of building the UI. Give the
-reviewer the screenshots, the user task, and the relevant event rules.
+reviewer the screenshots, the user task, and the relevant event rules. Run at
+least the first three waves for every UI issue. The procedure is in
+`ai-rules/skills/design-review/SKILL.md`.
 
 ### Wave 1 — Visual design
 
@@ -109,7 +117,7 @@ the review. Do not close the issue until the latest wave has no must-fix.
 ## Reject list
 
 - Misaligned labels or inputs.
-- Inconsistent gaps.
+- Inconsistent gaps between sections.
 - Crowded tables with no detail view.
 - More than one primary action.
 - Placeholder data in a review screenshot.

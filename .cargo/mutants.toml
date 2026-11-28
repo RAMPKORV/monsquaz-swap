@@ -28,15 +28,17 @@ build_timeout_multiplier = 4.0
 # `scripts/mutants.sh --list` shows the remaining mutants.
 exclude_re = [
   # The exact SplitMix64 bit mixing is an implementation detail. The contract
-  # is a deterministic, well-spread stream. Any deterministic mixer produces a
-  # different but valid schedule, so these mutants are equivalent under the
-  # contract and cannot be caught without asserting a private stream.
-  "SplitMix64::next_u64",
+  # is a deterministic, well-spread stream. These operator mutants produce a
+  # different but valid schedule, so they are equivalent under the contract.
+  # The constant-return mutants stay in scope: the determinism test must catch
+  # them.
+  "(replace \\^ with [|&]|replace >> with <<) in SplitMix64::next_u64$",
 
   # The async-queue tie-break uses a private SplitMix64 function and an FNV
   # hash only to order candidates. The contract is a deterministic, fair
-  # choice. A different mixer produces a different valid order, so these
-  # mutants are equivalent and are not a test gap.
-  "replace splitmix -> u64 with| in splitmix$",
-  "replace stable_hash -> u64 with| in stable_hash$",
+  # choice. These operator mutants produce a different valid order, so they
+  # are equivalent and are not a test gap. The constant-return mutants stay in
+  # scope.
+  "(replace \\^ with [|&]|replace >> with <<) in splitmix$",
+  "replace \\^= with [|&]= in stable_hash$",
 ]

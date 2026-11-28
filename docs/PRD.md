@@ -37,7 +37,7 @@ schedule and files, and makes the host's decisions one click.
 | **Host** (primary) | Run a complete anonymous swap without a server, with control over deadlines, skips, and the reveal. | Non-technical; Windows or Linux; will tolerate a 5-minute bot setup, not a terminal. |
 | **Participant** | Join by submitting a seed, receive a track they have never touched, edit it, submit before the deadline, and see the album at the end. | Desktop or mobile Discord; may skip, pause, or leave; may not know the schedule. |
 | **Fill-in** | Cover a skipped slot without ever receiving the same track twice. | May be a dedicated volunteer or someone who signed up but never seeded. |
-| **Co-host** | Help with nudges, extensions, pauses, and decisions; may see the mapping. | Trusted helper; actions audited. |
+| **Co-host** | Help with nudges, extensions, pauses, and decisions; may see the mapping. Decided, building in MSW-117 (D-059). | Trusted helper; actions audited. |
 | **Server member** | Watch the reveal and celebrate. | No assignments; no spectator role needed. |
 
 Not a user: an anonymous website visitor; a public API consumer; a mobile app
@@ -127,7 +127,7 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-EVENT-001 | must | The host SHALL create an event with mode, length, pack, allowlist, anonymity, deadlines, groups, and reveal settings, using presets and a reset-to-recommended action. | `ops.feature` |
-| REQ-EVENT-002 | must | The event SHALL move through Draft → Signup/Seed → Schedule review → Active → Paused → Reveal → Archived. | `ops.feature` |
+| REQ-EVENT-002 | must | The event SHALL move through Draft → Signup/Seed → Schedule review → Active → Paused → Reveal → Archived. The host pause action that enters Paused: decided, building in MSW-113 (D-055). | `ops.feature` |
 | REQ-EVENT-003 | must | When the schedule is committed, the app SHALL lock core rules and allow only operational knobs to change with an audit entry. | `scheduling.feature` |
 | REQ-EVENT-004 | should | The host SHALL clone a past event's settings and archive/export/import event bundles. | `ops.feature` |
 | REQ-EVENT-005 | must | The app SHALL bind one active event per Discord server and store past events in a library. | `ops.feature` |
@@ -200,7 +200,7 @@ named command. IDs are stable.
 | REQ-DEADLINE-001 | must | Deadlines SHALL be soft by default: reminders and a host alert, never a silent automatic transfer. | `deadlines_and_extensions.feature` |
 | REQ-DEADLINE-002 | must | Reminders SHALL fire at 50%, 80%, and 95% of the window plus at the deadline, respecting local quiet hours. | `deadlines_and_extensions.feature` |
 | REQ-DEADLINE-003 | must | A participant SHALL request +1h/+6h/+12h; the first request auto-approves up to 6h; max 2 per assignment; the host can override. | `deadlines_and_extensions.feature` |
-| REQ-DEADLINE-004 | must | The host SHALL be able to extend one person, extend the round, pause the event, skip, fill, or advance, each with an audit entry. | `deadlines_and_extensions.feature` |
+| REQ-DEADLINE-004 | must | The host SHALL be able to extend one person, extend the round, pause the event, skip, fill, or advance, each with an audit entry. Event pause: decided, building in MSW-113 (D-055). | `deadlines_and_extensions.feature` |
 | REQ-DEADLINE-005 | should | A bot outage SHALL be visible, and deadlines SHALL be extendable by the outage duration; DM messages sent while offline SHALL be reconciled on reconnect. | `ops.feature` |
 
 ### Skips & fill-ins
@@ -257,7 +257,7 @@ named command. IDs are stable.
 
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
-| REQ-OPS-001 | must | State SHALL persist in SQLite (WAL) with automatic backups and a restore wizard; the app SHALL recover from a crash without duplicate transitions. Delivery SHALL be at least once. A crash after Discord accepts a send can repeat that send until transport reconciliation lands. | `ops.feature` |
+| REQ-OPS-001 | must | State SHALL persist in SQLite (WAL); the app SHALL recover from a crash without duplicate transitions. Automatic backups and a restore wizard: decided, building in MSW-115 (D-057). Delivery SHALL be at least once. A crash after Discord accepts a send can repeat that send until transport reconciliation lands. | `ops.feature` |
 | REQ-OPS-002 | must | The app SHALL be single-instance and SHALL keep the bot running in the tray until explicit Quit. | `ops.feature` |
 | REQ-OPS-003 | must | Every host override, mapping access, and security-relevant event SHALL be recorded in an append-only audit log. | `ops.feature` |
 | REQ-OPS-004 | must | The app SHALL expose a participant view preview and a host dry-run simulator. | `ops.feature` |

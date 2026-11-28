@@ -15,7 +15,7 @@ code does not implement yet. The named issue builds it.
 | Event name | `Monsquaz Swap <n>` | Free text | No |
 | Guild / server | The host's selected guild | One active event per guild | Yes |
 | Host | The app owner | One primary host | Yes |
-| Co-hosts | None | Add Discord accounts; full mapping access; audited | No |
+| Co-hosts | None | Add Discord accounts; full mapping access; audited. Decided, building in MSW-117 | No |
 | Language | English | English in v1; strings are i18n-ready | No |
 
 ## 2. Mode, length, completeness
@@ -214,7 +214,7 @@ Rules:
 | Maximum extensions | 2 per assignment | 0–3 | No |
 | No-response fallback | Grace, then host | Grace + host; auto-skip; wait | Yes |
 | Host deadline prompt | DM + decision card; 6h target | 6h target; no target; host-set | No |
-| Event pause | Host action | On | No |
+| Event pause | Host action | On. Decided, building in MSW-113 | No |
 
 ## 9. Join, leave, rejoin
 
@@ -257,9 +257,9 @@ Rules:
 | Replans | No cap (D-043) | Each replan creates a new commitment and an audit entry | Yes |
 | Verification file | `verify.txt` in the reveal | Participants check the seal with `sha256sum` and `/swap verify` (D-043) | Yes |
 | Audit log | On | On | Yes |
-| Mapping access | Host + full co-hosts | Host; co-hosts; per-person | No |
+| Mapping access | Host only until co-hosts exist (MSW-117) | Host; co-hosts; per-person | No |
 | Data location | User-chosen library | Library; app data | No |
-| Backups | Auto + restore wizard | Auto; manual; off | No |
+| Backups | Auto + restore wizard | Auto; manual; off. Decided, building in MSW-115 | No |
 | Retention | Until host deletes/archives | Per-event; fixed period | No |
 | Telemetry | Off | Off; opt-in diagnostics | No |
 | Update | Off | Off; later | No |

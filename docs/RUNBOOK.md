@@ -2,6 +2,9 @@
 
 Use this file to run a real event. The app guides you, but this is the checklist.
 
+A step marked **Not built yet** describes a decided capability that the app
+does not have. Do not rely on that step. Use the workaround in the same step.
+
 ## 1. Install
 
 1. Download the Windows NSIS installer or the Linux `.deb`/AppImage from
@@ -33,14 +36,17 @@ The app stores the token in the OS keychain. It never shows the token again.
 6. Set deadlines, claim window, release time, and reminders.
 7. Choose anonymity and reveal settings.
 8. Read the warnings. Accept or change the plan.
-9. Run the dry run.
+9. **Not built yet:** the host dry run. Use `swap-sim` from a development
+   checkout, or skip this step.
 
 ## 4. Seed phase
 
 1. Post the join announcement. Pin it.
 2. Tell participants to enable DMs from server members.
-3. Watch the DM risk list. Help anyone with blocked DMs.
-4. Check the pack report for seeds that need review.
+3. **Not built yet:** the DM risk list. Use the test DM in setup and ask
+   participants to open their DMs.
+4. **Not built yet:** the pack report in seed intake. Listen to each seed if
+   the pack rules matter.
 5. Remind non-seeders before the seed deadline.
 6. Lock the roster. Unseeded signups become fill-ins by default.
 
@@ -86,13 +92,13 @@ The app stores the token in the OS keychain. It never shows the token again.
 
 ## 7. Reveal
 
-1. Build the runbook in the app.
+1. **Not built yet:** the runbook export. Write the running order by hand.
 2. Open the presenter window. Turn on stream-safe mode.
 3. Run the release stream. Show the lineage, play R1, then the final.
 4. Finish the stream.
 5. Press Reveal. The app publishes to the whole server.
 6. Verify the credits, comments, schedule, and album links.
-7. Export the ZIP and the personal keepsakes.
+7. Export the reveal ZIP. **Not built yet:** the personal keepsakes.
 8. Send the album link and the runbook.
 
 ## 8. Incidents
@@ -100,10 +106,10 @@ The app stores the token in the OS keychain. It never shows the token again.
 | Incident | Action |
 |---|---|
 | Token leaked | Rotate the token. Stop the bot. Follow the security policy. |
-| File is malicious | Quarantine it. Warn recipients. Do not distribute it. |
-| Schedule is infeasible | Use the planner's repair. If you replan, record the reason. |
-| Too many dropouts | Pause the event. Rebalance or merge groups. Use fill-ins. |
-| Data loss | Restore a backup. Check the ledger. Do not restore a stale backup. |
+| File is malicious | Do not distribute it. Warn recipients. **Not built yet:** quarantine in the app. |
+| Schedule is infeasible | Before the start, use the planner's group repair. **Not built yet:** replan after the start. |
+| Too many dropouts | Use fill-ins. Move the round deadline. **Not built yet:** event pause (MSW-113, D-055) and active-phase regrouping. |
+| Data loss | **Not built yet:** automatic backups and the restore wizard (MSW-115, D-057). Until then, close the app and copy the app data folder by hand before each round. |
 | Participant harassment | Stop the event. Preserve evidence. Remove the person. |
 | Accidental reveal | Stop. Tell the participants. Record what happened. Do not amplify. |
 
@@ -117,8 +123,18 @@ The app stores the token in the OS keychain. It never shows the token again.
 
 ## 10. Backups
 
-- The app backs up before transitions and daily.
-- Keep one copy outside the machine.
-- Test a restore before the first real event.
-- Backups expire after 90 days by default.
-- Do not put the database in a cloud-synced folder.
+**Decided, building in MSW-115 (D-057).** The app does not make backups yet,
+and it has no restore wizard. The planned design takes a snapshot before every
+state transition and once a day, and the wizard checks integrity.
+
+Until MSW-115 is done:
+
+1. Close the app before you copy data. A copy of an open database can be
+   inconsistent.
+2. Copy the whole app data folder, including the file store, to a second
+   disk.
+3. Do this before each round opens and after the reveal.
+4. Do not put the database in a cloud-synced folder.
+5. To restore, close the app, replace the folder, and start the app.
+
+The bot token is not in the folder. It stays in the OS keychain.

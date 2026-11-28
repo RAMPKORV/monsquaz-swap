@@ -3,7 +3,7 @@
   "features": [
     {
       "file": "specs/features/fill_ins.feature",
-      "reason": "A parallel batch rewrites the fill-in scenarios (D-039, D-049, D-050). That batch adds the @pending tags and the mappings.",
+      "reason": "MSW-080..MSW-083 rewrite the fill-in scenarios for D-050. That batch adds the @pending tags and the test mappings.",
       "expires": "2026-12-15"
     }
   ]

@@ -9,7 +9,7 @@ disagree, stop and decide which is wrong; record the decision.
 |---|---|
 | **Event / swap** | One album-making run with a roster, a pack (optional), a schedule, files, and a reveal. |
 | **Host** | The person running the desktop app and bot. May also participate, with disclosure. |
-| **Co-host** | Optional admin with full visibility, audited. |
+| **Co-host** | Optional helper with full visibility, audited. Decided, building in MSW-117 (D-059). |
 | **Participant** | A guild member who joins and seeds a track. |
 | **Fill-in** | A volunteer (or converted non-seeder) who covers a skipped slot; never receives a track twice. |
 | **Seed** | The participant's initial track submission (Round 1 / version 1). |
@@ -59,6 +59,7 @@ Draft → Signup/Seed → Schedule review → Active → Paused → Reveal → A
 - **Active:** offers, claims, edits, submissions, skips, fill-ins, reminders,
   extensions, group phases.
 - **Paused:** global freeze; clocks shift by the pause duration; no replan.
+  The host pause action is decided, building in MSW-113 (D-055).
 - **Reveal:** host-triggered after the release stream; schedule, titles,
   credits, comments, and album are published.
 - **Archived:** read-only; exportable; can be cloned.
@@ -159,9 +160,13 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   - **strike + cooldown** (default): one active offer; the first expiry starts
     a 24-hour cooldown; the second expiry pauses the participant until
     `/swap resume` or a host action;
-  - **cooldown only**: every expiry starts a 24-hour cooldown; no auto-pause;
-  - **host review**: every expiry creates a host decision;
-  - **none**: no cooldown and no auto-pause.
+  - **cooldown only**: every expiry starts a 24-hour cooldown; the app never
+    pauses the participant;
+  - **host review**: an expiry has no automatic effect except a host decision
+    card; the host chooses pause, cooldown, or ignore;
+  - **none**: the participant stays Ready and can get a new offer in the next
+    wave; the app never offers the same track again unless the re-offer
+    setting allows it.
 - Strikes reset when the participant resumes. An auto-pause alerts the host.
 - Same-track re-offer after expiry is a setting: never (default), after
   cooldown, last resort, or host.
@@ -229,7 +234,8 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
   per assignment; host can override.
 - No-response fallback: grace, then host decision; automatic skipping only if
   explicitly configured and disclosed.
-- Host can pause the event; all clocks shift by the pause duration.
+- Host can pause the event; all clocks shift by the pause duration. Decided,
+  building in MSW-113 (D-055).
 
 ## Files and naming
 

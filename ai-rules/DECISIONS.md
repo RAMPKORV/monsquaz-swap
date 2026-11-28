@@ -1,7 +1,7 @@
 # Decision log
 
 This file is the single human-readable decision log. It holds the
-hand-written decisions D-001..D-028 and the tracker decisions D-029..D-050.
+hand-written decisions D-001..D-028 and the tracker decisions D-029..D-062.
 The tracker (`./bin/project decision`) is the durable record for D-029 and
 later. `docs/generated/DECISIONS.md` is a generated dump of the tracker; do not
 read it as a second log.
@@ -363,7 +363,7 @@ shape instead of a bare cyclic shift.
 **Rejected:** bare cyclic shift as the default (predictable), pure greedy
 (dead-ends), and one fixed algorithm for every event.
 
-## Tracker decisions D-029..D-050
+## Tracker decisions D-029 and later
 
 The entries below copy the tracker decisions. The tracker text is the source.
 Run `./bin/project decision show D-0xx` for the full record.
@@ -604,3 +604,120 @@ A fill-in turn of a participant is an extra turn. It does not count toward
 seen pair, and the seen-ledger insert fails on a duplicate. Async mode does not
 change.
 **Status:** supersedes D-049 (chain: D-039 → D-049 → D-050).
+
+## D-051 — Complete opt-out with confirmation and host revert
+
+**Date:** 2026-11-28.
+**Decision:** a participant can leave at any time through `/swap leave`, a
+Leave button on every bot DM, or the host. A warning states the consequences,
+and the person (or the host) must confirm. Leave is immediate: a held track
+becomes a skip after claim (seen), the track returns unchanged, the fill-in
+flow starts, and the host gets an alert. Future plan turns become gaps. Queued
+offers, reminders, and nudges are cancelled, and the bot sends no further DMs;
+the confirmation is an ephemeral reply. The seed keeps circulating, also when
+the person leaves before the roster lock. Past credits keep the name. The host
+can revert a leave: the person confirms with a button, then gets planned turns
+from the next round; an auto-skipped turn stays a skip, and a fill-in keeps a
+taken slot. Every leave and revert is audited.
+**Consequences:** the planner must handle a track whose owner is not in the
+roster. Leavers return as fill-ins only through a host revert.
+
+## D-052 — Classic holes instead of a blocked round
+
+**Date:** 2026-11-28.
+**Decision:** when a planned person is paused, left, or removed, the round
+opens for everyone else. Their cell becomes a hole: the track waits and a
+fill-in decision card appears (D-050 tiers, `fill_in_flow`). With no eligible
+fill-in, the track passes on unchanged. Mission control shows the holes before
+the host opens the round.
+**Consequences:** one absent person no longer stalls the event.
+
+## D-053 — Wrong-file repair: rewind with extra material
+
+**Date:** 2026-11-28.
+**Decision:** the host marks a version as wrong basis. The main line rewinds
+to the last good version or a host-imported correct file. The current holder
+receives the rewound version plus the orphaned version as optional extra
+material. The orphaned edits are kept as a credited B-side in the album.
+Versions stay append-only; seen is per track, so re-delivery is safe. The plan
+does not change.
+**Consequences:** every person's work survives as main line, merge material,
+or B-side.
+
+## D-054 — Outage recovery
+
+**Date:** 2026-11-28.
+**Decision:** on-time is judged by the Discord message timestamp with a small
+skew allowance. Senders get a receipt that states the send time. Offers and
+deadlines that passed while the bot was offline do not expire. The host sees
+one welcome-back card with the downtime and a recommended extension by the
+downtime; one click extends, and affected holders get one DM.
+**Consequences:** an outage never costs a participant anything. No silent
+change to the event clock.
+
+## D-055 — Event pause
+
+**Date:** 2026-11-28.
+**Decision:** pause freezes the event clock: no offers, reminders, expiries,
+or nudges. The bot posts one channel message. Participants can still submit.
+Resume shifts every open deadline and claim window by the pause length; only
+people who hold a track get one DM with the new deadline.
+**Consequences:** implements the documented Paused state. Building in
+MSW-113.
+
+## D-056 — Change future round length after lock
+
+**Date:** 2026-11-28.
+**Decision:** the host can change the round length for rounds not yet opened,
+with a date preview and one channel note. The current round uses Move round
+deadline. The seal covers assignments, not dates.
+**Consequences:** a wrong round length is fixable without a replan.
+
+## D-057 — Automatic backups and restore
+
+**Date:** 2026-11-28.
+**Decision:** before every state transition and daily: a consistent SQLite
+snapshot plus a blob manifest in a host-chosen folder, with retention. A
+restore wizard checks integrity and asks for the bot token, which is never in
+a backup. A single-writer guard prevents two machines from running the same
+event.
+**Consequences:** fixes the false RUNBOOK and REQ-OPS-001 promise. Building in
+MSW-115.
+
+## D-058 — Host remove and alt-account link
+
+**Date:** 2026-11-28.
+**Decision:** host Remove uses the D-051 leave mechanics without consent,
+audited. Link as same person merges seen sets and own-track exclusions; any
+future plan cell that now breaks an invariant becomes a hole (D-052).
+**Consequences:** bans and alt accounts no longer break invariants.
+
+## D-059 — Co-host
+
+**Date:** 2026-11-28.
+**Decision:** the host names a co-host Discord user. The co-host can resolve
+decision cards through slash commands (extend, missed, appoint fill-in). Every
+host action records its actor. Discord never shows the mapping.
+**Consequences:** implements the D-010 deputy. Building in MSW-117.
+
+## D-060 — Host import version
+
+**Date:** 2026-11-28.
+**Decision:** the host can add a version on a holder's behalf from a chosen
+file, with explicit overrides for size and format and an audited reason.
+**Consequences:** implements the D-015 host-import fallback.
+
+## D-061 — Post-reveal errata not planned
+
+**Date:** 2026-11-28.
+**Decision:** post-reveal credit, title, and track-withdrawal edits are not
+planned. The reveal stays one-shot.
+**Consequences:** a takedown after the reveal is handled outside the app.
+
+## D-062 — Mirror the pinned TLA+ tools
+
+**Date:** 2026-11-28.
+**Decision:** the formal check downloads `tla2tools.jar` from our own release
+asset, pinned by SHA-256, not from the mutable upstream asset.
+**Consequences:** upstream changes cannot break or alter the formal check.
+Implemented in MSW-119; the update procedure is in `docs/FORMAL_METHODS.md`.

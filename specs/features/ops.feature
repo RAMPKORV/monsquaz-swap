@@ -123,6 +123,19 @@ Feature: Host operations and recovery
     When the host selects back up now
     Then the app writes a manual backup
 
+  Scenario: The host selects a backup folder
+    Given an installation with no backup folder
+    When the host selects a folder outside the app data folder
+    Then the app stores the folder
+    And the app shows the folder name
+    And the app refuses a folder inside the app data folder
+
+  Scenario: The app shows the backup history
+    Given a backup folder with three complete backups
+    When the host views the backup status
+    Then the app shows each backup time in the event timezone
+    And the app shows the backup kind and the event state
+
   Scenario: A backup copies each file one time
     Given a backup folder that contains a file from an earlier backup
     When the app writes a new backup

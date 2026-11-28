@@ -1361,7 +1361,8 @@ textarea {
 }
 
 .settings-grid > .card:first-child,
-.settings-grid > .card:last-child {
+.settings-grid > .card:last-child,
+.settings-grid > .backup-card {
   grid-column: 1 / -1;
 }
 
@@ -1903,6 +1904,98 @@ select.input {
   margin-left: auto;
   flex: none;
   color: var(--accent);
+}
+
+.backup-card__actions {
+  margin-top: 12px;
+}
+
+.backup-history {
+  margin-top: 12px;
+}
+
+.backup-history__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+
+.backup-history__head h3 {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.backup-history__head span {
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.backup-history__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-history__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.backup-history__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.backup-history__time {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.backup-history__empty {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.restore-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.restore-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.restore-option span {
+  min-width: 0;
+}
+
+.restore-events {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
 }
 
 .danger-zone {
@@ -3750,6 +3843,15 @@ select.input {
   }
   .content {
     padding: 12px 12px 0;
+  }
+
+  .backup-history__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .backup-history__time {
+    text-align: left;
   }
 
   .topbar {

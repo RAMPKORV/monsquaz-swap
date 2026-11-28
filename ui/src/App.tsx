@@ -980,6 +980,11 @@ export default function App() {
         }}
         onTheme={changeTheme}
         onConfigureBot={() => setBotDialogOpen(true)}
+        onRestored={() => {
+          if (!demo) {
+            reloadView();
+          }
+        }}
         onDiscard={resetSettings}
         onTestNotification={async () => {
           try {

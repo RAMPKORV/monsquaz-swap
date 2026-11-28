@@ -1,6 +1,7 @@
 import type {
   ActivityEntry,
   AuditEntry,
+  BackupStatus,
   BotPreview,
   ChannelOption,
   Decision,
@@ -1768,5 +1769,81 @@ export function demoRevealPackage(scenario: Scenario): RevealPackage {
     eventState: "Active",
     published: false,
     album: Array.from({ length: count }, (_, index) => revealTrack(index, long)),
+  };
+}
+
+export type BackupScenario = "default" | "empty" | "long" | "foreign";
+
+export function demoBackupStatus(
+  scenario: BackupScenario = "default",
+): BackupStatus {
+  const now = Math.floor(Date.now() / 1000);
+  const event = (state: string, name = "Night Shift Vol. 2") => [
+    { name, state },
+  ];
+  const backup = (
+    id: string,
+    kind: string,
+    age: number,
+    state: string,
+    name = "Night Shift Vol. 2",
+  ) => ({
+    id,
+    kind,
+    createdAt: now - age,
+    complete: true,
+    events: event(state, name),
+  });
+  const folderName =
+    scenario === "long"
+      ? "The studio USB drive with the long label"
+      : "Swap backups";
+  const manual = [
+    backup("demo-manual", "manual", 25 * 60, "active"),
+    backup("demo-daily", "daily", 9 * 3600, "active"),
+    backup("demo-transition", "transition", 2 * 86_400, "schedule_review"),
+    backup("demo-signup", "transition", 6 * 86_400, "signup"),
+  ];
+  const long = [
+    ...manual,
+    backup("demo-draft", "transition", 8 * 86_400, "draft", longEventName),
+    backup("demo-seed", "transition", 10 * 86_400, "signup", longEventName),
+    backup(
+      "demo-lock",
+      "transition",
+      12 * 86_400,
+      "schedule_review",
+      longEventName,
+    ),
+    backup("demo-round", "transition", 14 * 86_400, "active", longEventName),
+    backup("demo-pause", "transition", 18 * 86_400, "paused", longEventName),
+    backup(
+      "demo-archive",
+      "transition",
+      21 * 86_400,
+      "archived",
+      longEventName,
+    ),
+  ];
+  const backups = scenario === "empty" ? [] : scenario === "long" ? long : manual;
+  return {
+    folderName: scenario === "empty" ? null : folderName,
+    keepTransition: 20,
+    keepDaily: 14,
+    backups,
+    writer:
+      scenario === "foreign"
+        ? {
+            state: "foreign",
+            machine: "a91c3f07",
+            heartbeatAt: now - 42,
+            lostLock: null,
+          }
+        : {
+            state: "own",
+            machine: "4f2a9c1e",
+            heartbeatAt: now - 120,
+            lostLock: null,
+          },
   };
 }

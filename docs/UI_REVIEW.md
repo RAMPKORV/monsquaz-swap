@@ -23,6 +23,7 @@ Capture each view in the required states. Use realistic sample data.
 | Reveal presenter | yes | yes | yes | yes | yes | yes |
 | Export/reveal package | yes | yes | yes | yes | n/a | yes |
 | Settings | yes | n/a | yes | yes | yes | yes |
+| Backups and restore (Settings) | yes | yes | yes | yes | yes | yes |
 | Logs | n/a | yes | yes | yes | yes | yes |
 | Dry run (MSW-122; not built) | yes | yes | yes | yes | yes | yes |
 

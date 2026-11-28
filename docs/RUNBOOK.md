@@ -123,18 +123,16 @@ The app stores the token in the OS keychain. It never shows the token again.
 
 ## 10. Backups
 
-**Decided, building in MSW-115 (D-057).** The app does not make backups yet,
-and it has no restore wizard. The planned design takes a snapshot before every
-state transition and once a day, and the wizard checks integrity.
-
-Until MSW-115 is done:
-
-1. Close the app before you copy data. A copy of an open database can be
-   inconsistent.
-2. Copy the whole app data folder, including the file store, to a second
-   disk.
-3. Do this before each round opens and after the reveal.
-4. Do not put the database in a cloud-synced folder.
-5. To restore, close the app, replace the folder, and start the app.
-
-The bot token is not in the folder. It stays in the OS keychain.
+1. Open Settings. In "Backups and restore", select a backup folder on another disk or a USB drive.
+2. The app writes a backup before each event state change and one daily backup.
+3. Keep one copy of the backup folder off this machine.
+4. The app keeps the newest 20 state-change backups and the newest 14 daily backups.
+5. Select "Restore from a backup" to start a restore.
+6. Select a backup. Select "Check backup". Type `RESTORE`.
+7. The app stops the bot and replaces the database. It keeps the replaced database in a pre-restore folder.
+8. Add the bot token again after the restore. Backups never hold the token.
+9. Type `PURGE` to delete every backup after a participant asks for deletion.
+10. Do not put the database or the backup folder in a cloud-synced folder.
+11. The single-writer guard stops a second machine from running the bot.
+12. If the app shows "Another machine", stop the bot on that machine. Select "Take over" and type `TAKE OVER`.
+13. Test a restore before the first real event.

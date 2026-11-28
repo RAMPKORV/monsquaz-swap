@@ -144,6 +144,59 @@
       "id": "settings-bot-light",
       "query": "demo=1&static=1&view=settings&dialog=bot&theme=light",
       "contrast": true
+    },
+    {
+      "id": "settings-backups",
+      "query": "demo=1&static=1&view=settings&scroll=backups&theme=dark",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "settings-backups-light",
+      "query": "demo=1&static=1&view=settings&scroll=backups&theme=light",
+      "contrast": true
+    },
+    {
+      "id": "settings-backups-empty",
+      "query": "demo=1&static=1&view=settings&backup=empty&scroll=backups&theme=dark",
+      "contrast": true
+    },
+    {
+      "id": "settings-backups-error",
+      "query": "demo=1&static=1&view=settings&backup=error&scroll=backups&theme=dark",
+      "contrast": true
+    },
+    {
+      "id": "settings-backups-long",
+      "query": "demo=1&static=1&view=settings&backup=long&scroll=backups&theme=dark"
+    },
+    {
+      "id": "settings-restore",
+      "query": "demo=1&static=1&view=settings&dialog=restore&theme=dark"
+    },
+    {
+      "id": "settings-restore-empty",
+      "query": "demo=1&static=1&view=settings&dialog=restore&restore=empty&theme=dark"
+    },
+    {
+      "id": "settings-restore-preview",
+      "query": "demo=1&static=1&view=settings&dialog=restore&restore=preview&theme=dark",
+      "contrast": true,
+      "focus": true
+    },
+    {
+      "id": "settings-restore-done",
+      "query": "demo=1&static=1&view=settings&dialog=restore&restore=done&theme=dark",
+      "contrast": true
+    },
+    {
+      "id": "settings-restore-error",
+      "query": "demo=1&static=1&view=settings&dialog=restore&restore=error&theme=dark",
+      "contrast": true
+    },
+    {
+      "id": "settings-takeover",
+      "query": "demo=1&static=1&view=settings&dialog=takeover&backup=foreign&scroll=backups&theme=dark"
     }
   ]
 }

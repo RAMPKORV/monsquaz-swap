@@ -484,3 +484,52 @@ export type RevealStats = {
   skips: number;
   contributors: number;
 };
+
+export type BackupEvent = {
+  name: string;
+  state: string;
+};
+
+export type BackupItem = {
+  id: string;
+  kind: "transition" | "daily" | "manual" | string;
+  createdAt: number;
+  complete: boolean;
+  events: BackupEvent[];
+};
+
+export type WriterStatus = {
+  state: "free" | "own" | "foreign";
+  machine: string | null;
+  heartbeatAt: number | null;
+  lostLock: string | null;
+};
+
+export type BackupStatus = {
+  folderName: string | null;
+  keepTransition: number;
+  keepDaily: number;
+  backups: BackupItem[];
+  writer: WriterStatus;
+};
+
+export type RestoreSource = {
+  folderName: string | null;
+  backups: BackupItem[];
+};
+
+export type RestorePreview = {
+  id: string;
+  kind: string;
+  createdAt: number;
+  appVersion: string;
+  files: number;
+  events: BackupEvent[];
+  staleness: "none" | "same" | "older" | "newer" | "diverged";
+  newerEntries: number;
+};
+
+export type RestoreDone = {
+  events: BackupEvent[];
+  keptPrevious: boolean;
+};

@@ -1,6 +1,7 @@
 import type { HostSettings } from "../types";
 import { Button, Field, PageHeader, Skeleton, StatusPill, Toggle } from "../components";
 import { Icon } from "../icons";
+import { BackupCard } from "./Backups";
 
 const timezones = [
   "Europe/Stockholm",
@@ -36,6 +37,7 @@ export function SettingsView({
   onConfigureBot,
   onDiscard,
   onTestNotification,
+  onRestored,
 }: {
   settings: HostSettings;
   eventName: string;
@@ -47,6 +49,7 @@ export function SettingsView({
   onConfigureBot: () => void;
   onDiscard: () => void;
   onTestNotification: () => void;
+  onRestored: () => void;
 }) {
   function update<K extends keyof HostSettings>(
     key: K,
@@ -460,6 +463,12 @@ export function SettingsView({
               ))}
             </div>
           </section>
+
+          <BackupCard
+            timezone={settings.timezone}
+            onEnterToken={onConfigureBot}
+            onRestored={onRestored}
+          />
 
           <section
             className="card danger-zone"

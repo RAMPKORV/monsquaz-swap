@@ -24,7 +24,7 @@ Capture each view in the required states. Use realistic sample data.
 | Export/reveal package | yes | yes | yes | yes | n/a | yes |
 | Settings | yes | n/a | yes | yes | yes | yes |
 | Logs | n/a | yes | yes | yes | yes | yes |
-| Dry run | yes | yes | yes | yes | yes | yes |
+| Dry run (MSW-122; not built) | yes | yes | yes | yes | yes | yes |
 
 Capture every state at 1280×800 and at the 1024×700 minimum. Use a
 deterministic seed and sample data. Store curated screenshots under
@@ -114,7 +114,9 @@ without the human.
    affected views.
 2. The agent publishes the screenshots to the shared review gallery for the
    human.
-3. The agent continues only after the agent publishes the screenshots.
+3. The agent continues only after the human approves the checkpoint or writes
+   a comment in the gallery. The agent must not treat its own publication as
+   approval.
 4. When a visual choice is open, the agent renders 2 or 3 variants (A, B, C)
    as screenshots.
 5. The agent publishes the variants and asks the human to choose one. The

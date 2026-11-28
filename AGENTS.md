@@ -20,11 +20,12 @@ This file is a router. Detailed rules live in `ai-rules/`.
 7. `ai-rules/DESIGN.md` — the deterministic design policy, the Refract gate,
    and how to change a locked rule.
 8. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
-   `ai-rules/DECISIONS.md` is the single decision log. `ai-rules/skills/` holds
-   the shared agent skills (formal verification, design review, STE writing).
-9. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
-   and append-only ledger. It is not the PRD; the PRD is hand-written.
-10. The issue you are working on, its notes, and linked docs.
+9. `ai-rules/DECISIONS.md` — the single decision log.
+10. `ai-rules/skills/` — the shared agent skills (formal verification, design
+    review, STE writing).
+11. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
+    and append-only ledger. It is not the PRD; the PRD is hand-written.
+12. The issue you are working on, its notes, and linked docs.
 
 ## Current state
 
@@ -133,25 +134,18 @@ instruction ambiguous.
 ## UI quality gate
 
 A UI issue is not done until the visual evidence exists and the review waves
-pass. `docs/UI_REVIEW.md` owns the screenshot matrix and the reject list.
+pass. `docs/UI_REVIEW.md` is the single owner of the screenshot matrix, the
+states, the review waves, the human checkpoints, and the reject list.
 `ai-rules/UX.md` owns the copy rules.
-
-- Capture every affected view at 1280×800 and at the minimum 1024×700 width.
-- Capture empty, loading, populated, error, long-content, and dense-table
-  states.
-- Check alignment, spacing, density, typography, contrast, overflow, focus, and
-  responsive behavior.
-- Run at least three independent reviews in waves: visual design, UX/copy, and
-  accessibility. Fix every must-fix, then re-capture.
-- Store the curated screenshots under `docs/ui/screens/` and record the review.
-- Do not use placeholder text or fake-looking data in a review screenshot.
 
 ## Definition of done
 
 - The behaviour has a Gherkin scenario in `specs/features/` (or a recorded
   verification command for a chore).
 - A test declares the scenario with `// scenario: <name>`, and the scenario
-  has no `@pending` tag. `node scripts/trace-scenarios.mjs` passes.
+  has no `@pending` tag. A feature file that cucumber-rs runs counts as mapped
+  in full and needs no per-test comment. `node scripts/trace-scenarios.mjs`
+  passes.
 - A failing test existed first, or the change is a docs/chore.
 - New specifications follow `ai-rules/STE.md`, and `node scripts/ste-lint.mjs`
   passes.

@@ -15,7 +15,8 @@ not add rules.
 1. Run `scripts/design-check.sh`. Fix every finding first. The waves do not
    replace the gate.
 2. Capture the screenshot matrix in `docs/UI_REVIEW.md` for every affected
-   view. Use real sample data from the engine fixtures.
+   view. Use the demo data in `ui/src/data/demo.ts`. Engine-generated fixtures
+   are MSW-101.
 3. Put the curated screenshots in `docs/ui/screens/`. Name each file by view,
    state, theme, and width.
 
@@ -57,7 +58,7 @@ Follow "Human in the loop" in `docs/UI_REVIEW.md` at every checkpoint:
 
 ## Record
 
-- Write the review to `docs/ui/reviews/MSW-###.md`: the screenshots, each
-  wave, each finding, and the fix.
-- Add the review record to the tracker issue.
+- Write the review to `docs/ui/reviews/`. Use one file for each issue, or one
+  batch file named by the issue keys.
+- Add one review record to the tracker for each issue.
 - Link the review file from the PR body.

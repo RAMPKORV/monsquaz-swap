@@ -65,8 +65,9 @@ Feature: Anonymous scheduling
 cargo test -p swap-acceptance --test cucumber
 ```
 
-Step definitions call app services with a fake `DiscordPort`, a fake clock, and
-an in-memory SQLite database. They must not touch the network.
+The current runner is a pure `swap-core` harness. It does not call app
+services. App-service fakes for `DiscordPort`, the clock, and SQLite are future
+work.
 
 ## Traceability (D-038)
 

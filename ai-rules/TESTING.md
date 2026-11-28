@@ -139,9 +139,10 @@ intermittency.
 ## Scenario traceability
 
 Every scenario in `specs/features/` maps to a test or carries `@pending`
-(D-038). The convention and the gate are in `ai-rules/GHERKIN.md`. When you
-add a test that proves a scenario, add the `// scenario:` comment and remove
-the `@pending` tag in the same PR.
+(D-038). The convention and the gate are in `ai-rules/GHERKIN.md`. A feature
+file that cucumber-rs runs counts as mapped in full and needs no per-test
+comment. When you add a test that proves a scenario, add the `// scenario:`
+comment and remove the `@pending` tag in the same PR.
 
 ## DoD
 

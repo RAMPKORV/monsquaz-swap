@@ -33,8 +33,9 @@ current tools, the planned routes, and the gates.
   4. Upload the jar to a new release tag `tools-tla2tools-<version>`. Do not
      replace the asset of an existing tag.
   5. Change `TLA_URL`, `TLA_SHA256`, and the provenance comment in
-     `scripts/formal/check.sh` in one PR. Change the cache key in
-     `.github/workflows/formal.yml` in the same PR.
+     `scripts/formal/check.sh` in one PR. The script replaces the cached
+     `target/formal/tla2tools.jar` when the new hash does not match the pin.
+     Change the cache key in `.github/workflows/formal.yml` in the same PR.
   6. Record the change in a tracker decision or in the issue evidence.
 - **proptest-state-machine** for model-based tests against the real Rust types
   and engine.

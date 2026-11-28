@@ -70,7 +70,7 @@ automatically a bug.
   `ci-gate` and it does not block a pull request.
 - The job uploads `mutants.out/` as an artifact for 14 days.
 
-The job has a 45-minute limit. The final local run took 4 minutes 7 seconds
+The job has a 45-minute limit. The final local run took 4 minutes 26 seconds
 with four jobs on a 24-core workstation. Expect 15 to 25 minutes on a 4-core runner.
 
 Read the survivors:

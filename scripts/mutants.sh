@@ -33,6 +33,7 @@ Install cargo-mutants 27.1.0 when the check reports that it is missing:
   mkdir -p /tmp/cargo-mutants
   curl -sSLf -o /tmp/cargo-mutants/cargo-mutants.tar.gz \
     https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz
+  echo "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e  /tmp/cargo-mutants/cargo-mutants.tar.gz" | sha256sum -c -
   tar xzf /tmp/cargo-mutants/cargo-mutants.tar.gz -C /tmp/cargo-mutants
   install -m 755 /tmp/cargo-mutants/cargo-mutants ~/.cargo/bin/cargo-mutants
 EOF

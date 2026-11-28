@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "note": "Reviewed STE debt. Each entry needs a reason and an issue or an expiry.",
+  "entries": {
+    "docs/EVENT_SETTINGS.md|synonym|song": {
+      "count": 1,
+      "reason": "'Async expected songs' is the setting name from D-033. A rename needs the UI label and the settings key to change together.",
+      "issue": "MSW-095",
+      "expires": null
+    },
+    "specs/features/files.feature|synonym|song": {
+      "count": 1,
+      "reason": "'song message' is the module-format field name in IT/XM/MOD files, not a synonym for track.",
+      "issue": "MSW-095",
+      "expires": null
+    },
+    "specs/features/privacy.feature|synonym|user": {
+      "count": 1,
+      "reason": "'Discord user ID' is the Discord API term for the account identifier.",
+      "issue": "MSW-095",
+      "expires": null
+    },
+    "specs/features/security.feature|synonym|user": {
+      "count": 1,
+      "reason": "'user token' is the Discord term for a personal account token (self-bot), not a participant.",
+      "issue": "MSW-095",
+      "expires": null
+    }
+  }
+}

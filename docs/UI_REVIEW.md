@@ -126,6 +126,14 @@ without the human.
 A UI checkpoint is the end of each review wave, a visual choice, and the end
 of the UI issue.
 
+The review gallery is a private page. The repository is public, so the docs
+must not contain the gallery link.
+
+- The orchestrating agent publishes the checkpoint screenshots to the private
+  review gallery.
+- The orchestrating agent puts the gallery link in the PR body.
+- `docs/ui/screens/` keeps the curated screenshots that the change commits.
+
 ## Finding format
 
 ```

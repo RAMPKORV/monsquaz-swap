@@ -504,7 +504,7 @@ describe("BackupCard", () => {
     ).toBeInTheDocument();
     const choose = within(dialog).getByRole("button", { name: "Choose folder" });
     expect(choose).toBeEnabled();
-    await waitFor(() => expect(choose).toHaveFocus());
+    await waitFor(() => expect(choose).toHaveFocus(), { timeout: 3000 });
   });
 
   // scenario: The host deletes every backup

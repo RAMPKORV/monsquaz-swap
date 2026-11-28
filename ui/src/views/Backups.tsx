@@ -832,7 +832,10 @@ function RestoreWizard({
     } else if (preview) {
       document.getElementById("restore-confirm")?.focus();
     } else if (source && complete.length === 0) {
-      document.getElementById("restore-choose-folder")?.focus();
+      const timer = window.setTimeout(() => {
+        document.getElementById("restore-choose-folder")?.focus();
+      }, 0);
+      return () => window.clearTimeout(timer);
     } else if (source) {
       const checked = document.querySelector<HTMLInputElement>(
         'input[name="restore-backup"]:checked',

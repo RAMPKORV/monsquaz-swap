@@ -8,7 +8,9 @@ product contract is hand-written in `docs/`.
 ## The loop
 
 1. **Orient.** `./bin/project status`, `./bin/project next`, then read
-   `docs/PRD.md`, `docs/EVENT_SETTINGS.md`, and the issue.
+   `docs/PRD.md`, `docs/EVENT_SETTINGS.md`, and the issue. If the issue touches
+   a requirement, setting, decision, or scenario, read
+   `specs/requirements/README.md`.
 2. **Claim.** `./bin/project issue claim MSW-### --as-agent <name>`.
    Respect the batch WIP limit (6). Claim every issue in the batch.
 3. **Worktree.** `./bin/project worktree new MSW-### --as-agent <name>` for
@@ -22,6 +24,9 @@ product contract is hand-written in `docs/`.
    observable behaviour, the error path, and the verification command. Write
    the spec in ASD-STE100 Simplified Technical English (`ai-rules/STE.md`).
    Tag a scenario `@pending` until a test proves it (`ai-rules/GHERKIN.md`).
+   Update the requirement model in `specs/requirements/` for a requirement,
+   setting, decision, or scenario change. Run
+   `scripts/requirements-check.sh`.
 6. **Red.** Add the smallest failing test. For Rust domain behaviour, a unit
    test or `proptest` property. For a user journey, a cucumber-rs scenario.
 7. **Green.** Implement the minimum. No speculative abstractions.
@@ -29,7 +34,9 @@ product contract is hand-written in `docs/`.
 9. **Model.** Do this step when the change touches a modeled action, a
    property, or a mapped file. `specs/tla/mapping.json` lists the mapped files.
    Update the TLA+ model or the trace mapping in the same PR. Run
-   `scripts/formal/check.sh`. Skip this step for other changes.
+   `scripts/formal/check.sh`. A requirement change also updates the Z3 model in
+   `specs/requirements/`; see "Requirement changes". Skip this step for other
+   changes.
 10. **Self-review.** Read the diff as a hostile reviewer: invariants, anonymity,
    error paths, timezones, idempotency, secrets, path safety. Record the review
    for `standard`/`full` ceremony. Then run the review loop (below).
@@ -38,13 +45,32 @@ product contract is hand-written in `docs/`.
     `./bin/project worktree finish ...`. Record evidence for every issue.
 13. **Export.** `./bin/project export` and commit the ledger dump with the code.
 
+## Requirement changes
+
+An agent must update the formal model in `specs/requirements/` before it adds
+or changes a PRD requirement. The same rule applies to an EVENT_SETTINGS row,
+a decision, or a Gherkin scenario. Then run `scripts/requirements-check.sh`.
+
+- A contradiction, an unsatisfiable scenario, or a coverage gap blocks the
+  change.
+- The natural-language source wins. The formal model is a reviewed
+  formalization. A stale model is a defect.
+- The model change is reviewed like a test. The reviewer reads the rule
+  formula, the source links, and the scenario links.
+- A rule has a stable id, a source link, a Z3 formula, and a paraphrase in
+  ASD-STE100. A scenario links the rules that it exercises.
+- Add the natural-language change, the model change, and the generated report
+  in the same PR.
+- The trusted gap is in `docs/FORMAL_METHODS.md`. A wrong or incomplete model
+  can miss a contradiction. Review and source links are mandatory.
+
 ## Ceremony
 
 | Tier | Use | Required |
 |---|---|---|
 | `light` | docs, chores, one-line fixes | issue + verification |
 | `standard` | normal feature/bug | scenario + tests + self-review + review loop |
-| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + review loop + rollback/restore evidence + formal evidence (`scripts/formal/check.sh` output, or a note that no modeled action changed) |
+| `full` | schema, scheduling invariants, anonymity, security, irreversible data | design note + review loop + rollback/restore evidence + formal evidence (`scripts/formal/check.sh` output, or a note that no modeled action changed) + requirement consistency evidence (`scripts/requirements-check.sh` output, or a note that no requirement changed) |
 
 The default is `light`; raise it deliberately for `full` work. The tracker's
 status gates still exist.
@@ -113,7 +139,8 @@ CI is the main wait. Batch related work into one PR.
 - **Issue review:** use the review loop below. It covers `standard` and `full`
   issues. Focus on anonymity, scheduling, schema, security, and file handling.
 - Reviewer looks for contradictions, untestable claims, anonymity leaks,
-  missing error paths, silent auto-advance, and duplicated truth.
+  missing error paths, silent auto-advance, duplicated truth, and a stale
+  requirement model.
 
 ## Review loop
 

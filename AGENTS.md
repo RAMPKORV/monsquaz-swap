@@ -17,15 +17,17 @@ This file is a router. Detailed rules live in `ai-rules/`.
 5. `ai-rules/ARCHITECTURE.md` — process model, crates, ports/adapters.
 6. `ai-rules/TESTING.md`, `ai-rules/GHERKIN.md`, and `ai-rules/CLI.md` — how to
    prove behaviour and where the commands live.
-7. `ai-rules/DESIGN.md` — the deterministic design policy, the Refract gate,
+7. `specs/requirements/` — the formal requirement model and
+   `scripts/requirements-check.sh`.
+8. `ai-rules/DESIGN.md` — the deterministic design policy, the Refract gate,
    and how to change a locked rule.
-8. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
-9. `ai-rules/DECISIONS.md` — the single decision log.
-10. `ai-rules/skills/` — the shared agent skills (formal verification, design
+9. `ai-rules/RELEASES.md` — versioning, tags, GitHub Releases, signing status.
+10. `ai-rules/DECISIONS.md` — the single decision log.
+11. `ai-rules/skills/` — the shared agent skills (formal verification, design
     review, STE writing).
-11. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
+12. `project` (`./bin/project`) — the SQLite issue tracker, decisions, evidence,
     and append-only ledger. It is not the PRD; the PRD is hand-written.
-12. The issue you are working on, its notes, and linked docs.
+13. The issue you are working on, its notes, and linked docs.
 
 ## Current state
 
@@ -35,7 +37,9 @@ This file is a router. Detailed rules live in `ai-rules/`.
   validates intake, scrubs module metadata, A/B renders through openmpt123, and
   stores content by SHA-256. `swap-discord` defines the transport contract.
   `swap-engine` runs the classic walking skeleton.
-- Product spec and Gherkin live in `docs/` and `specs/features/`.
+- Product spec and Gherkin live in `docs/` and `specs/features/`. The formal
+  requirement model is in `specs/requirements/`; the gate is
+  `scripts/requirements-check.sh`.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.
 - The host UI shell covers mission control, settings, and the audit log, with a
@@ -94,6 +98,7 @@ pnpm --dir ui build   # before cargo test on a clean checkout
 cargo test --workspace
 scripts/check.sh
 scripts/design-check.sh   # Refract + contrast + focus + token policy
+scripts/requirements-check.sh     # Z3 requirement consistency gate
 node scripts/ste-lint.mjs          # STE gate
 node scripts/trace-scenarios.mjs   # Gherkin traceability gate
 scripts/formal/check.sh            # TLA+ models (needs java)
@@ -152,6 +157,10 @@ states, the review waves, the human checkpoints, and the reject list.
   passes.
 - A change to a file in `specs/tla/mapping.json` updates the model or the
   mapping, and `scripts/formal/check.sh` passes.
+- A change to a PRD requirement, EVENT_SETTINGS row, decision, or Gherkin
+  scenario updates `specs/requirements/`, and `scripts/requirements-check.sh`
+  passes. A contradiction, an unsatisfiable scenario, or a coverage gap blocks
+  the change.
 - For UI work, the UI quality gate passes with screenshots and review evidence.
 - `scripts/check.sh` passes.
 - The tracker has evidence and the issue is closed through the CLI.
@@ -173,7 +182,9 @@ states, the review waves, the human checkpoints, and the reject list.
 | `docs/SETUP.md` | bot token, keychain, channel mapping, test DM |
 | `docs/FORMAL_METHODS.md` | formal verification scope, tools, and maintenance |
 | `specs/tla/` | TLA+ design models; `mapping.json` lists the code each model covers |
+| `specs/requirements/` | finite Z3 requirement model, known-bad corpus, and gate tests |
 | `docs/generated/SCENARIO_COVERAGE.md` | generated scenario-to-test coverage |
+| `docs/generated/REQUIREMENT_CONSISTENCY.md` | generated rule, scenario, contradiction, and coverage report |
 | `docs/RESEARCH.md` | evidence and sources behind the design |
 | `docs/ROADMAP.md` | milestones and exit criteria |
 | `specs/features/` | hand-written Gherkin, executable later with cucumber-rs |

@@ -1,6 +1,6 @@
 ---
 name: formal-verification
-description: Check the Monsquaz Swap event rules with TLA+/TLC, mutation tests, model-based proptests, and parser property tests, and plan the D-037 routes (trace validation, type-level anonymity, DB-enforced invariants, Apalache, planner certificates). Use when a change touches claim, offer, custody, expiry, scheduling, delivery, a parser/codec, or a file in specs/tla/mapping.json.
+description: Check the Monsquaz Swap event rules with TLA+/TLC, mutation tests, model-based proptests, and parser property tests, plan the D-037 routes (trace validation, type-level anonymity, DB-enforced invariants, Apalache, planner certificates), and check the Z3 requirement consistency model. Use when a change touches claim, offer, custody, expiry, scheduling, delivery, a parser/codec, a file in specs/tla/mapping.json, a PRD requirement, an EVENT_SETTINGS row, a decision, or a Gherkin scenario.
 ---
 
 # Formal verification
@@ -23,7 +23,65 @@ full plan is `docs/FORMAL_METHODS.md`.
 5. A new Rust file that implements a modeled action must go into
    `specs/tla/mapping.json` in the same PR.
 
-## Run
+## Requirement consistency (D-076)
+
+The Z3 model in `specs/requirements/` formalizes the normative rules with
+source links. It is a reviewed model, not a second source of truth. The
+natural-language source wins. A stale model is a defect.
+
+### When to update the model
+
+Update the model before you add or change any of these:
+
+- a PRD requirement in `docs/PRD.md`;
+- an `EVENT_SETTINGS.md` row or rule;
+- a decision in the tracker or `ai-rules/DECISIONS.md`;
+- a Gherkin scenario in `specs/features/`.
+
+### File format
+
+- `schema.py` holds the typed enums, the finite domain sizes, and the `Rule`,
+  `Scenario`, and `Source` records.
+- `model.py` holds the symbolic world, the domain definitions, `build_rules`,
+  and `build_scenarios`.
+- A `Rule` has a stable id, source links, a Z3 formula, and a paraphrase in
+  ASD-STE100.
+- A `Scenario` has an id, the source scenario name and feature file, a
+  precondition, an action, a postcondition, and rule links.
+- `checker.py` runs the four checks: the base conjunction, every scenario,
+  every rule pair, and the coverage links.
+
+### Run
+
+```bash
+scripts/requirements-check.sh           # generate the report
+scripts/requirements-check.sh --check   # fail when the report is stale
+```
+
+The gate fails on a contradiction, an unsatisfiable scenario, a coverage gap,
+a missed known-bad case, or a stale report. The report is
+`docs/generated/REQUIREMENT_CONSISTENCY.md`.
+
+### Read an unsat core
+
+- The core names the rule ids. `domain` means the shared definitions are
+  unsatisfiable; fix the model, not a rule.
+- The contradiction table names both rules and their source links. Read the
+  sources before you edit a formula.
+- A scenario failure lists the rules that conflict with the scenario. The
+  scenario is impossible under the rules; fix the source or the model.
+- Do not delete a rule, weaken a formula, or remove a scenario link to make the
+  gate pass. Report the finding.
+- The known-bad corpus and the seeded mutation must stay. They prove that the
+  gate detects the historical contradictions.
+
+### Review duty
+
+Review a model change like a test. Check the source link, the formula, the
+paraphrase, and the scenario links. The model change, the natural-language
+change, and the generated report go in the same PR.
+
+## Run the TLA+ checks
 
 ```bash
 scripts/formal/check.sh                 # PR models + mutation set

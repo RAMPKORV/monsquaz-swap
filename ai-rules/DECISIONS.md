@@ -1,7 +1,7 @@
 # Decision log
 
 This file is the single human-readable decision log. It holds the
-hand-written decisions D-001..D-028 and the tracker decisions D-029..D-070.
+hand-written decisions D-001..D-028 and the tracker decisions D-029..D-076.
 The tracker (`./bin/project decision`) is the durable record for D-029 and
 later. The repository does not keep a generated decision dump. Read the
 tracker only to confirm a code, a status, or a supersession link.
@@ -824,3 +824,68 @@ deadline and the edit due time separately.
 list has no fixed cap. Each offer in the list uses the claim window from D-069.
 **Consequences:** a large list can delay the host decision. The UI shows the
 claim deadline for each offer.
+
+## D-071 — Adopt a Rust-first verification pillar
+
+**Date:** 2026-11-28.
+**Decision:** the project uses a Rust-first verification pillar. TLA+ and
+Apalache model protocols. Verus proves pure Rust functions. Kani proves
+bounded safety properties. Miri and Loom check undefined behaviour and
+concurrency. Trace validation connects the models to the engine. Mutation
+testing and fuzzing measure the evidence.
+**Consequences:** the pillar verifies shipped Rust where possible. Dafny,
+Creusot, Prusti, Flux, Lean, Aeneas, Rocq, and TLAPS are not part of the
+pillar. A new tool needs a decision.
+
+## D-072 — First code-tier target is the planner checker
+
+**Date:** 2026-11-28.
+**Decision:** the first Verus target is the MSW-107 planner checker and the
+Hall-violator certificate verifier. The checker must accept only a valid plan.
+The verifier must accept only a valid Hall violator. Incompleteness is
+allowed: the checker can reject a valid plan with an explicit reason. The
+proof covers soundness and termination, not completeness.
+**Consequences:** a rejected plan needs a reason. The certificate verifier is
+independent of the planner. The engine calls the checker before lock.
+
+## D-073 — No interactive proofs in the verification pillar
+
+**Date:** 2026-11-28.
+**Decision:** the pillar does not use Lean, Aeneas, Rocq, Isabelle, or TLAPS.
+If an automated tool cannot prove a property, the project records the gap and
+uses tests, TLA+, or a narrower property. A later decision can add an
+interactive proof for one named property.
+**Consequences:** proof effort stays bounded. Some deep properties stay
+unproved.
+
+## D-074 — No fixed CI time cap for verification
+
+**Date:** 2026-11-28.
+**Decision:** verification jobs have no fixed time cap. Changed proofs run on
+every pull request. The full proof set runs nightly. If CI time delays the
+team, a new decision sets a cap.
+**Consequences:** proof coverage can grow. CI cost needs monitoring.
+
+## D-075 — Every proof must earn its place
+
+**Date:** 2026-11-28.
+**Decision:** a proof stays only if it catches a bug, protects a must
+requirement, or proves a property that tests cannot. Every proof has a
+deliberately broken variant that must fail. A proof that adds no assurance is
+deleted in one PR.
+**Consequences:** the pillar stays small and useful. Proofs are reviewed like
+tests.
+
+## D-076 — Formal requirement consistency gate
+
+**Date:** 2026-11-28.
+**Decision:** the project formalizes the normative rules in the PRD,
+EVENT_SETTINGS, and Gherkin into typed predicates with source links. A solver
+checks that all must rules are satisfiable together, that every formalized
+scenario is satisfiable under the rules, and that no pair of rules contradicts.
+An unsatisfiable core names the conflicting sources. The formalization is
+reviewed like a test. The gate runs when a requirement, setting, or scenario
+changes.
+**Consequences:** a contradiction blocks the change. The formalization is a
+model, not the natural-language source; a stale model is a defect. A rule
+without a scenario or a scenario without a rule is reported.

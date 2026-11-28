@@ -12,16 +12,6 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-export function mappedPrefixes(mapping) {
-  const prefixes = new Set(mapping.always ?? []);
-  for (const model of mapping.models ?? []) {
-    prefixes.add(model.spec);
-    for (const config of model.configs ?? []) prefixes.add(config);
-    for (const cover of model.covers ?? []) prefixes.add(cover.path);
-  }
-  return [...prefixes];
-}
-
 export function touchedModels(mapping, files) {
   const hits = new Set();
   for (const file of files) {
@@ -39,7 +29,13 @@ export function touchedModels(mapping, files) {
 }
 
 function main(argv) {
-  const mapping = JSON.parse(readFileSync(join(root, "specs/tla/mapping.json"), "utf8"));
+  let mapping;
+  try {
+    mapping = JSON.parse(readFileSync(join(root, "specs/tla/mapping.json"), "utf8"));
+  } catch (error) {
+    console.error(`formal: cannot read specs/tla/mapping.json: ${error.message}`);
+    return 2;
+  }
   let files;
   if (argv[0] === "--files") {
     files = argv.slice(1);

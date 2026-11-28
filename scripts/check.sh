@@ -10,8 +10,14 @@ if [ -d "$HOME/.npm-global/bin" ]; then
 fi
 
 echo "== tracker =="
-python3 tools/project/cli.py doctor
-python3 -m unittest discover -s tests -p 'test_tracker_smoke.py' -v
+skipped=()
+if [ -f .project/project.db ]; then
+  python3 tools/project/cli.py doctor
+  python3 -m unittest discover -s tests -p 'test_tracker_smoke.py' -v
+else
+  echo "tracker: SKIPPED (no .project/project.db in this worktree; run the tracker checks from the main checkout)"
+  skipped+=("tracker — no database")
+fi
 
 echo "== spec gates =="
 node --test scripts/tests/
@@ -38,11 +44,19 @@ cargo test --workspace
 cargo test -p swap-discord --features test-proxy --test setup_http
 
 echo "== formal =="
-skipped=()
 if command -v java >/dev/null 2>&1; then
   scripts/formal/check.sh
 else
-  echo "formal: SKIPPED (no java)"
+  set +e
+  node scripts/formal/changed.mjs main >/dev/null 2>&1
+  mapped=$?
+  set -e
+  if [ "$mapped" -eq 0 ]; then
+    echo "formal: FAILED (a mapped change needs java)" >&2
+    echo "Install java, run scripts/formal/check.sh, and record the output as formal evidence." >&2
+    exit 1
+  fi
+  echo "formal: SKIPPED (no java; no mapped change)"
   skipped+=("formal — no java")
 fi
 

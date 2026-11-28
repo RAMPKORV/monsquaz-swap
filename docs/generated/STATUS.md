@@ -3,9 +3,9 @@
 > <!-- GENERATED FILE — edit project.db via tools/project/cli.py; do not edit by hand. -->
 
 **PRD:** draft v1  
-**Blocked issues:** 5 · **Ready leaves:** 14  
+**Blocked issues:** 5 · **Ready leaves:** 13  
 **Open PRD questions:** 0 (0 high) · **Open reviews:** 1 · **Human queue:** 0  
-**Stale scores:** 70
+**Stale scores:** 69
 
 ## Issues by status
 
@@ -14,12 +14,12 @@
 | Triage | 48 |
 | Research | 0 |
 | Specification | 0 |
-| Ready for implementation | 16 |
+| Ready for implementation | 15 |
 | Implementation | 6 |
 | Reviewing | 0 |
 | Testing | 0 |
 | Merging | 0 |
-| Done | 67 |
+| Done | 68 |
 | Cancelled | 0 |
 | Duplicate | 0 |
 
@@ -34,9 +34,9 @@
 | 20 | `MSW-081` | DB-enforced scheduling invariants | ready | 1 |
 | 21 | `MSW-082` | Host sets the fill-in due time | ready | 1 |
 | 22 | `MSW-083` | Fill-in flow event setting | ready | 1 |
-| 31 | `MSW-092` | Unify the decision logs and fix doc contradictions | ready | 1 |
-| 34 | `MSW-100` | New design-gate rules | ready | 1 |
-| 35 | `MSW-101` | Engine-generated demo fixtures | ready | 1 |
+| 33 | `MSW-100` | New design-gate rules | ready | 1 |
+| 34 | `MSW-101` | Engine-generated demo fixtures | ready | 1 |
+| 35 | `MSW-102` | App shell: lifecycle nav, status chip, wordmark | ready | 1 |
 
 ## Open reviews
 

@@ -1532,7 +1532,7 @@ fn parse_plan(line: &str) -> Option<FlatPlan> {
         let round_len: usize = it.next()?.parse().ok()?;
         plan.round_starts[r] = pos;
         plan.round_lens[r] = round_len;
-        for _ in 0..round_len.min(MAX_TOTAL) {
+        for _ in 0..round_len.min(MAX_ASSIGNMENTS) {
             let participant: u16 = it.next()?.parse().ok()?;
             let track: u16 = it.next()?.parse().ok()?;
             if pos < MAX_TOTAL {

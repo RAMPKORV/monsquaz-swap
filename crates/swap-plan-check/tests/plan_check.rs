@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use swap_plan_check::corpus::{self, CaseKind};
 use swap_plan_check::{
     Assignment, HallCertificate, MAX_ASSIGNMENTS, MAX_PEOPLE, MAX_ROUNDS, MAX_TRACKS, NO_OWNER,
-    PlanInput, Policy, Round, check_plan, verify_hall_certificate,
+    PlanInput, PlanReject, Policy, Round, check_plan, verify_hall_certificate,
 };
 
 #[test]
@@ -306,4 +306,22 @@ fn seen_before_round(input: &PlanInput, round: usize, participant: u16, track: u
             .iter()
             .any(|assignment| assignment.participant == participant && assignment.track == track)
     })
+}
+
+#[test]
+fn one_round_with_seventeen_assignments_is_capacity() {
+    let mut input = PlanInput {
+        active_people_len: 2,
+        active_tracks_len: 2,
+        rounds_len: 1,
+        ..PlanInput::default()
+    };
+    input.active_people[0] = 0;
+    input.active_people[1] = 1;
+    input.active_tracks[0] = 0;
+    input.active_tracks[1] = 1;
+    input.owners[0] = 0;
+    input.owners[1] = 1;
+    input.rounds[0].len = MAX_ASSIGNMENTS + 1;
+    assert_eq!(check_plan(&input), Err(PlanReject::Capacity));
 }

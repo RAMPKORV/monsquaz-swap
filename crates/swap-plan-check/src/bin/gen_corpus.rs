@@ -3,7 +3,7 @@
 //! Example:
 //!
 //! ```bash
-//! cargo run -p swap-plan-check --bin gen-corpus -- \
+//! cargo run -p swap-plan-check --bin gen_corpus -- \
 //!   --plans 1200 --certs 600 \
 //!   --corpus target/plan-check/corpus.txt \
 //!   --expected target/plan-check/expected.txt
@@ -62,7 +62,7 @@ fn main() -> ExitCode {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: gen-corpus [--plans N] [--certs N] [--corpus PATH] [--expected PATH]"
+                    "usage: gen_corpus [--plans N] [--certs N] [--corpus PATH] [--expected PATH]"
                 );
                 return ExitCode::SUCCESS;
             }

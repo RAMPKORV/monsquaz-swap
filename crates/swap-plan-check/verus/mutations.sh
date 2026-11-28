@@ -36,7 +36,7 @@ PY
     return 1
   fi
   echo "proof mutation failed as required: $label"
-  grep -m1 -E "postcondition not satisfied|assertion failed|precondition not satisfied" "$dir/verus.log" | sed 's/^/  /' || true
+  grep -m1 -E "postcondition not satisfied|assertion failed|precondition not satisfied|invariant not satisfied" "$dir/verus.log" | sed 's/^/  /' || true
   return 0
 }
 

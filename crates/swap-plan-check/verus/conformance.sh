@@ -52,3 +52,21 @@ if acceptance:
 PY
 
 echo "conformance OK: no acceptance disagreement"
+
+# Adapter regression: one round with 17 assignments. The writer emits 16
+# assignments and declares 17. The parser must read 16, keep the declared
+# length, and reject with Capacity, not fail or desynchronize.
+{
+  printf 'PLAN 0 0 2 0 1 2 0 1 0 1'
+  for _ in $(seq 1 14); do printf ' 65535'; done
+  printf ' 1 17'
+  for _ in $(seq 1 16); do printf ' 0 1'; done
+  printf '\n'
+} > "$out/one_round_17.txt"
+"$here/flat_plan_check" "$out/one_round_17.txt" > "$out/one_round_17.out"
+if [ "$(cat "$out/one_round_17.out")" != "PLAN 0 1" ]; then
+  echo "adapter regression failed: expected 'PLAN 0 1'" >&2
+  cat "$out/one_round_17.out" >&2
+  exit 1
+fi
+echo "adapter regression OK: one round with 17 assignments parses and rejects as Capacity"

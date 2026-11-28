@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "Participant export, anonymizing delete, diagnostics, and retention for Monsquaz Swap"
+description = "Participant export, anonymizing delete, and diagnostics for Monsquaz Swap"
 
 [dependencies]
 hex = "0.4"

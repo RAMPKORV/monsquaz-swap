@@ -79,6 +79,9 @@ impl LiveRuntime {
             .app_data_dir()
             .map_err(|error| error.to_string())?;
         std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+        // Single-writer guard: refuse when another machine has a fresh
+        // heartbeat; otherwise record this machine as the writer.
+        crate::backup_host::claim_writer(&directory, crate::host::now_secs())?;
         let db = Arc::new(Mutex::new(
             Db::open(directory.join("monsquaz.db")).map_err(|error| error.to_string())?,
         ));

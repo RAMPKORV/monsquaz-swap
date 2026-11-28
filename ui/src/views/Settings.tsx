@@ -1,6 +1,7 @@
 import type { HostSettings } from "../types";
 import { Button, Field, PageHeader, Skeleton, StatusPill, Toggle } from "../components";
 import { Icon } from "../icons";
+import { BackupCard } from "./Backups";
 
 const timezones = [
   "Europe/Stockholm",
@@ -36,6 +37,8 @@ export function SettingsView({
   onConfigureBot,
   onDiscard,
   onTestNotification,
+  onRestored,
+  onBotStatus,
 }: {
   settings: HostSettings;
   eventName: string;
@@ -47,6 +50,8 @@ export function SettingsView({
   onConfigureBot: () => void;
   onDiscard: () => void;
   onTestNotification: () => void;
+  onRestored: () => void;
+  onBotStatus: () => void;
 }) {
   function update<K extends keyof HostSettings>(
     key: K,
@@ -87,7 +92,7 @@ export function SettingsView({
       >
         <PageHeader
           title="Settings"
-          description="Connection, channels, schedule defaults, and retention. The app never shows the bot token again after you save it."
+          description="Connection, channels, schedule defaults, retention, and backups. The app never shows the bot token again after you save it."
           actions={
             dirty ? (
               <div className="settings-header-actions">
@@ -325,7 +330,7 @@ export function SettingsView({
                 label="Keep files for"
                 htmlFor="retention"
                 helpId="retention-help"
-                help="Days after the reveal. Backups follow the same window."
+                help="Days after the reveal. This setting does not change backup retention."
               >
                 <div className="number-control">
                   <input
@@ -461,6 +466,14 @@ export function SettingsView({
             </div>
           </section>
 
+          <BackupCard
+            timezone={settings.timezone}
+            tokenConfigured={settings.botConfigured}
+            onEnterToken={onConfigureBot}
+            onRestored={onRestored}
+            onBotStatus={onBotStatus}
+          />
+
           <section
             className="card danger-zone"
             aria-labelledby="danger-title"
@@ -479,9 +492,10 @@ export function SettingsView({
                   Delete {eventName} from this computer
                 </span>
                 <span className="field-help">
-                  Removes the local database, every track version, and every local
-                  backup for {eventName}. Other events are not touched. Discord
-                  messages and exported albums stay.
+                  Removes the local event data and every stored track version
+                  for {eventName}. Other events are not touched. The app does
+                  not delete backups. To delete every backup, choose Delete all
+                  backups. Discord messages and exported albums stay.
                 </span>
               </div>
               <Button variant="danger" icon="trash" onClick={onDelete}>

@@ -501,6 +501,36 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the backup card and opens the restore wizard in settings", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { level: 1, name: "Settings" });
+    expect(
+      await screen.findByRole("heading", { name: "Backups and restore" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("4 backups")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Restore from a backup" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Restore from a backup" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens backups from the command palette", async () => {
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.click(screen.getByRole("option", { name: /go to backups/i }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Backups and restore" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens the command palette with Ctrl K and navigates", async () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Night Shift Vol. 2" });

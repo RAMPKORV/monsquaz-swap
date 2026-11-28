@@ -1,3 +1,4 @@
+mod backup_host;
 // The setup service starts this host after it reads the keychain token.
 #[cfg(feature = "live")]
 mod gateway_host;
@@ -101,7 +102,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(setup_host::BotRuntime::new());
+        .manage(setup_host::BotRuntime::new())
+        .manage(backup_host::BackupRuntime::new());
     #[cfg(feature = "live")]
     let builder = builder.manage(live_runtime::LiveRuntime::new());
     let app = builder
@@ -110,6 +112,7 @@ pub fn run() {
             if let Err(error) = host::setup_tray(app) {
                 eprintln!("tray unavailable: {error}");
             }
+            backup_host::spawn_timer(app.handle().clone());
             #[cfg(feature = "live")]
             {
                 let settings = host::read_settings(app.handle()).unwrap_or_default();
@@ -190,7 +193,19 @@ pub fn run() {
             setup_host::host_bot_save,
             setup_host::host_bot_test_dm,
             setup_host::host_bot_status,
-            setup_host::host_bot_clear
+            setup_host::host_bot_clear,
+            backup_host::host_backup_status,
+            backup_host::host_backup_choose_folder,
+            backup_host::host_backup_set_retention,
+            backup_host::host_backup_now,
+            backup_host::host_backup_purge,
+            backup_host::host_backup_reveal_folder,
+            backup_host::host_writer_takeover,
+            backup_host::host_restore_choose_folder,
+            backup_host::host_restore_source,
+            backup_host::host_restore_preview,
+            backup_host::host_restore,
+            backup_host::host_open_recovery_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building Monsquaz Swap");

@@ -3,12 +3,14 @@
 //! The database is a single-writer projection. This crate stays synchronous;
 //! callers use `spawn_blocking` when they build the Tauri service layer.
 
+pub mod backup;
 pub mod codec;
 pub mod db;
 pub mod migrations;
 pub mod repos;
+pub mod writer;
 
-pub use db::{Db, DbError};
+pub use db::{Db, DbError, TransitionHook};
 pub use repos::{
     AssignmentDeadlineRecord, AssignmentRecord, AssignmentRepo, AuditRecord, AuditRepo,
     AvailabilityRecord, AvailabilityRepo, DeadlineRepo, DeliveryRecord, DeliveryRepo,

@@ -307,7 +307,7 @@ anonymity test suites green.
 | # | Question | Status / default | Trigger |
 |---|---|---|---|
 | 1 | Host pack delivery: DM vs channel | DM to each participant at join/start; the host can also pin it. | Before REQ-FILES-002 |
-| 2 | Default retention period after archive | Keep until host deletes; document; backups expire 90 days. | Before public release |
+| 2 | Default retention period after archive | Keep until host deletes; document; backups follow the count-based retention. | Before public release |
 | 3 | Windows SmartScreen copy and checksum UX | Document; no signing in v1. | Before beta |
 | 4 | Render pipeline (openmpt123 vs WASM) | openmpt123 sidecar; preview v1, render later. | Before REQ-FILES-008 |
 | 5 | Release stream integration depth | Discord scheduled event + countdown; OBS external. | Before REQ-REVEAL-003 |

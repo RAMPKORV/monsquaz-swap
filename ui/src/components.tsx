@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 
 type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
@@ -257,6 +258,9 @@ export function Dialog({
   footer,
   labelledBy = "dialog-title",
   initialFocusId,
+  describedBy,
+  closeDisabled = false,
+  returnFocusId,
 }: {
   title: string;
   children: ReactNode;
@@ -264,14 +268,28 @@ export function Dialog({
   footer: ReactNode;
   labelledBy?: string;
   initialFocusId?: string;
+  describedBy?: string;
+  closeDisabled?: boolean;
+  returnFocusId?: string;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const closeDisabledRef = useRef(closeDisabled);
+  closeDisabledRef.current = closeDisabled;
+  const returnFocusRef = useRef(returnFocusId);
+  returnFocusRef.current = returnFocusId;
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    const root = document.getElementById("root");
+    const hadInert = root?.hasAttribute("inert") ?? false;
+    const previousHidden = root?.getAttribute("aria-hidden") ?? null;
+    if (root) {
+      root.setAttribute("inert", "");
+      root.setAttribute("aria-hidden", "true");
+    }
     const initial =
       (initialFocusId
         ? document.getElementById(initialFocusId)
@@ -283,7 +301,9 @@ export function Dialog({
     initial?.focus();
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onCloseRef.current();
+        if (!closeDisabledRef.current) {
+          onCloseRef.current();
+        }
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) {
@@ -320,7 +340,22 @@ export function Dialog({
       if (!bodyHadNoScroll) {
         document.body.classList.remove("no-scroll");
       }
-      if (previous?.isConnected) {
+      if (root) {
+        if (!hadInert) {
+          root.removeAttribute("inert");
+        }
+        if (previousHidden === null) {
+          root.removeAttribute("aria-hidden");
+        } else {
+          root.setAttribute("aria-hidden", previousHidden);
+        }
+      }
+      const preferred = returnFocusRef.current
+        ? document.getElementById(returnFocusRef.current)
+        : null;
+      if (preferred) {
+        preferred.focus();
+      } else if (previous?.isConnected) {
         previous.focus();
       } else {
         document.querySelector<HTMLElement>("#main h1")?.focus();
@@ -328,14 +363,14 @@ export function Dialog({
     };
   }, []);
 
-  return (
+  return createPortal(
     <div className="dialog-backdrop" role="presentation">
       <div
         className="dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        aria-describedby={`${labelledBy}-body`}
+        aria-describedby={describedBy ?? `${labelledBy}-body`}
         ref={dialogRef}
       >
         <div className="dialog__header">
@@ -343,7 +378,17 @@ export function Dialog({
           <button
             type="button"
             className="icon-button"
-            aria-label="Close dialog"
+            aria-label={
+              closeDisabled
+                ? "Close is unavailable while the action runs"
+                : "Close dialog"
+            }
+            title={
+              closeDisabled
+                ? "The action is still running. Wait for it to finish."
+                : undefined
+            }
+            disabled={closeDisabled}
             onClick={onClose}
             ref={closeRef}
           >
@@ -355,7 +400,8 @@ export function Dialog({
         </div>
         <div className="dialog__footer">{footer}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

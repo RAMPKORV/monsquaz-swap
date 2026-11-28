@@ -18,11 +18,18 @@ pub enum DbError {
     InvalidEnum(String),
     #[error("participant {participant} has already seen track {track}")]
     SeenPairRepeat { track: String, participant: String },
+    #[error("the backup before the state transition failed: {0}")]
+    BackupFailed(String),
 }
+
+/// Runs before an event state transition, outside any transaction. The app
+/// installs a backup here; an error refuses the transition.
+pub type TransitionHook = Box<dyn Fn(&Db, &str) -> Result<(), String> + Send + Sync>;
 
 /// A single SQLite connection with the project pragmas and migrations applied.
 pub struct Db {
     conn: Connection,
+    transition_hook: Option<TransitionHook>,
 }
 
 impl Db {
@@ -42,7 +49,10 @@ impl Db {
         // WAL returns a row; an in-memory database reports "memory".
         let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
         migrations::migrate(&mut conn)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            transition_hook: None,
+        })
     }
 
     pub fn conn(&self) -> &Connection {
@@ -51,6 +61,21 @@ impl Db {
 
     pub fn conn_mut(&mut self) -> &mut Connection {
         &mut self.conn
+    }
+
+    /// Install the hook that runs before every event state transition.
+    pub fn with_transition_hook(mut self, hook: TransitionHook) -> Self {
+        self.transition_hook = Some(hook);
+        self
+    }
+
+    /// Run the transition hook for `event_id`. The engine calls this before it
+    /// opens the transaction that changes the event state.
+    pub fn before_transition(&self, event_id: &str) -> Result<(), DbError> {
+        match &self.transition_hook {
+            Some(hook) => hook(self, event_id).map_err(DbError::BackupFailed),
+            None => Ok(()),
+        }
     }
 
     pub fn schema_version(&self) -> Result<i64, DbError> {

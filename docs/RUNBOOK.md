@@ -123,18 +123,23 @@ The app stores the token in the OS keychain. It never shows the token again.
 
 ## 10. Backups
 
-**Decided, building in MSW-115 (D-057).** The app does not make backups yet,
-and it has no restore wizard. The planned design takes a snapshot before every
-state transition and once a day, and the wizard checks integrity.
-
-Until MSW-115 is done:
-
-1. Close the app before you copy data. A copy of an open database can be
-   inconsistent.
-2. Copy the whole app data folder, including the file store, to a second
-   disk.
-3. Do this before each round opens and after the reveal.
-4. Do not put the database in a cloud-synced folder.
-5. To restore, close the app, replace the folder, and start the app.
-
-The bot token is not in the folder. It stays in the OS keychain.
+1. Open Settings. Choose "Backups and restore".
+2. Choose a backup folder on another disk or a USB drive.
+3. Do not choose the app data folder. The app data folder does not survive a disk loss.
+4. Do not choose a cloud-synced folder.
+5. The app writes a backup record before each event state change and once a day while the app runs.
+6. A backup record holds participant data, stored track files, and the audit log. It never holds the bot token.
+7. The app keeps the newest 20 state-change and manual backups and the newest 14 daily backups.
+8. Keep one copy of the backup folder off this computer.
+9. If the last backup failed, connect the drive and choose "Back up now".
+10. Choose "Restore from a backup" to start a restore.
+11. Choose a backup. Choose "Check backup". Type `RESTORE` in capital letters.
+12. The app stops the bot and replaces the event data. It keeps the replaced event data in a recovery folder.
+13. Choose "Open recovery folder" to see the replaced event data.
+14. The bot token stays in the operating system keychain. Choose "Reconnect bot" to start the bot.
+15. An older backup removes claims and submissions after the backup. A participant can receive a track that they already had. Restore only if you must.
+16. Choose "Delete all backups" and type `PURGE` to delete backups for every event.
+17. The bot lock stops two computers from running the bot for the same data folder.
+18. If the app shows "Another computer", stop the bot on that computer. Choose "Take over" and type `TAKE OVER`.
+19. The bot lock clears 5 minutes after the last check. Choose "Check bot lock" to check again.
+20. Test a restore before the first real event.

@@ -645,7 +645,21 @@ textarea {
 
 .button:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  opacity: 1;
+}
+
+.button--primary:disabled,
+.button--danger:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.button--quiet:disabled {
+  background: transparent;
 }
 
 .button--primary {
@@ -1298,6 +1312,12 @@ textarea {
   color: var(--text);
 }
 
+.link-button:disabled {
+  color: var(--faint);
+  text-decoration: none;
+  cursor: not-allowed;
+}
+
 .link-button {
   margin-left: 6px;
   padding: 0;
@@ -1361,7 +1381,8 @@ textarea {
 }
 
 .settings-grid > .card:first-child,
-.settings-grid > .card:last-child {
+.settings-grid > .card:last-child,
+.settings-grid > .backup-card {
   grid-column: 1 / -1;
 }
 
@@ -1539,17 +1560,30 @@ select.input {
 .channel-map__value {
   display: flex;
   min-width: 0;
+  max-width: 40ch;
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
   font-family: var(--font-mono);
   font-size: 11.5px;
+  overflow-wrap: anywhere;
   text-align: right;
 }
 
 .channel-map__value small {
   color: var(--faint);
   font-size: 10px;
+}
+
+.bot-lock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.bot-lock .link-button {
+  margin-left: 0;
 }
 
 .bot-token-row {
@@ -1903,6 +1937,142 @@ select.input {
   margin-left: auto;
   flex: none;
   color: var(--accent);
+}
+
+.backup-card__actions {
+  margin-top: 12px;
+}
+
+.backup-history {
+  margin-top: 12px;
+}
+
+.backup-history__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 4px;
+}
+
+.backup-history__head h3 {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.backup-history__head span {
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.backup-history__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backup-history__row {
+  display: grid;
+  min-height: 51px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.backup-history__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.backup-history__time {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.backup-history__empty,
+.backup-history__note {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.problem-detail {
+  margin-top: 4px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.restore-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.restore-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.restore-option:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.restore-option input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 2px;
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  accent-color: var(--accent-fill);
+  background: var(--surface);
+}
+
+.restore-option input[type="radio"]:checked {
+  border-color: var(--accent-fill);
+  background: radial-gradient(
+    circle,
+    var(--accent-fill) 0 3.5px,
+    var(--surface) 4px
+  );
+}
+
+.restore-option input[type="radio"]:focus-visible {
+  outline: none;
+}
+
+.restore-option span {
+  min-width: 0;
+}
+
+.restore-events {
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
 }
 
 .danger-zone {
@@ -3533,6 +3703,10 @@ select.input {
     text-align: left;
   }
 
+  .bot-lock {
+    align-items: flex-start;
+  }
+
   .settings-grid > .card:first-child,
   .settings-grid > .card:last-child {
     grid-column: auto;
@@ -3750,6 +3924,15 @@ select.input {
   }
   .content {
     padding: 12px 12px 0;
+  }
+
+  .backup-history__row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .backup-history__time {
+    text-align: left;
   }
 
   .topbar {

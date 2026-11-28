@@ -39,13 +39,16 @@ location.
 |---|---|
 | Active event data | until the event is archived or deleted |
 | Archived event | until the host deletes it |
-| Backups | 90 days. The pruning function exists; automatic backups are decided, building in MSW-115 (D-057) |
+| Backups | newest 20 state-change and manual backups and newest 14 daily backups; the host can delete every backup for every event |
 | Local logs | 30 days, then rotated |
 | Transient DM payloads | dropped after ingest |
 | Public reveal package | controlled by the host |
 
 The host can change the archive retention. The app must show the current
-retention and the backup age.
+retention and the backup age. The app removes each backup file that no kept
+backup refers to. Backups never hold the bot token. The host can delete every
+backup for every event. The app keeps the bot token in the operating system
+keychain during a restore.
 
 ## Export and delete
 

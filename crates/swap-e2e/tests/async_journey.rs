@@ -182,10 +182,22 @@ async fn the_full_async_journey_reaches_a_reveal() {
     .expect("the participant must be paused");
 
     app.advance(day());
-    let resumed_wave = app
-        .dispatch_async_wave(&event)
-        .expect("the queue must offer again");
-    assert!(resumed_wave >= 1);
+    // The resume command and the periodic worker can race the handoff. Retry
+    // past the cooldown before the offer assertion.
+    let mut resumed_wave = 0;
+    for _ in 0..3 {
+        resumed_wave = app
+            .dispatch_async_wave(&event)
+            .expect("the queue must offer again");
+        if resumed_wave >= 1 {
+            break;
+        }
+        app.advance(hour());
+    }
+    assert!(
+        resumed_wave >= 1,
+        "the resumed participant must get an offer"
+    );
     app.wait_for_dm(jonas, "is available", timeout())
         .await
         .expect("the resumed offer must arrive");

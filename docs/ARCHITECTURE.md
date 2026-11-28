@@ -245,8 +245,20 @@ are in `docs/SETUP.md`.
   deletion until the host resolves it.
 - Diagnostics redaction takes the token, known paths, and known user IDs and
   replaces them with typed placeholders.
-- Backup pruning removes regular files older than a cutoff. The backup
-  scheduler and the host UI for these operations are follow-ups.
+- `swap-db::backup` writes a VACUUM INTO snapshot and a manifest before each
+  event state transition. It also writes one daily backup.
+- Each backup stores files by SHA-256 and reuses a file from an earlier backup.
+- Retention keeps the newest 20 state-change and manual backups and the newest
+  14 daily backups. It removes each file that no kept backup refers to.
+- A restore checks the manifest, the database hash, the SQLite integrity check,
+  and every file hash. It moves the replaced database to a recovery folder.
+- The host UI provides the folder choice, the backup history, the restore
+  wizard, the last-failure status, and the delete confirmation.
+- `swap-db::writer` records a computer id and a check time in the database and
+  the backup folder. A second computer with a recent check cannot start the
+  bot. The bot lock clears 5 minutes after the last check.
+- `BackupRuntime` keeps the last backup failure and the time this computer lost
+  the bot lock. Every backup command returns host copy with a stable code.
 
 ## Reveal package
 

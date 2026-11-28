@@ -669,7 +669,7 @@ pub fn open_seed_round(
         return Err(EngineError::PackRequired);
     }
 
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if current.state != EventState::Draft {
@@ -816,7 +816,7 @@ pub fn reopen_seed_round(
     if !AssignmentRepo::list_active(db.conn(), event_id)?.is_empty() {
         return Err(EngineError::RoundNotResolved { round: 1 });
     }
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if current.state != EventState::ScheduleReview {
@@ -1127,7 +1127,7 @@ pub fn join_with_seed(
 pub fn lock_roster(db: &Db, event_id: &str, now: i64) -> Result<LockOutcome, EngineError> {
     let event = load_event(db, event_id)?;
     require_state(&event, EventState::Signup, "roster lock", "signup")?;
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if current.state != EventState::Signup {
@@ -2381,7 +2381,7 @@ pub fn start_event_with_channel(
         "event start",
         "schedule review",
     )?;
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if current.state != EventState::ScheduleReview {
@@ -2497,7 +2497,7 @@ pub fn start_async_event(db: &Db, event_id: &str, now: i64) -> Result<(), Engine
     {
         return Err(EngineError::AsyncClaimTarget { claims, tracks });
     }
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if current.state != EventState::ScheduleReview {
@@ -3805,7 +3805,7 @@ pub fn reveal_with_channel(
             });
         }
     }
-    let transaction = begin(db)?;
+    let transaction = begin_transition(db, event_id)?;
     let current = EventRepo::get(&transaction, event_id)?
         .ok_or_else(|| EngineError::EventNotFound(event_id.to_string()))?;
     if !matches!(current.state, EventState::Active | EventState::Paused) {
@@ -5436,6 +5436,14 @@ pub fn event_status(db: &Db, event_id: &str) -> Result<EventStatus, EngineError>
             Vec::new()
         },
     })
+}
+
+/// Begin the transaction for an event state transition. The database runs its
+/// transition hook first (the pre-transition backup); a hook error refuses the
+/// transition before anything changes.
+fn begin_transition<'a>(db: &'a Db, event_id: &str) -> Result<Transaction<'a>, EngineError> {
+    db.before_transition(event_id)?;
+    begin(db)
 }
 
 pub(crate) fn begin(db: &Db) -> Result<Transaction<'_>, EngineError> {

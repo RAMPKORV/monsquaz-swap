@@ -704,8 +704,21 @@ fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(directory.join("monsquaz.db"))
 }
 
+/// Open the database for a host command. When the host selected a backup
+/// folder, every event state transition first writes a backup.
 fn open_db(app: &AppHandle) -> Result<Db, String> {
-    Db::open(database_path(app)?).map_err(|error| error.to_string())
+    let path = database_path(app)?;
+    let db = Db::open(&path).map_err(|error| error.to_string())?;
+    let failures = app
+        .state::<crate::backup_host::BackupRuntime>()
+        .failure_sink();
+    let hook = path
+        .parent()
+        .and_then(|data| crate::backup_host::transition_hook(data, failures));
+    Ok(match hook {
+        Some(hook) => db.with_transition_hook(hook),
+        None => db,
+    })
 }
 
 fn open_store(app: &AppHandle) -> Result<swap_files::BlobStore, String> {
@@ -730,7 +743,7 @@ fn e2e_now() -> Option<i64> {
         .and_then(|value| value.trim().parse().ok())
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     if let Some(now) = e2e_now() {
         return now;
     }

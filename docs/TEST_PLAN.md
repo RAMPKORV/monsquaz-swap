@@ -33,7 +33,7 @@ No live bot in pull-request CI. Use fake adapters and recorded payloads.
 - [ ] Public progress has no per-person counts before deadline.
 - [ ] Reveal is atomic and HMAC-ordered.
 - [ ] Crash recovery does not duplicate a send.
-- [ ] Backups exist and a restore drill passed.
+- [x] Backups exist and a restore drill passed. `cargo test -p swap-engine --test backup_drill`.
 - [ ] The host can explain every override.
 - [ ] The rules state the anonymity limits and the host's mapping access.
 

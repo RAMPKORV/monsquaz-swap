@@ -113,9 +113,9 @@ describes.
 | Engine trace validation | NDJSON traces checked by TLC | MSW-106 | planned |
 | Planner checker | `crates/swap-plan-check/verus/flat_plan_check.rs` | MSW-107, MSW-133 | pilot: checker proved; certificate verifier open |
 | Inductive invariants | Apalache | MSW-108 | planned |
-| Classic schedule | `SwapSchedule.tla` | MSW-037 | planned |
+| Classic schedule | `specs/tla/SwapSchedule.tla` | MSW-037 | implemented |
 | Async queue | `SwapAsync.tla` | MSW-038 | planned |
-| Reveal gate | `SwapReveal.tla` | MSW-041 | planned |
+| Reveal gate | `specs/tla/SwapReveal.tla` | MSW-041 | implemented |
 | Rust mutation testing | `cargo-mutants` nightly | MSW-097 | planned |
 
 ## Gates
@@ -178,6 +178,40 @@ A restart is a stuttering step because the outbox and event state live in
 SQLite. The model proves safety across duplicate sends, lost responses, and
 the retry cap. It does not prove wall-clock liveness.
 
+The schedule model checks:
+
+- `CompleteRounds`: R1 covers every track with its owner. Every planned
+  exchange round gives one track to each participant and one participant to
+  each track.
+- `NoRepeat`: no participant-track pair appears in two exchange rounds.
+- `NoOwnTrack`: no exchange round gives a participant the track they seeded.
+- `GroupContainment`: a participant receives a track from the group one phase
+  step forward. A fallback phase can use the global pool.
+- `SealedPlanComplete`: a locked plan has every exchange round.
+- `TypeOK`: every variable has the expected shape.
+
+The schedule model assumes strict participation. Flexible handoff caps, away
+ranges, fill-ins, bench states, and manual edits are outside the checked bound.
+The group bounds keep the group sizes equal because the classic group planner
+requires one track per participant per group.
+
+The reveal model checks:
+
+- `NoRevealBeforeHostAction`: the reveal is not published until the host
+  presses reveal.
+- `NoRevealWithActiveAssignments`: the reveal is not published while an
+  assignment is active.
+- `NoIdentityBeforeReveal`: the participant projection has no owner,
+  contributor, title, comments, or mapping fact before the gate.
+- `StreamSafeDefault`: stream-safe mode is on before the reveal, hides identity
+  facts, and turns off only after host confirmation.
+- `TypeOK`: every variable has the expected shape.
+
+The reveal model abstracts the participant projection to identity facts. It
+does not model the opaque assignment text, the Discord message split, redaction,
+or the ZIP export. Atomic publish is structural: one action sets the state and
+the projections.
+
 ## Model-checking bounds
 
 | Run | Model | Bound | Time budget |
@@ -186,9 +220,17 @@ the retry cap. It does not prove wall-clock liveness.
 | Claim nightly | 3 participants × 3 tracks | 2 ticks | 20 minutes |
 | Delivery PR | 3 effects | 2 attempts | 5 minutes |
 | Delivery nightly | 4 effects | 3 attempts | 20 minutes |
+| Schedule PR | 4 participants × 4 tracks | 3 exchange rounds | 5 minutes |
+| Schedule nightly | 6 participants × 6 tracks | 4 exchange rounds, 2 groups | 20 minutes |
+| Reveal PR | 2 participants × 2 tracks | 1 gate | 5 minutes |
+| Reveal nightly | 3 participants × 3 tracks | 1 gate | 20 minutes |
 
 The claim PR model has 750 distinct states and the nightly model has 2,338,158.
 The delivery PR model has 343 distinct states and the nightly model has 6,561.
+The schedule PR model has 82 distinct states and the nightly model has 1,445;
+the nightly model finishes in 2 seconds on 24 workers. The reveal PR model has
+67 distinct states and the nightly model has 2,051; both finish in less than one
+second on 24 workers.
 The nightly timeout is a hard ceiling. If a model exceeds its budget, reduce the
 scope or use Apalache. A skipped model must be reported, never silently
 ignored.
@@ -204,6 +246,14 @@ TLC to report the named invariant. The set covers `TypeOK`, `NoRepeat`,
 `NoLostEffect`, `FailedWereAlerted`, `AttemptsBounded`, and the delivery
 `TypeOK`. A parse error or an unrelated failure is not counted as a detected
 mutation.
+
+`scripts/formal/check.sh` applies the same rule to the schedule and reveal
+models. The schedule set breaks `TypeOK`, `CompleteRounds`, `NoRepeat`,
+`NoOwnTrack`, `GroupContainment`, and `SealedPlanComplete`. The reveal set
+breaks `TypeOK`, `NoRevealBeforeHostAction`,
+`NoRevealWithActiveAssignments`, `NoIdentityBeforeReveal` (one mutation for each
+identity kind), and `StreamSafeDefault` (an unsafe presenter default and a
+disable without confirmation).
 
 ## Conformance
 
@@ -251,8 +301,8 @@ delivery, and reveal models are required before 1.0.0.
 ## Commands
 
 ```bash
-scripts/formal/check.sh          # TLA+ PR model + mutations
-scripts/formal/check.sh nightly  # deeper model
+scripts/formal/check.sh          # TLA+ PR models + mutations
+scripts/formal/check.sh nightly  # deeper models
 node scripts/formal/changed.mjs origin/main   # does this branch touch a model?
 cargo test -p swap-core --test assignment_machine
 cargo test -p swap-discord custom_id   # custom-ID property tests

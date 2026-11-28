@@ -65,6 +65,66 @@
           "functions": ["deliveries table"]
         }
       ]
+    },
+    {
+      "name": "SwapSchedule",
+      "spec": "specs/tla/SwapSchedule.tla",
+      "configs": ["specs/tla/SwapSchedulePR.cfg", "specs/tla/SwapScheduleNightly.cfg", "specs/tla/SwapScheduleMutation.cfg"],
+      "actions": ["AssignRound", "Seal"],
+      "covers": [
+        {
+          "path": "crates/swap-core/src/schedule.rs",
+          "functions": ["Schedule::generate", "Schedule::generate_with", "cyclic_schedule", "random_schedule", "balanced_schedule", "match_round"]
+        },
+        {
+          "path": "crates/swap-core/src/groups.rs",
+          "functions": ["suggest_groups", "group_sizes", "default_cadence", "phase_count", "group_warnings", "group_schedule"]
+        },
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["generate_schedule", "generate_schedule_internal", "repair_group_schedule", "plan_edit_candidates", "edit_plan_assignment", "participant_schedule"]
+        },
+        {
+          "path": "crates/swap-engine/tests/classic_flow.rs",
+          "functions": ["the_event_scheduler_setting_selects_each_strategy_and_keeps_the_plan_valid", "group_events_rotate_participants_and_keep_tracks", "group_repair_merges_an_underfilled_group_only_when_needed", "locking_the_schedule_publishes_the_latest_commitment"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["PlanRepo::latest", "PlanRepo::insert_assignment", "PlanRepo::list_assignments", "PlanRepo::set_commitment_meta"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["plans table", "plan_assignments table"]
+        }
+      ]
+    },
+    {
+      "name": "SwapReveal",
+      "spec": "specs/tla/SwapReveal.tla",
+      "configs": ["specs/tla/SwapRevealPR.cfg", "specs/tla/SwapRevealNightly.cfg", "specs/tla/SwapRevealMutation.cfg"],
+      "actions": ["HostPress", "Publish", "Claim", "Resolve", "ConfirmStreamSafeOff", "DisableStreamSafe", "EnableStreamSafe"],
+      "covers": [
+        {
+          "path": "crates/swap-engine/src/engine.rs",
+          "functions": ["reveal", "reveal_with_channel", "reveal_messages", "safe_reveal_text", "reveal_package", "reveal_zip"]
+        },
+        {
+          "path": "crates/swap-core/src/state.rs",
+          "functions": ["EventState::can_transition_to", "EventState::transition_to"]
+        },
+        {
+          "path": "crates/swap-engine/tests/classic_flow.rs",
+          "functions": ["the_classic_loop_reaches_a_reveal", "the_reveal_package_carries_titles_comments_and_credits", "commitment_v2_covers_the_seed_owner_map", "participant_schedule_redacts_by_default_and_opens_on_request"]
+        },
+        {
+          "path": "crates/swap-db/src/repos.rs",
+          "functions": ["AssignmentRepo::list_active", "EventRepo::set_state"]
+        },
+        {
+          "path": "crates/swap-db/src/migrations.rs",
+          "functions": ["events.state", "assignments.status"]
+        }
+      ]
     }
   ]
 }

@@ -28,6 +28,13 @@ test("a description sentence of 25 words passes and 26 words fails", () => {
   assert.equal(lintText(`${"word ".repeat(26).trim()}.\n`)[0].rule, "length-25");
 });
 
+test("semicolons and colons do not end a sentence", () => {
+  const chained = `${Array.from({ length: 6 }, () => "the host sets one value").join("; ")}.\n`;
+  const findings = lintText(chained);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule, "length-25");
+});
+
 test("a numbered list item uses the procedure limit", () => {
   const findings = lintText(`1. ${"word ".repeat(21).trim()}.\n`);
   assert.equal(findings[0].rule, "length-20");

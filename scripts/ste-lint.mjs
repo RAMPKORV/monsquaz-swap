@@ -89,7 +89,7 @@ export function wordCount(sentence) {
 
 export function sentences(text) {
   return text
-    .split(/(?<=[.!?;:])\s+(?=[A-Z0-9`"(*])/)
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9`"(*])/)
     .map((part) => part.trim())
     .filter(Boolean);
 }

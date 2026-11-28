@@ -10,13 +10,15 @@ Feature: Skips and fill-ins
     Then the app can offer a slot to any of them
     And the app records the source of the fill-in
 
+  # Decided, building in MSW-083.
   Scenario: A fill-in offer uses the standard sequence
-    Given a stranded track and three eligible fill-ins
+    Given a stranded track and eligible fill-ins
     When the bot offers the track
     Then the bot offers it to one fill-in at a time
     And the first accept wins
-    And the bot waits up to 12 hours per offer
-    And the bot makes at most 3 offers before the host decides
+    And the bot waits up to 6 hours for a claim
+    And an auto-chain makes at most 3 offers before the host decides
+    And a host-ordered list has no size limit
 
   Scenario: A fill-in has never seen the track
     Given a fill-in who has already worked on track S7F3A
@@ -24,12 +26,14 @@ Feature: Skips and fill-ins
     Then the app does not offer S7F3A to that fill-in
     And the app offers it to another eligible fill-in
 
-  Scenario: A fill-in edit counts toward the shared budget
-    Given a fill-in with a maximum handoff budget of 4
-    And the fill-in has completed 2 edits
-    When the fill-in accepts a third edit
-    Then the app records 3 completed handoffs
-    And the app does not offer a fifth handoff
+  # Decided, building in MSW-080..MSW-083.
+  Scenario: A tier-2 fill-in rescue is an extra turn
+    Given a seeded participant with a maximum handoff budget of 4
+    And the participant has completed 2 edits
+    When the participant rescues a slot as a tier-2 fill-in
+    Then the app records the rescue as an extra turn
+    And the app does not count the rescue toward the budget
+    And the app can still offer the next planned handoff
 
   Scenario: No eligible fill-in exists
     Given a skipped slot with no eligible fill-in
@@ -38,11 +42,13 @@ Feature: Skips and fill-ins
     And the async mode returns the track to the pool
     And the app does not repeat a track to rescue the slot
 
-  Scenario: A fill-in is credited
-    Given a fill-in who submitted an edit
+  # Decided, building in MSW-080.
+  Scenario: A fill-in rescue is credited
+    Given a seeded participant who rescued a slot as a fill-in
     When the reveal runs
-    Then the credits mark the contributor as a fill-in
-    And the fill-in is credited in the round where they worked
+    Then the credits mark that turn as a fill-in rescue
+    And the credits mark the participant's planned turns as plain credits
+    And the participant is credited in the round where they worked
 
   Scenario: A final fill-in can name the track
     Given a fill-in who is the last editor of a track

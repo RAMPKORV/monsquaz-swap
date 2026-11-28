@@ -95,9 +95,9 @@ Total: 171 scenarios. Mapped: 46. Pending: 117. Exempt: 8.
 - The fill-in pool has three sources (exempt)
 - A fill-in offer uses the standard sequence (exempt)
 - A fill-in has never seen the track (exempt)
-- A fill-in edit counts toward the shared budget (exempt)
+- A tier-2 fill-in rescue is an extra turn (exempt)
 - No eligible fill-in exists (exempt)
-- A fill-in is credited (exempt)
+- A fill-in rescue is credited (exempt)
 - A final fill-in can name the track (exempt)
 - A fill-in wins over a late original holder (exempt)
 

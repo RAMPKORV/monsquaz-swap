@@ -223,11 +223,15 @@ EXPIRED (not seen)       └──host revoke──► REVOKED / SUPERSEDED
 
 - Pool: dedicated volunteers + signed-up non-seeders converted at lock; the host
   can appoint a specific eligible person.
-- Sequential offers, 12h timeout, max 3, then the host; first accept wins.
-- Eligibility: never seen the track, not the owner, available/ready, under the
-  shared handoff budget. All regular and fill-in edits count toward that one
-  budget.
-- Credit: marked as fill-in; can name the track if they are the final editor.
+- Offers are sequential, and first accept wins. The claim window default is 6h
+  (D-069). An auto-chain uses at most 3 offers; a host-ordered list has no size
+  limit (D-070). Decided, building in MSW-083.
+- Eligibility: never seen the track, not the owner, available/ready. A tier-2
+  fill-in rescue is an extra turn and does not count toward the shared handoff
+  budget (D-050). Decided, building in MSW-080..MSW-083.
+- Credit: the badge marks a rescued turn, whoever did it. Planned turns of a
+  person with the fill-in role are plain credits (D-065). Decided, building in
+  MSW-080.
 - No eligible fill-in: classic passes the track unchanged; async returns it to
   the pool. Never relax the no-repeat invariant to rescue a slot.
 

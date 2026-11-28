@@ -42,12 +42,14 @@ always mean the hand-written entries below.
 |---|---|---|
 | D-009 | "Async group migration remains an open decision" | D-024 |
 | D-011 | The 12h claim window and the auto-pause after two expiries | D-025, D-033, D-041 |
+| D-014 | The 12h fill-in claim window, the 3-offer cap, and the shared handoff budget | D-069, D-070, D-050, D-065 |
 | D-016 | The `R#` host file names and the round folders | Corrected to `v#`; the folder layout is not built |
 | D-018 | The cap of two replans | D-043 |
 | D-025 | The fixed 12h claim reminder | D-041 (12h stays the default) |
 | D-026 | The fixed never-re-offer rule and the strike recommendation | D-041 |
 | D-029 | The whole design scale | D-047 |
 | D-039 | The whole fill-in candidate rule | D-049, then D-050 |
+| D-040 | The fill-in due-time default | D-069 (a separate claim window starts the edit due time) |
 | D-049 | The whole fill-in candidate rule | D-050 |
 | D-032 | The owners, titles, names, and comments in an open schedule | D-045 |
 
@@ -189,6 +191,12 @@ appoint a specific eligible person; sequential first-accept, 12h, max 3; shared
 handoff budget; marked in credits; can name if final.
 **Rejected:** broadcast races, auto-assignment without consent, unlimited
 rescues.
+**Status:** refined on 2026-11-28 by D-069 and D-070. D-069 changes "12h" to a
+6-hour default claim window; the edit due time starts at claim. D-070 removes
+the 3-offer cap for a host-ordered list; the auto-chain keeps the 3-offer
+budget. D-050 and D-065 change "shared handoff budget" and "marked in credits":
+a tier-2 fill-in rescue is an extra turn outside the budget, and the badge
+marks the rescued turn, not the role.
 
 ## D-015 — Files: allowlist, no format changes, module-aware scrub
 
@@ -517,6 +525,9 @@ now+24h)). The event setting `fill_in_flow` is `host_appoints` (default),
 `auto_chain`, or `host_list`.
 **Consequences:** the next classic round waits for a fill-in. No silent
 auto-advance.
+**Status:** refined by D-069. A fill-in offer has a separate claim window
+(default 6 hours). The edit due time, default 24 hours, starts at claim. The
+"host sets the fill-in due time" sentence remains the edit due time.
 
 ## D-041 — Build the async expiry, re-offer, and claim-reminder settings
 
@@ -578,11 +589,14 @@ brand tokens.
 **Date:** 2026-11-28.
 **Decision:** type 12/13/14/16/20/24/32/44 with a locked 12px floor; spacing
 0/4/8/12/16/24/32/48/64; radius 4/8/999. Supersedes D-029 and ADR 0006.
-**Consequences:** every view must migrate with no baseline exceptions for the
+**Consequences:** Every view is migrated with no baseline exceptions for the
 old sizes.
 **Status:** decided, building in MSW-099 (scales and brand tokens) and MSW-100
 (gate rules). The UI is not migrated. The old scales in `design/policy.json`
 remain locked until those issues land.
+*Corrected 2026-11-28 (MSW-092):* the consequence text above is the tracker
+record, and the tracker is the source. It describes the target state, not the
+current UI. The Status line records the current state.
 
 ## D-048 — New design-gate rules
 

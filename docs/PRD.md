@@ -209,10 +209,10 @@ named command. IDs are stable.
 |---|---|---|---|
 | REQ-FILL-001 | must | A skip SHALL return the track unchanged and never count as an edit; a claim-then-skip SHALL count as seen. | `fill_ins.feature` |
 | REQ-FILL-002 | must | Fill-ins SHALL be dedicated volunteers, converted non-seeders, or host-appointed eligible people; they SHALL never receive a track twice. | `fill_ins.feature` |
-| REQ-FILL-003 | must | Fill-in offers SHALL be sequential first-accept, with a 12h timeout and at most three offers, then a host decision. | `fill_ins.feature` |
-| REQ-FILL-004 | must | All regular and fill-in edits SHALL count toward one shared handoff budget. | `fill_ins.feature` |
+| REQ-FILL-003 | must | Fill-in offers SHALL be sequential first-accept. The claim window SHALL be 6h by default (D-069). An auto-chain SHALL make at most three offers, then the host decides. A host-ordered list SHALL have no size limit (D-070). Decided, building in MSW-083. | `fill_ins.feature` |
+| REQ-FILL-004 | must | Regular edits SHALL count toward one shared handoff budget. A tier-2 fill-in rescue SHALL be an extra turn and SHALL NOT count toward the budget (D-050). Decided, building in MSW-080..MSW-083. | `fill_ins.feature` |
 | REQ-FILL-005 | must | If no eligible fill-in exists, classic SHALL pass the track unchanged; async SHALL return it to the pool. | `fill_ins.feature` |
-| REQ-FILL-006 | should | Fill-ins SHALL be marked in credits and MAY name the track if they are the final editor. | `fill_ins.feature` |
+| REQ-FILL-006 | should | Credits SHALL mark a rescued turn with a fill-in badge, whoever did it (D-065). A fill-in SHALL be able to name the track if they are the final editor. Decided, building in MSW-080..MSW-083. | `fill_ins.feature` |
 
 ### Files, pack, scrub
 

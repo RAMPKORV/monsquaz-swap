@@ -14,10 +14,28 @@ current tools, the planned routes, and the gates.
 
 ## Tools
 
-- **TLA+ 1.8.0 and TLC** for finite design models. The build is pinned by
-  SHA-256 in `scripts/formal/check.sh`. The upstream `v1.8.0` asset was
-  rebuilt on 2026-11-26; the pin tracks that build. A mismatch fails the check
-  for review. The jar is not committed.
+- **TLA+ 1.8.0 and TLC** for finite design models. The jar is not committed.
+  `scripts/formal/check.sh` downloads it from our own release asset
+  `tools-tla2tools-1.8.0` and checks a pinned SHA-256 (D-062). A mismatch
+  fails the check.
+
+  We mirror the jar because the upstream `v1.8.0` asset is mutable. Upstream
+  rebuilt it on 2026-11-26 and again on 2026-11-28, and each rebuild broke
+  the pin. The mirror holds the 2026-11-28 build (`sha256:df7cef5d…`). The
+  script keeps the upstream URL as a provenance comment.
+
+  To update the mirror:
+  1. Download the new upstream `tla2tools.jar`.
+  2. Compare its SHA-256 with the digest that the GitHub API reports for the
+     upstream asset.
+  3. Run `scripts/formal/check.sh` and `scripts/formal/check.sh nightly` with
+     the new jar. Every model and every mutation must pass.
+  4. Upload the jar to a new release tag `tools-tla2tools-<version>`. Do not
+     replace the asset of an existing tag.
+  5. Change `TLA_URL`, `TLA_SHA256`, and the provenance comment in
+     `scripts/formal/check.sh` in one PR. Change the cache key in
+     `.github/workflows/formal.yml` in the same PR.
+  6. Record the change in a tracker decision or in the issue evidence.
 - **proptest-state-machine** for model-based tests against the real Rust types
   and engine.
 - **Kani** was spiked for the header parser and custom-ID codec. The current

@@ -5,8 +5,12 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 TLA_VERSION="v1.8.0"
-TLA_SHA256="67f9575c3b9ef7a0787b1bded34812862ffe79d711298e5a75b1a77720b19928"
-TLA_URL="https://github.com/tlaplus/tlaplus/releases/download/${TLA_VERSION}/tla2tools.jar"
+# D-062: download from our own release asset, not the mutable upstream asset.
+# Provenance: https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+# (upstream build of 2026-11-28, GitHub digest sha256:df7cef5d...).
+# The update procedure is in docs/FORMAL_METHODS.md, section "Tools".
+TLA_SHA256="df7cef5d37bcca879817424c001696e07fd094d68a72690449af3045fd972469"
+TLA_URL="https://github.com/RAMPKORV/monsquaz-swap/releases/download/tools-tla2tools-1.8.0/tla2tools.jar"
 TLA_JAR="target/formal/tla2tools.jar"
 MODE="${1:-pr}"
 

@@ -39,7 +39,7 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         with:
           path: target/formal
-          key: tla-${{ runner.os }}-1.8.0-2026-11-26
+          key: tla-${{ runner.os }}-1.8.0-mirror-df7cef5d
       - name: TLA+ PR model and mutations
         if: steps.changed.outputs.run == 'true'
         run: scripts/formal/check.sh
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: target/formal
-          key: tla-${{ runner.os }}-1.8.0-2026-11-26
+          key: tla-${{ runner.os }}-1.8.0-mirror-df7cef5d
       - name: TLA+ nightly model
         run: scripts/formal/check.sh nightly
 

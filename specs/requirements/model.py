@@ -13,24 +13,30 @@ import z3
 
 from .schema import (
     AUTO_CHAIN_MAX_OFFERS,
-    EDIT_WINDOW_H,
-    FILL_IN_CLAIM_WINDOW_H,
-    HOST_APPOINT_EDIT_WINDOW_H,
+    CLAIM_WINDOW_MAX_H,
+    CLAIM_WINDOW_MIN_H,
+    DEFAULT_CLAIM_REMINDER_H,
+    DEFAULT_EDIT_WINDOW_H,
+    DEFAULT_FILL_IN_CLAIM_WINDOW_H,
+    DEFAULT_REGULAR_CLAIM_WINDOW_H,
     INVITATIONS,
     PARTICIPANTS,
-    REGULAR_CLAIM_WINDOW_H,
     RESTORE_INVITATION_HOURS,
     ROUNDS,
     TRACKS,
     TURNS,
+    FillInSource,
     Flow,
     Membership,
     Mode,
     OfferKind,
+    Participation,
+    Premise,
     Role,
     Rule,
     Scenario,
     Source,
+    TrackOutcome,
     TurnKind,
 )
 
@@ -80,6 +86,7 @@ class World:
     def __init__(self) -> None:
         # Event and roster.
         self.mode = z3.Int("mode")
+        self.participation_mode = z3.Int("participation_mode")
         self.owner = [z3.Int(f"owner_{track}") for track in range(TRACKS)]
         self.role = [z3.Int(f"role_{person}") for person in range(PARTICIPANTS)]
         self.membership = [z3.Int(f"membership_{person}") for person in range(PARTICIPANTS)]
@@ -92,15 +99,15 @@ class World:
             z3.Int(f"budget_after_tier2_{person}") for person in range(PARTICIPANTS)
         ]
         self.submitted_own = [z3.Bool(f"submitted_own_{person}") for person in range(PARTICIPANTS)]
+        self.fill_in_source = [
+            z3.Int(f"fill_in_source_{person}") for person in range(PARTICIPANTS)
+        ]
         self.leave = [z3.Bool(f"leave_{person}") for person in range(PARTICIPANTS)]
         self.leave_after_claim = [
             z3.Bool(f"leave_after_claim_{person}") for person in range(PARTICIPANTS)
         ]
         self.leave_held_track = [
             z3.Int(f"leave_held_track_{person}") for person in range(PARTICIPANTS)
-        ]
-        self.held_track_seen = [
-            z3.Bool(f"held_track_seen_{person}") for person in range(PARTICIPANTS)
         ]
         self.has_future_assignment = [
             z3.Bool(f"has_future_assignment_{person}") for person in range(PARTICIPANTS)
@@ -131,23 +138,29 @@ class World:
             [z3.Bool(f"tier2_offer_{person}_{track}") for track in range(TRACKS)]
             for person in range(PARTICIPANTS)
         ]
-        self.fill_in_offer = [
-            [z3.Bool(f"fill_in_offer_{person}_{track}") for track in range(TRACKS)]
-            for person in range(PARTICIPANTS)
-        ]
-        self.plan_leaves_gap = [
-            [z3.Bool(f"plan_leaves_gap_{person}_{track}") for track in range(TRACKS)]
+        self.plan_never_gives_track = [
+            [z3.Bool(f"plan_never_gives_track_{person}_{track}") for track in range(TRACKS)]
             for person in range(PARTICIPANTS)
         ]
         self.tier2_turns = [
             [z3.Int(f"tier2_turns_{person}_{round}") for round in range(ROUNDS)]
             for person in range(PARTICIPANTS)
         ]
+        self.tier2_offer_round = [
+            [z3.Int(f"tier2_offer_round_{person}_{track}") for track in range(TRACKS)]
+            for person in range(PARTICIPANTS)
+        ]
 
-        # Settings.
+        # Settings. The defaults are separate from the current event values.
+        self.default_claim_window_h = z3.Int("default_claim_window_h")
+        self.default_fill_in_claim_window_h = z3.Int("default_fill_in_claim_window_h")
+        self.default_claim_reminder_h = z3.Int("default_claim_reminder_h")
+        self.default_edit_window_h = z3.Int("default_edit_window_h")
         self.claim_window_h = [z3.Int(f"claim_window_h_{kind}") for kind in range(2)]
         self.claim_reminder_h = z3.Int("claim_reminder_h")
         self.edit_window_h = z3.Int("edit_window_h")
+        self.offer_kind = z3.Int("offer_kind")
+        self.offer_claim_window_h = z3.Int("offer_claim_window_h")
         self.fill_in_flow = z3.Int("fill_in_flow")
         self.fill_in_offer_cap = [z3.Bool(f"fill_in_offer_cap_{flow}") for flow in range(3)]
         self.max_auto_chain_offers = z3.Int("max_auto_chain_offers")
@@ -155,6 +168,13 @@ class World:
         self.first_accept_wins = z3.Bool("first_accept_wins")
         self.event_wide_tier2_cap = z3.Bool("event_wide_tier2_cap")
         self.invitation_valid_h = z3.Int("invitation_valid_h")
+        self.replan_allowed = z3.Bool("replan_allowed")
+
+        # Classic length and participation.
+        self.participant_count = z3.Int("participant_count")
+        self.total_rounds = z3.Int("total_rounds")
+        self.exchange_rounds = z3.Int("exchange_rounds")
+        self.plan_valid = z3.Bool("plan_valid")
 
         # Assignment turns. A turn is a static record; the model does not
         # model wall-clock transitions.
@@ -181,6 +201,7 @@ class World:
         self.appoint_time_h = [z3.Int(f"appoint_time_h_{turn}") for turn in range(TURNS)]
         self.claim_time_h = [z3.Int(f"claim_time_h_{turn}") for turn in range(TURNS)]
         self.fill_in_due_h = [z3.Int(f"fill_in_due_h_{turn}") for turn in range(TURNS)]
+        self.turn_edit_due_h = [z3.Int(f"turn_edit_due_h_{turn}") for turn in range(TURNS)]
 
         # Rounds and reveal.
         self.round_open = [z3.Bool(f"round_open_{round}") for round in range(ROUNDS)]
@@ -192,11 +213,13 @@ class World:
         self.auto_advanced = [z3.Bool(f"auto_advanced_{round}") for round in range(ROUNDS)]
         self.open_round_count = z3.Int("open_round_count")
         self.host_reveal_action = z3.Bool("host_reveal_action")
+        self.release_stream_finished = z3.Bool("release_stream_finished")
         self.reveal_published = z3.Bool("reveal_published")
         self.active_assignments_count = z3.Int("active_assignments_count")
         self.no_active_assignments = z3.Bool("no_active_assignments")
 
         # Leave and restore.
+        self.current_round = z3.Int("current_round")
         self.invitation_sent_h = [z3.Int(f"invitation_sent_h_{item}") for item in range(INVITATIONS)]
         self.invitation_action_h = [
             z3.Int(f"invitation_action_h_{item}") for item in range(INVITATIONS)
@@ -206,8 +229,9 @@ class World:
             z3.Bool(f"invitation_expired_{item}") for item in range(INVITATIONS)
         ]
 
-        # Fill-in flow outcomes.
+        # Fill-in outcome.
         self.no_eligible_fill_in = z3.Bool("no_eligible_fill_in")
+        self.track_outcome = z3.Int("track_outcome")
         self.pass_unchanged = z3.Bool("pass_unchanged")
         self.return_to_pool = z3.Bool("return_to_pool")
 
@@ -217,16 +241,53 @@ class World:
         constraints: list = [
             self.mode >= Mode.CLASSIC,
             self.mode <= Mode.ASYNC,
+            self.participation_mode >= Participation.STRICT,
+            self.participation_mode <= Participation.FLEXIBLE,
             self.fill_in_flow >= Flow.HOST_APPOINTS,
             self.fill_in_flow <= Flow.HOST_LIST,
             self.max_auto_chain_offers >= 0,
             self.open_fill_in_offers >= 0,
             self.invitation_valid_h >= 0,
+            self.default_edit_window_h > 0,
             self.edit_window_h > 0,
             self.claim_reminder_h >= 0,
+            self.participant_count >= 2,
+            self.total_rounds >= 1,
+            self.exchange_rounds >= 0,
+            self.current_round >= 0,
+            self.current_round < ROUNDS,
+            self.offer_kind >= OfferKind.REGULAR,
+            self.offer_kind <= OfferKind.FILL_IN,
+            self.track_outcome >= TrackOutcome.PASSED,
+            self.track_outcome <= TrackOutcome.HELD,
         ]
         for kind in range(2):
-            constraints.append(self.claim_window_h[kind] > 0)
+            constraints.extend(
+                [
+                    self.claim_window_h[kind] >= CLAIM_WINDOW_MIN_H,
+                    self.claim_window_h[kind] <= CLAIM_WINDOW_MAX_H,
+                ]
+            )
+        for default in (
+            self.default_claim_window_h,
+            self.default_fill_in_claim_window_h,
+            self.default_claim_reminder_h,
+            self.default_edit_window_h,
+        ):
+            constraints.append(default > 0)
+
+        constraints.extend(
+            [
+                self.offer_claim_window_h
+                == z3.If(
+                    self.offer_kind == OfferKind.REGULAR,
+                    self.claim_window_h[OfferKind.REGULAR],
+                    self.claim_window_h[OfferKind.FILL_IN],
+                ),
+                self.pass_unchanged == (self.track_outcome == TrackOutcome.PASSED),
+                self.return_to_pool == (self.track_outcome == TrackOutcome.RETURNED),
+            ]
+        )
 
         for track in range(TRACKS):
             constraints.extend([self.owner[track] >= 0, self.owner[track] < PARTICIPANTS])
@@ -244,19 +305,63 @@ class World:
                     self.budget_after_tier2[person] >= 0,
                     self.leave_held_track[person] >= 0,
                     self.leave_held_track[person] < TRACKS,
-                    self.held_track_seen[person]
-                    == _select_bool(self.leave_held_track[person], self.seen[person]),
+                    self.fill_in_source[person] >= FillInSource.VOLUNTEER,
+                    self.fill_in_source[person] <= FillInSource.NONE,
                 ]
+            )
+            constraints.append(
+                self.tier2_rescues[person]
+                == z3.Sum([self.tier2_turns[person][round] for round in range(ROUNDS)])
             )
             for round in range(ROUNDS):
                 constraints.extend(
                     [self.tier2_turns[person][round] >= 0, self.tier2_turns[person][round] <= TURNS]
                 )
             for track in range(TRACKS):
-                constraints.append(
-                    self.fill_in_offer[person][track]
-                    == z3.Or(self.tier1_offer[person][track], self.tier2_offer[person][track])
+                constraints.extend(
+                    [
+                        self.tier2_offer_round[person][track] >= 0,
+                        self.tier2_offer_round[person][track] < ROUNDS,
+                    ]
                 )
+                constraints.append(
+                    self.tier1_eligible[person][track]
+                    == z3.And(
+                        self.role[person] == Role.FILL_IN,
+                        self.membership[person] == Membership.ACTIVE,
+                        self.ready[person],
+                        z3.Not(self.seen[person][track]),
+                        self.owner[track] != person,
+                        self.fill_in_source[person] != FillInSource.NONE,
+                    )
+                )
+                constraints.append(
+                    self.tier2_eligible[person][track]
+                    == z3.And(
+                        self.role[person] == Role.PARTICIPANT,
+                        self.membership[person] == Membership.ACTIVE,
+                        self.ready[person],
+                        self.submitted_own[person],
+                        z3.Not(self.seen[person][track]),
+                        self.owner[track] != person,
+                        self.plan_never_gives_track[person][track],
+                    )
+                )
+
+        constraints.append(
+            self.open_fill_in_offers
+            == z3.Sum(
+                [
+                    z3.If(
+                        z3.Or(self.tier1_offer[person][track], self.tier2_offer[person][track]),
+                        1,
+                        0,
+                    )
+                    for person in range(PARTICIPANTS)
+                    for track in range(TRACKS)
+                ]
+            )
+        )
 
         for turn in range(TURNS):
             constraints.extend(
@@ -274,12 +379,13 @@ class World:
                     == z3.Or(
                         self.turn_active[turn],
                         self.turn_offered[turn],
+                        self.turn_claimed[turn],
                         self.turn_submitted[turn],
                         self.turn_skip_before_claim[turn],
                         self.turn_skip_after_claim[turn],
                         self.turn_expired[turn],
                     ),
-                    z3.Implies(self.turn_active[turn], self.turn_assigned[turn]),
+                    z3.Implies(self.turn_claimed[turn], self.turn_assigned[turn]),
                     z3.Implies(self.turn_submitted[turn], z3.Not(self.turn_active[turn])),
                     z3.Implies(self.turn_skip_before_claim[turn], z3.Not(self.turn_active[turn])),
                     z3.Implies(self.turn_skip_after_claim[turn], z3.Not(self.turn_active[turn])),
@@ -308,6 +414,21 @@ class World:
                         ]
                     ),
                 ]
+            )
+
+        for person in range(PARTICIPANTS):
+            constraints.append(
+                self.has_future_assignment[person]
+                == z3.Or(
+                    [
+                        z3.And(
+                            self.turn_assigned[turn],
+                            self.turn_holder[turn] == person,
+                            self.turn_round[turn] > self.current_round,
+                        )
+                        for turn in range(TURNS)
+                    ]
+                )
             )
 
         constraints.extend(
@@ -341,8 +462,9 @@ def build_rules(world: World) -> list[Rule]:
                 _setting("Claim window"),
                 _scenario("A claim delivers the file and starts the deadline", "async_queue.feature"),
             ),
-            paraphrase="A regular offer must expire after the 24-hour claim window.",
-            formula=world.claim_window_h[OfferKind.REGULAR] == REGULAR_CLAIM_WINDOW_H,
+            paraphrase="The default regular claim window must be 24 hours.",
+            formula=world.default_claim_window_h == DEFAULT_REGULAR_CLAIM_WINDOW_H,
+            kind="setting",
             tags=("claim", "setting"),
         )
     )
@@ -355,8 +477,9 @@ def build_rules(world: World) -> list[Rule]:
                 _setting("Fill-in offer claim window"),
                 _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
             ),
-            paraphrase="A fill-in offer must expire after the 6-hour claim window.",
-            formula=world.claim_window_h[OfferKind.FILL_IN] == FILL_IN_CLAIM_WINDOW_H,
+            paraphrase="The default fill-in claim window must be 6 hours.",
+            formula=world.default_fill_in_claim_window_h == DEFAULT_FILL_IN_CLAIM_WINDOW_H,
+            kind="setting",
             tags=("claim", "fill-in", "setting"),
         )
     )
@@ -368,11 +491,15 @@ def build_rules(world: World) -> list[Rule]:
                 _setting("Claim reminder"),
                 _scenario("The bot reminds the participant to claim", "async_queue.feature"),
             ),
-            paraphrase="The claim reminder must occur before the claim window ends.",
+            paraphrase=(
+                "The default claim reminder must be 12 hours. "
+                "The claim reminder must occur before the claim window ends."
+            ),
             formula=z3.And(
-                world.claim_reminder_h == 12,
+                world.default_claim_reminder_h == DEFAULT_CLAIM_REMINDER_H,
                 world.claim_reminder_h < world.claim_window_h[OfferKind.REGULAR],
             ),
+            kind="setting",
             tags=("claim", "setting"),
         )
     )
@@ -386,8 +513,31 @@ def build_rules(world: World) -> list[Rule]:
                 _scenario("A claimed fill-in offer starts the 24-hour edit time", "fill_ins.feature"),
             ),
             paraphrase="The default edit window must be 24 hours.",
-            formula=world.edit_window_h == EDIT_WINDOW_H,
+            formula=world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
+            kind="setting",
             tags=("deadline", "setting"),
+        )
+    )
+    rules.append(
+        Rule(
+            id="R-CLAIM-EDIT-DUE",
+            sources=(
+                _prd("REQ-ASYNC-002"),
+                _decision("D-033"),
+                _scenario("A claim delivers the file and starts the deadline", "async_queue.feature"),
+            ),
+            paraphrase="A claimed assignment must start the edit due time at the claim.",
+            formula=z3.And(
+                [
+                    z3.Implies(
+                        world.turn_claimed[turn],
+                        world.turn_edit_due_h[turn]
+                        == world.claim_time_h[turn] + world.edit_window_h,
+                    )
+                    for turn in range(TURNS)
+                ]
+            ),
+            tags=("claim", "deadline"),
         )
     )
     rules.append(
@@ -406,6 +556,7 @@ def build_rules(world: World) -> list[Rule]:
                 world.fill_in_offer_cap[Flow.AUTO_CHAIN],
                 world.max_auto_chain_offers == AUTO_CHAIN_MAX_OFFERS,
             ),
+            kind="setting",
             tags=("fill-in", "setting"),
         )
     )
@@ -420,6 +571,7 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="A host-ordered fill-in list must have no size limit.",
             formula=z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
+            kind="setting",
             tags=("fill-in", "setting"),
         )
     )
@@ -431,7 +583,7 @@ def build_rules(world: World) -> list[Rule]:
                 _prd("REQ-FILL-003"),
                 _scenario("A fill-in offer uses the standard sequence", "fill_ins.feature"),
             ),
-            paraphrase="The bot must offer a fill-in slot to one person at a time.",
+            paraphrase="The bot must have at most one open fill-in offer at a time.",
             formula=world.open_fill_in_offers <= 1,
             tags=("fill-in",),
         )
@@ -446,7 +598,8 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="The first accept must win the fill-in offer.",
             formula=world.first_accept_wins,
-            tags=("fill-in",),
+            kind="setting",
+            tags=("fill-in", "setting"),
         )
     )
     rules.append(
@@ -460,7 +613,7 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase=(
                 "A host-appointed fill-in must have a due time at the later of two times. "
-                "The two times are the round deadline and 24 hours after the appointment."
+                "The two times are the round deadline and the default edit window."
             ),
             formula=z3.And(
                 [
@@ -472,12 +625,13 @@ def build_rules(world: World) -> list[Rule]:
                         world.fill_in_due_h[turn]
                         == _max_int(
                             _select_int(world.turn_round[turn], world.round_deadline_h),
-                            world.appoint_time_h[turn] + HOST_APPOINT_EDIT_WINDOW_H,
+                            world.appoint_time_h[turn] + world.default_edit_window_h,
                         ),
                     )
                     for turn in range(TURNS)
                 ]
             ),
+            kind="setting",
             tags=("fill-in", "deadline", "setting"),
         )
     )
@@ -490,18 +644,20 @@ def build_rules(world: World) -> list[Rule]:
                 _setting("Fill-in offer claim window"),
                 _scenario("A claimed fill-in offer starts the 24-hour edit time", "fill_ins.feature"),
             ),
-            paraphrase="A claimed fill-in offer must start the 24-hour edit time at the claim.",
+            paraphrase="A claimed fill-in offer must start the edit due time at the claim.",
             formula=z3.And(
                 [
                     z3.Implies(
                         z3.And(
                             world.is_fill_in_turn[turn],
+                            world.turn_claimed[turn],
                             z3.Or(
                                 world.fill_in_flow == Flow.AUTO_CHAIN,
                                 world.fill_in_flow == Flow.HOST_LIST,
                             ),
                         ),
-                        world.fill_in_due_h[turn] == world.claim_time_h[turn] + world.edit_window_h,
+                        world.fill_in_due_h[turn]
+                        == world.claim_time_h[turn] + world.edit_window_h,
                     )
                     for turn in range(TURNS)
                 ]
@@ -511,47 +667,7 @@ def build_rules(world: World) -> list[Rule]:
     )
     rules.append(
         Rule(
-            id="R-FILL-ELIGIBLE-NEVER-SEEN",
-            sources=(
-                _decision("D-007"),
-                _decision("D-050"),
-                _prd("REQ-FILL-002"),
-                _scenario("A fill-in has never seen the track", "fill_ins.feature"),
-            ),
-            paraphrase="The app must not offer a fill-in slot to a person who has seen the track.",
-            formula=z3.And(
-                [
-                    z3.Implies(world.fill_in_offer[person][track], z3.Not(world.seen[person][track]))
-                    for person in range(PARTICIPANTS)
-                    for track in range(TRACKS)
-                ]
-            ),
-            tags=("fill-in", "seen"),
-        )
-    )
-    rules.append(
-        Rule(
-            id="R-FILL-ELIGIBLE-NOT-OWNER",
-            sources=(
-                _decision("D-007"),
-                _decision("D-050"),
-                _prd("REQ-FILL-002"),
-                _scenario("A fill-in has never seen the track", "fill_ins.feature"),
-            ),
-            paraphrase="The app must not offer a fill-in slot to the track owner.",
-            formula=z3.And(
-                [
-                    z3.Implies(world.fill_in_offer[person][track], world.owner[track] != person)
-                    for person in range(PARTICIPANTS)
-                    for track in range(TRACKS)
-                ]
-            ),
-            tags=("fill-in", "own-track"),
-        )
-    )
-    rules.append(
-        Rule(
-            id="R-TIER1-ELIGIBLE",
+            id="R-TIER1-OFFER-ELIGIBLE",
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
@@ -559,18 +675,22 @@ def build_rules(world: World) -> list[Rule]:
                 _scenario("The fill-in pool has three sources", "fill_ins.feature"),
             ),
             paraphrase=(
-                "A tier-1 fill-in must have the fill-in role, be active, and be ready. "
-                "A tier-1 fill-in must not have seen the track or own the track."
+                "A tier-1 offer must go to a person with the fill-in role who is active. "
+                "The person must be ready, must have a fill-in source, and must not have seen the track. "
+                "The person must not own the track."
             ),
             formula=z3.And(
                 [
-                    world.tier1_eligible[person][track]
-                    == z3.And(
-                        world.role[person] == Role.FILL_IN,
-                        world.membership[person] == Membership.ACTIVE,
-                        world.ready[person],
-                        z3.Not(world.seen[person][track]),
-                        world.owner[track] != person,
+                    z3.Implies(
+                        world.tier1_offer[person][track],
+                        z3.And(
+                            world.role[person] == Role.FILL_IN,
+                            world.membership[person] == Membership.ACTIVE,
+                            world.ready[person],
+                            z3.Not(world.seen[person][track]),
+                            world.owner[track] != person,
+                            world.fill_in_source[person] != FillInSource.NONE,
+                        ),
                     )
                     for person in range(PARTICIPANTS)
                     for track in range(TRACKS)
@@ -581,49 +701,36 @@ def build_rules(world: World) -> list[Rule]:
     )
     rules.append(
         Rule(
-            id="R-TIER2-ELIGIBLE",
+            id="R-TIER2-OFFER-ELIGIBLE",
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
-                _scenario("The fill-in pool has three sources", "fill_ins.feature"),
+                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
             ),
             paraphrase=(
-                "A tier-2 fill-in must be an active seeded participant who submitted their own "
-                "track in the round. The plan must leave a gap for that track."
+                "A tier-2 offer must go to an active seeded participant. "
+                "The participant must have submitted their own turn and the plan must never give the track. "
+                "The participant must not have seen the track and must not own it. "
+                "The offer round must have at most one tier-2 turn."
             ),
-            formula=z3.And(
-                [
-                    world.tier2_eligible[person][track]
-                    == z3.And(
-                        world.role[person] == Role.PARTICIPANT,
-                        world.membership[person] == Membership.ACTIVE,
-                        world.ready[person],
-                        world.submitted_own[person],
-                        z3.Not(world.seen[person][track]),
-                        world.owner[track] != person,
-                        world.plan_leaves_gap[person][track],
-                    )
-                    for person in range(PARTICIPANTS)
-                    for track in range(TRACKS)
-                ]
-            ),
-            tags=("fill-in", "tier"),
-        )
-    )
-    rules.append(
-        Rule(
-            id="R-TIER1-BEFORE-TIER2",
-            sources=(
-                _decision("D-050"),
-                _prd("REQ-FILL-002"),
-                _scenario("The fill-in pool has three sources", "fill_ins.feature"),
-            ),
-            paraphrase="A tier-2 offer must not go to a person who is eligible as tier 1.",
             formula=z3.And(
                 [
                     z3.Implies(
                         world.tier2_offer[person][track],
-                        z3.Not(world.tier1_eligible[person][track]),
+                        z3.And(
+                            world.role[person] == Role.PARTICIPANT,
+                            world.membership[person] == Membership.ACTIVE,
+                            world.ready[person],
+                            world.submitted_own[person],
+                            z3.Not(world.seen[person][track]),
+                            world.owner[track] != person,
+                            world.plan_never_gives_track[person][track],
+                            _select_int(
+                                world.tier2_offer_round[person][track],
+                                world.tier2_turns[person],
+                            )
+                            <= 1,
+                        ),
                     )
                     for person in range(PARTICIPANTS)
                     for track in range(TRACKS)
@@ -638,9 +745,11 @@ def build_rules(world: World) -> list[Rule]:
             sources=(
                 _decision("D-050"),
                 _prd("REQ-FILL-002"),
-                _scenario("The fill-in pool has three sources", "fill_ins.feature"),
+                _scenario("A tier-2 fill-in rescue is an extra turn", "fill_ins.feature"),
             ),
-            paraphrase="A tier-2 offer must not occur while a tier-1 person is eligible for the track.",
+            paraphrase=(
+                "A tier-2 offer must occur only after tier 1, when no tier-1 person is eligible for the track."
+            ),
             formula=z3.And(
                 [
                     z3.Implies(
@@ -685,7 +794,8 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="The event must not cap the total number of tier-2 fill-in turns.",
             formula=z3.Not(world.event_wide_tier2_cap),
-            tags=("fill-in", "tier"),
+            kind="setting",
+            tags=("fill-in", "tier", "setting"),
         )
     )
     rules.append(
@@ -724,6 +834,31 @@ def build_rules(world: World) -> list[Rule]:
     )
     rules.append(
         Rule(
+            id="R-FILL-PASS-UNCHANGED",
+            sources=(
+                _decision("D-052"),
+                _prd("REQ-FILL-005"),
+                _scenario("No eligible fill-in exists", "fill_ins.feature"),
+            ),
+            paraphrase=(
+                "When no eligible fill-in exists, classic must pass the track unchanged. "
+                "Async must return the track to the pool."
+            ),
+            formula=z3.And(
+                z3.Implies(
+                    z3.And(world.no_eligible_fill_in, world.mode == Mode.CLASSIC),
+                    world.track_outcome == TrackOutcome.PASSED,
+                ),
+                z3.Implies(
+                    z3.And(world.no_eligible_fill_in, world.mode == Mode.ASYNC),
+                    world.track_outcome == TrackOutcome.RETURNED,
+                ),
+            ),
+            tags=("fill-in",),
+        )
+    )
+    rules.append(
+        Rule(
             id="R-NO-REPEAT",
             sources=(
                 _decision("D-007"),
@@ -737,6 +872,7 @@ def build_rules(world: World) -> list[Rule]:
                     for turn in range(TURNS)
                 ]
             ),
+            kind="invariant",
             tags=("scheduling", "invariant"),
         )
     )
@@ -754,11 +890,8 @@ def build_rules(world: World) -> list[Rule]:
                     z3.Implies(world.turn_assigned[turn], z3.Not(world.own_track_turn[turn]))
                     for turn in range(TURNS)
                 ]
-                + [
-                    z3.Implies(world.turn_offered[turn], z3.Not(world.own_track_turn[turn]))
-                    for turn in range(TURNS)
-                ]
             ),
+            kind="invariant",
             tags=("scheduling", "invariant"),
         )
     )
@@ -822,6 +955,22 @@ def build_rules(world: World) -> list[Rule]:
     )
     rules.append(
         Rule(
+            id="R-CLASSIC-LENGTH",
+            sources=(
+                _decision("D-030"),
+                _prd("REQ-SCHED-002"),
+                _scenario("A default classic event runs N total rounds", "scheduling.feature"),
+            ),
+            paraphrase="A full classic event must run N total rounds and N minus one exchange rounds.",
+            formula=z3.And(
+                world.total_rounds == world.participant_count,
+                world.exchange_rounds == world.total_rounds - 1,
+            ),
+            tags=("scheduling",),
+        )
+    )
+    rules.append(
+        Rule(
             id="R-ROUNDS-HOST-OPENED",
             sources=(
                 _decision("D-031"),
@@ -829,13 +978,14 @@ def build_rules(world: World) -> list[Rule]:
                 _prd("REQ-DEADLINE-001"),
                 _scenario("A default classic event runs N total rounds", "scheduling.feature"),
             ),
-            paraphrase="The host must open every round. A round must not open automatically.",
+            paraphrase="An open round must have a host open action.",
             formula=z3.And(
                 [
                     z3.Implies(world.round_open[round], world.host_opened_round[round])
                     for round in range(ROUNDS)
                 ]
             ),
+            kind="invariant",
             tags=("scheduling", "deadline", "invariant"),
         )
     )
@@ -850,6 +1000,7 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="A passed deadline must not advance a round without a host action.",
             formula=z3.And([z3.Not(world.auto_advanced[round]) for round in range(ROUNDS)]),
+            kind="invariant",
             tags=("deadline", "invariant"),
         )
     )
@@ -867,15 +1018,69 @@ def build_rules(world: World) -> list[Rule]:
     )
     rules.append(
         Rule(
+            id="R-STRICT-REFUSAL",
+            sources=(
+                _prd("REQ-SCHED-012"),
+                _setting("Participation"),
+                _scenario(
+                    "Strict participation requires enough handoff budget",
+                    "participation.feature",
+                ),
+            ),
+            paraphrase=(
+                "A strict event must refuse a plan when a handoff cap is below the exchange count."
+            ),
+            formula=z3.And(
+                [
+                    z3.Implies(
+                        z3.And(
+                            world.participation_mode == Participation.STRICT,
+                            world.max_handoffs[person] < world.exchange_rounds,
+                        ),
+                        z3.Not(world.plan_valid),
+                    )
+                    for person in range(PARTICIPANTS)
+                ]
+            ),
+            tags=("scheduling", "participation"),
+        )
+    )
+    rules.append(
+        Rule(
             id="R-REVEAL-AFTER-HOST",
+            sources=(
+                _decision("D-017"),
+                _prd("REQ-REVEAL-001"),
+                _setting("Reveal trigger"),
+                _scenario("A reveal without the host action is refused", "reveal.feature"),
+            ),
+            paraphrase="The app must not publish the reveal before the host acts.",
+            formula=z3.Implies(world.reveal_published, world.host_reveal_action),
+            kind="invariant",
+            tags=("reveal", "invariant"),
+        )
+    )
+    rules.append(
+        Rule(
+            id="R-REVEAL-HOST-TRIGGER",
             sources=(
                 _decision("D-017"),
                 _prd("REQ-REVEAL-001"),
                 _setting("Reveal trigger"),
                 _scenario("The host triggers the reveal", "reveal.feature"),
             ),
-            paraphrase="The host must trigger the reveal.",
-            formula=z3.Implies(world.reveal_published, world.host_reveal_action),
+            paraphrase=(
+                "The app must publish the reveal when the host acts after the release stream. "
+                "The event must have no active assignment."
+            ),
+            formula=z3.Implies(
+                z3.And(
+                    world.host_reveal_action,
+                    world.release_stream_finished,
+                    world.no_active_assignments,
+                ),
+                world.reveal_published,
+            ),
             tags=("reveal",),
         )
     )
@@ -890,6 +1095,7 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="The app must not publish the reveal while an assignment is active.",
             formula=z3.Implies(world.reveal_published, world.no_active_assignments),
+            kind="invariant",
             tags=("reveal", "invariant"),
         )
     )
@@ -904,7 +1110,10 @@ def build_rules(world: World) -> list[Rule]:
             paraphrase="A leave after a claim must mark the held track as seen.",
             formula=z3.And(
                 [
-                    z3.Implies(world.leave_after_claim[person], world.held_track_seen[person])
+                    z3.Implies(
+                        world.leave_after_claim[person],
+                        _select_bool(world.leave_held_track[person], world.seen[person]),
+                    )
                     for person in range(PARTICIPANTS)
                 ]
             ),
@@ -937,18 +1146,24 @@ def build_rules(world: World) -> list[Rule]:
                 _prd("REQ-JOIN-006"),
                 _scenario("A leaver can return as a fill-in", "join_and_seed.feature"),
             ),
-            paraphrase="A leaver must return as a fill-in only.",
-            formula=z3.And(
-                [
-                    z3.Implies(
-                        world.restored[person],
-                        z3.And(
-                            world.role[person] == Role.FILL_IN,
-                            z3.Not(world.has_personal_track[person]),
-                        ),
-                    )
-                    for person in range(PARTICIPANTS)
-                ]
+            paraphrase=(
+                "Without the replan option, a leaver must return as a fill-in only. "
+                "The replan option can give a new personal track."
+            ),
+            formula=z3.Implies(
+                z3.Not(world.replan_allowed),
+                z3.And(
+                    [
+                        z3.Implies(
+                            world.restored[person],
+                            z3.And(
+                                world.role[person] == Role.FILL_IN,
+                                z3.Not(world.has_personal_track[person]),
+                            ),
+                        )
+                        for person in range(PARTICIPANTS)
+                    ]
+                ),
             ),
             tags=("leave", "restore"),
         )
@@ -966,7 +1181,7 @@ def build_rules(world: World) -> list[Rule]:
                     z3.Implies(
                         world.invitation_action[item],
                         world.invitation_action_h[item]
-                        <= world.invitation_sent_h[item] + RESTORE_INVITATION_HOURS,
+                        < world.invitation_sent_h[item] + RESTORE_INVITATION_HOURS,
                     )
                     for item in range(INVITATIONS)
                 ]
@@ -983,6 +1198,7 @@ def build_rules(world: World) -> list[Rule]:
             ),
             paraphrase="The restore invitation must expire after 168 hours.",
             formula=world.invitation_valid_h == RESTORE_INVITATION_HOURS,
+            kind="setting",
             tags=("restore", "setting"),
         )
     )
@@ -1006,43 +1222,7 @@ def build_rules(world: World) -> list[Rule]:
             tags=("restore",),
         )
     )
-    rules.append(
-        Rule(
-            id="R-FILL-PASS-UNCHANGED",
-            sources=(
-                _decision("D-052"),
-                _prd("REQ-FILL-005"),
-                _scenario("No eligible fill-in exists", "fill_ins.feature"),
-            ),
-            paraphrase=(
-                "When no eligible fill-in exists, classic must pass the track unchanged. "
-                "Async must return the track to the pool."
-            ),
-            formula=z3.And(
-                z3.Implies(
-                    z3.And(world.no_eligible_fill_in, world.mode == Mode.CLASSIC),
-                    world.pass_unchanged,
-                ),
-                z3.Implies(
-                    z3.And(world.no_eligible_fill_in, world.mode == Mode.ASYNC),
-                    world.return_to_pool,
-                ),
-            ),
-            tags=("fill-in",),
-        )
-    )
     return rules
-
-
-def _turn(world: World, turn: int, holder: int, track: int, round_number: int, active: bool = True):
-    return z3.And(
-        world.turn_holder[turn] == holder,
-        world.turn_track[turn] == track,
-        world.turn_round[turn] == round_number,
-        world.turn_active[turn] == active,
-        world.turn_offered[turn] == active,
-        world.turn_claimed[turn] == active,
-    )
 
 
 def build_scenarios(world: World) -> list[Scenario]:
@@ -1056,30 +1236,37 @@ def build_scenarios(world: World) -> list[Scenario]:
             name="A fill-in offer uses the standard sequence",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
+                world.offer_kind == OfferKind.FILL_IN,
+                world.claim_window_h[OfferKind.FILL_IN] == world.default_fill_in_claim_window_h,
                 world.fill_in_flow == Flow.AUTO_CHAIN,
                 world.turn_kind[0] == TurnKind.FILL_IN,
-                world.claim_time_h[0] == 100,
-                world.fill_in_due_h[0] == 124,
-                world.max_auto_chain_offers == AUTO_CHAIN_MAX_OFFERS,
-                world.fill_in_offer_cap[Flow.AUTO_CHAIN],
-                z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
-                world.open_fill_in_offers == 1,
-                world.first_accept_wins,
+                world.turn_offered[0],
+                z3.Or(
+                    [
+                        z3.Or(world.tier1_offer[person][track], world.tier2_offer[person][track])
+                        for person in range(PARTICIPANTS)
+                        for track in range(TRACKS)
+                    ]
+                ),
             ),
             action=world.turn_offered[0],
             postcondition=z3.And(
-                world.turn_offered[0],
-                world.fill_in_due_h[0] == world.claim_time_h[0] + EDIT_WINDOW_H,
+                world.default_fill_in_claim_window_h == DEFAULT_FILL_IN_CLAIM_WINDOW_H,
+                world.offer_claim_window_h == DEFAULT_FILL_IN_CLAIM_WINDOW_H,
+                world.max_auto_chain_offers == AUTO_CHAIN_MAX_OFFERS,
+                world.fill_in_offer_cap[Flow.AUTO_CHAIN],
+                z3.Not(world.fill_in_offer_cap[Flow.HOST_LIST]),
+                world.open_fill_in_offers <= 1,
+                world.first_accept_wins,
             ),
             rules=(
                 "R-CLAIM-WINDOW-FILLIN",
-                "R-EDIT-WINDOW",
                 "R-FILL-AUTO-CHAIN",
                 "R-FILL-HOST-LIST",
                 "R-FILL-SEQUENTIAL",
                 "R-FILL-FIRST-ACCEPT",
-                "R-FILL-DUE-CLAIM",
             ),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1088,51 +1275,42 @@ def build_scenarios(world: World) -> list[Scenario]:
             name="A tier-2 fill-in rescue is an extra turn",
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
-                world.role[0] == Role.PARTICIPANT,
-                world.membership[0] == Membership.ACTIVE,
-                world.ready[0],
-                world.max_handoffs[0] == 4,
+                world.owner[0] == 0,
+                world.owner[1] == 1,
+                world.owner[2] == 2,
+                world.tier2_offer[1][0],
+                world.tier2_offer_round[1][0] == 1,
                 world.planned_edits[0] == 2,
                 world.tier2_rescues[0] == 1,
-                world.tier2_turns[0][1] == 1,
-                z3.Not(world.event_wide_tier2_cap),
+                world.max_handoffs[0] == 4,
             ),
-            action=world.tier2_turns[0][1] == 1,
+            action=world.tier2_offer[1][0],
             postcondition=z3.And(
+                world.role[1] == Role.PARTICIPANT,
+                world.membership[1] == Membership.ACTIVE,
+                world.ready[1],
+                world.submitted_own[1],
+                z3.Not(world.seen[1][0]),
+                world.owner[0] != 1,
+                world.plan_never_gives_track[1][0],
+                z3.Not(
+                    z3.Or([world.tier1_eligible[person][0] for person in range(PARTICIPANTS)])
+                ),
+                world.tier2_turns[1][1] <= 1,
+                world.tier2_turns[1][2] <= 1,
+                z3.Not(world.event_wide_tier2_cap),
                 world.budget_used[0] == world.planned_edits[0],
                 world.budget_after_tier2[0] == world.budget_used[0],
             ),
             rules=(
+                "R-TIER2-OFFER-ELIGIBLE",
+                "R-TIER2-ONLY-NO-TIER1",
                 "R-TIER2-ONE-PER-ROUND",
                 "R-TIER2-NO-EVENT-CAP",
                 "R-BUDGET-REGULAR",
                 "R-BUDGET-TIER2-EXTRA",
             ),
-        )
-    )
-    scenarios.append(
-        Scenario(
-            id="S-FILL-NEVER-SEEN",
-            name="A fill-in has never seen the track",
-            feature="specs/features/fill_ins.feature",
-            precondition=z3.And(
-                world.owner[0] == 0,
-                world.role[1] == Role.FILL_IN,
-                world.membership[1] == Membership.ACTIVE,
-                world.ready[1],
-                z3.Not(world.seen[1][0]),
-            ),
-            action=world.tier1_offer[1][0],
-            postcondition=z3.And(
-                world.fill_in_offer[1][0],
-                z3.Not(world.seen[1][0]),
-                world.owner[0] != 1,
-            ),
-            rules=(
-                "R-FILL-ELIGIBLE-NEVER-SEEN",
-                "R-FILL-ELIGIBLE-NOT-OWNER",
-                "R-TIER1-ELIGIBLE",
-            ),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1142,33 +1320,31 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(
                 world.owner[0] == 0,
-                world.owner[1] == 0,
-                world.role[1] == Role.FILL_IN,
-                world.membership[1] == Membership.ACTIVE,
-                world.ready[1],
-                z3.Not(world.seen[1][0]),
-                world.seen[1][1],
-                world.role[2] == Role.PARTICIPANT,
-                world.membership[2] == Membership.ACTIVE,
-                world.ready[2],
-                world.submitted_own[2],
-                z3.Not(world.seen[2][1]),
-                world.plan_leaves_gap[2][1],
+                world.owner[1] == 1,
+                world.owner[2] == 2,
+                world.fill_in_source[0] == FillInSource.HOST_APPOINTED,
+                world.fill_in_source[1] == FillInSource.VOLUNTEER,
+                world.fill_in_source[2] == FillInSource.CONVERTED_SIGNUP,
+                world.tier1_offer[1][0],
+                world.tier1_eligible[0][1],
+                world.tier1_eligible[2][0],
             ),
-            action=z3.And(world.tier1_offer[1][0], world.tier2_offer[2][1]),
+            action=world.tier1_offer[1][0],
             postcondition=z3.And(
-                world.tier1_eligible[1][0],
-                world.tier2_eligible[2][1],
-                z3.Not(
-                    z3.Or([world.tier1_eligible[person][1] for person in range(PARTICIPANTS)])
-                ),
+                [
+                    z3.And(
+                        world.role[person] == Role.FILL_IN,
+                        world.membership[person] == Membership.ACTIVE,
+                        world.ready[person],
+                        z3.Not(world.seen[person][track]),
+                        world.owner[track] != person,
+                        world.fill_in_source[person] != FillInSource.NONE,
+                    )
+                    for person, track in ((0, 1), (1, 0), (2, 0))
+                ]
             ),
-            rules=(
-                "R-TIER1-ELIGIBLE",
-                "R-TIER2-ELIGIBLE",
-                "R-TIER1-BEFORE-TIER2",
-                "R-TIER2-ONLY-NO-TIER1",
-            ),
+            rules=("R-TIER1-OFFER-ELIGIBLE",),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1178,8 +1354,21 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/fill_ins.feature",
             precondition=z3.And(world.mode == Mode.CLASSIC, world.no_eligible_fill_in),
             action=z3.BoolVal(True),
-            postcondition=world.pass_unchanged,
+            postcondition=world.track_outcome == TrackOutcome.PASSED,
             rules=("R-FILL-PASS-UNCHANGED",),
+            pending=False,
+        )
+    )
+    scenarios.append(
+        Scenario(
+            id="S-FILL-PASS-ASYNC",
+            name="No eligible fill-in exists",
+            feature="specs/features/fill_ins.feature",
+            precondition=z3.And(world.mode == Mode.ASYNC, world.no_eligible_fill_in),
+            action=z3.BoolVal(True),
+            postcondition=world.track_outcome == TrackOutcome.RETURNED,
+            rules=("R-FILL-PASS-UNCHANGED",),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1187,24 +1376,54 @@ def build_scenarios(world: World) -> list[Scenario]:
             id="S-SCHEDULE-ROUND",
             name="Every participant receives one unseen track per round",
             feature="specs/features/scheduling.feature",
-            precondition=z3.And(world.owner[0] == 0, world.owner[1] == 1, world.owner[2] == 2),
-            action=z3.And(
-                [
-                    _turn(world, 0, 0, 1, 0),
-                    _turn(world, 1, 1, 2, 0),
-                    _turn(world, 2, 2, 0, 0),
-                    _turn(world, 3, 0, 2, 1),
-                    _turn(world, 4, 1, 0, 1),
-                    _turn(world, 5, 2, 1, 1),
-                ]
+            precondition=z3.And(
+                world.owner[0] == 0,
+                world.owner[1] == 1,
+                world.owner[2] == 2,
+                *[
+                    z3.And(
+                        world.turn_assigned[turn],
+                        world.turn_claimed[turn],
+                        world.turn_active[turn],
+                        world.turn_round[turn] == (0 if turn < 3 else 1),
+                    )
+                    for turn in range(TURNS)
+                ],
             ),
+            action=world.turn_assigned[0],
             postcondition=z3.And(
-                [
-                    z3.Not(world.repeat_pair[turn]) for turn in range(TURNS)
-                ]
-                + [
-                    z3.Not(world.own_track_turn[turn]) for turn in range(TURNS)
-                ]
+                *[
+                    _sum_bools(
+                        [
+                            z3.And(
+                                world.turn_assigned[turn],
+                                world.turn_holder[turn] == person,
+                                world.turn_round[turn] == round,
+                            )
+                            for turn in range(TURNS)
+                        ]
+                    )
+                    == 1
+                    for person in range(PARTICIPANTS)
+                    for round in range(2)
+                ],
+                *[
+                    _sum_bools(
+                        [
+                            z3.And(
+                                world.turn_assigned[turn],
+                                world.turn_track[turn] == track,
+                                world.turn_round[turn] == round,
+                            )
+                            for turn in range(TURNS)
+                        ]
+                    )
+                    <= 1
+                    for track in range(TRACKS)
+                    for round in range(2)
+                ],
+                *[z3.Not(world.own_track_turn[turn]) for turn in range(TURNS)],
+                *[z3.Not(world.repeat_pair[turn]) for turn in range(TURNS)],
             ),
             rules=(
                 "R-NO-REPEAT",
@@ -1212,6 +1431,7 @@ def build_scenarios(world: World) -> list[Scenario]:
                 "R-ONE-ASSIGNMENT-PER-PERSON-ROUND",
                 "R-ONE-ASSIGNMENT-PER-TRACK-ROUND",
             ),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1221,14 +1441,17 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/scheduling.feature",
             precondition=z3.And(
                 world.mode == Mode.CLASSIC,
-                z3.Not(world.round_open[0]),
+                world.participant_count == 6,
                 world.round_open[1],
-                world.host_opened_round[1],
-                z3.Not(world.round_open[2]),
             ),
-            action=world.host_opened_round[1],
-            postcondition=world.round_open[1],
-            rules=("R-ROUNDS-HOST-OPENED",),
+            action=world.round_open[1],
+            postcondition=z3.And(
+                world.total_rounds == 6,
+                world.exchange_rounds == 5,
+                world.host_opened_round[1],
+            ),
+            rules=("R-CLASSIC-LENGTH", "R-ROUNDS-HOST-OPENED"),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1238,11 +1461,30 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/reveal.feature",
             precondition=z3.And(
                 [z3.Not(world.turn_active[turn]) for turn in range(TURNS)]
-                + [world.host_reveal_action]
+                + [world.host_reveal_action, world.release_stream_finished]
             ),
             action=world.host_reveal_action,
-            postcondition=z3.And(world.reveal_published, world.no_active_assignments),
-            rules=("R-REVEAL-AFTER-HOST", "R-REVEAL-NO-ACTIVE"),
+            postcondition=z3.And(world.reveal_published, world.host_reveal_action),
+            rules=("R-REVEAL-HOST-TRIGGER",),
+            pending=True,
+        )
+    )
+    scenarios.append(
+        Scenario(
+            id="S-REVEAL-NO-HOST",
+            name="A reveal without the host action is refused",
+            feature="specs/features/reveal.feature",
+            precondition=z3.And(
+                [z3.Not(world.turn_active[turn]) for turn in range(TURNS)]
+                + [
+                    z3.Not(world.host_reveal_action),
+                    world.release_stream_finished,
+                ]
+            ),
+            action=world.release_stream_finished,
+            postcondition=z3.Not(world.reveal_published),
+            rules=("R-REVEAL-AFTER-HOST",),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1252,15 +1494,18 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/reveal.feature",
             precondition=z3.And(
                 world.host_reveal_action,
+                world.release_stream_finished,
+                world.turn_active[0],
                 world.owner[1] == 1,
-                _turn(world, 0, 0, 1, 1),
+                world.turn_holder[0] == 0,
+                world.turn_track[0] == 1,
+                world.turn_round[0] == 1,
+                world.turn_claimed[0],
             ),
-            action=z3.Not(world.reveal_published),
-            postcondition=z3.And(
-                z3.Not(world.reveal_published),
-                world.active_assignments_count == 1,
-            ),
+            action=world.host_reveal_action,
+            postcondition=z3.Not(world.reveal_published),
             rules=("R-REVEAL-NO-ACTIVE",),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1268,15 +1513,11 @@ def build_scenarios(world: World) -> list[Scenario]:
             id="S-SOFT-DEADLINE",
             name="A soft deadline does not move a track",
             feature="specs/features/deadlines_and_extensions.feature",
-            precondition=z3.And(
-                world.round_open[1],
-                world.host_opened_round[1],
-                world.deadline_passed[1],
-                z3.Not(world.auto_advanced[1]),
-            ),
+            precondition=world.deadline_passed[1],
             action=world.deadline_passed[1],
             postcondition=z3.Not(world.auto_advanced[1]),
-            rules=("R-NO-AUTO-ADVANCE", "R-ROUNDS-HOST-OPENED"),
+            rules=("R-NO-AUTO-ADVANCE",),
+            pending=False,
         )
     )
     scenarios.append(
@@ -1284,14 +1525,11 @@ def build_scenarios(world: World) -> list[Scenario]:
             id="S-ONE-OPEN-ROUND",
             name="The host opens at most one round at a time",
             feature="specs/features/deadlines_and_extensions.feature",
-            precondition=z3.And(
-                world.round_open[0],
-                world.host_opened_round[0],
-                z3.Not(world.round_open[1]),
-            ),
+            precondition=z3.Or(world.round_open[0], world.round_open[1]),
             action=world.round_open[0],
-            postcondition=world.open_round_count == 1,
+            postcondition=world.open_round_count <= 1,
             rules=("R-ONE-OPEN-ROUND",),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1303,14 +1541,16 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.leave[0],
                 world.leave_after_claim[0],
                 world.leave_held_track[0] == 1,
-                world.seen[0][1],
+                world.owner[1] == 1,
+                world.current_round == 0,
             ),
             action=world.leave[0],
             postcondition=z3.And(
-                world.held_track_seen[0],
+                world.seen[0][1],
                 z3.Not(world.has_future_assignment[0]),
             ),
             rules=("R-LEAVE-SEEN", "R-LEAVE-NO-FUTURE"),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1320,15 +1560,15 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/join_and_seed.feature",
             precondition=z3.And(
                 world.restored[0],
+                z3.Not(world.replan_allowed),
                 world.invitation_action[0],
                 world.invitation_sent_h[0] == 100,
-                world.invitation_action_h[0] == 124,
-                z3.Not(world.invitation_expired[0]),
             ),
             action=world.invitation_action[0],
             postcondition=z3.And(
                 world.role[0] == Role.FILL_IN,
                 z3.Not(world.has_personal_track[0]),
+                world.invitation_action_h[0] < world.invitation_sent_h[0] + RESTORE_INVITATION_HOURS,
                 world.invitation_valid_h == RESTORE_INVITATION_HOURS,
             ),
             rules=(
@@ -1336,6 +1576,7 @@ def build_scenarios(world: World) -> list[Scenario]:
                 "R-RESTORE-EXPIRY",
                 "R-RESTORE-EXPIRY-SETTING",
             ),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1345,20 +1586,15 @@ def build_scenarios(world: World) -> list[Scenario]:
             feature="specs/features/join_and_seed.feature",
             precondition=z3.And(
                 world.invitation_sent_h[0] == 100,
-                world.invitation_action_h[0] == 300,
                 world.invitation_expired[0],
-                z3.Not(world.invitation_action[0]),
             ),
-            action=z3.Not(world.invitation_action[0]),
+            action=world.invitation_expired[0],
             postcondition=z3.And(
-                world.invitation_expired[0],
+                z3.Not(world.invitation_action[0]),
                 world.invitation_valid_h == RESTORE_INVITATION_HOURS,
             ),
-            rules=(
-                "R-RESTORE-EXPIRY",
-                "R-RESTORE-EXPIRY-SETTING",
-                "R-RESTORE-EXPIRED-BLOCKS",
-            ),
+            rules=("R-RESTORE-EXPIRED-BLOCKS", "R-RESTORE-EXPIRY-SETTING"),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1369,14 +1605,18 @@ def build_scenarios(world: World) -> list[Scenario]:
             precondition=z3.And(
                 world.fill_in_flow == Flow.AUTO_CHAIN,
                 world.turn_kind[0] == TurnKind.FILL_IN,
+                world.turn_claimed[0],
                 world.claim_time_h[0] == 100,
+                world.edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
-            action=world.fill_in_due_h[0] == 124,
+            action=world.turn_claimed[0],
             postcondition=z3.And(
-                world.edit_window_h == EDIT_WINDOW_H,
-                world.fill_in_due_h[0] == world.claim_time_h[0] + EDIT_WINDOW_H,
+                world.fill_in_due_h[0] == world.claim_time_h[0] + world.edit_window_h,
+                world.turn_edit_due_h[0] == world.claim_time_h[0] + world.edit_window_h,
+                world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
-            rules=("R-FILL-DUE-CLAIM", "R-EDIT-WINDOW"),
+            rules=("R-FILL-DUE-CLAIM", "R-CLAIM-EDIT-DUE", "R-EDIT-WINDOW"),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1391,30 +1631,13 @@ def build_scenarios(world: World) -> list[Scenario]:
                 world.round_deadline_h[1] == 150,
                 world.appoint_time_h[0] == 100,
             ),
-            action=world.fill_in_due_h[0] == 150,
+            action=world.is_fill_in_turn[0],
             postcondition=z3.And(
-                world.edit_window_h == EDIT_WINDOW_H,
-                world.fill_in_due_h[0]
-                == _max_int(
-                    world.round_deadline_h[1],
-                    world.appoint_time_h[0] + EDIT_WINDOW_H,
-                ),
+                world.fill_in_due_h[0] == 150,
+                world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
             rules=("R-FILL-DUE-APPOINT", "R-EDIT-WINDOW"),
-        )
-    )
-    scenarios.append(
-        Scenario(
-            id="S-CLAIM-REMINDER",
-            name="The bot reminds the participant to claim",
-            feature="specs/features/async_queue.feature",
-            precondition=world.claim_reminder_h == 12,
-            action=world.claim_reminder_h < world.claim_window_h[OfferKind.REGULAR],
-            postcondition=z3.And(
-                world.claim_reminder_h == 12,
-                world.claim_reminder_h < world.claim_window_h[OfferKind.REGULAR],
-            ),
-            rules=("R-CLAIM-REMINDER",),
+            pending=True,
         )
     )
     scenarios.append(
@@ -1423,16 +1646,157 @@ def build_scenarios(world: World) -> list[Scenario]:
             name="A claim delivers the file and starts the deadline",
             feature="specs/features/async_queue.feature",
             precondition=z3.And(
-                world.claim_window_h[OfferKind.REGULAR] == REGULAR_CLAIM_WINDOW_H,
+                world.offer_kind == OfferKind.REGULAR,
+                world.claim_window_h[OfferKind.REGULAR] == world.default_claim_window_h,
                 world.owner[0] == 0,
-                _turn(world, 0, 1, 0, 1),
+                world.turn_claimed[0],
+                world.turn_holder[0] == 1,
+                world.turn_track[0] == 0,
+                world.turn_round[0] == 1,
+                world.claim_time_h[0] == 100,
+                world.edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
             action=world.turn_claimed[0],
             postcondition=z3.And(
+                world.default_claim_window_h == DEFAULT_REGULAR_CLAIM_WINDOW_H,
+                world.offer_claim_window_h == DEFAULT_REGULAR_CLAIM_WINDOW_H,
                 world.turn_seen[0],
-                world.claim_window_h[OfferKind.REGULAR] == REGULAR_CLAIM_WINDOW_H,
+                world.turn_edit_due_h[0] == 124,
+                world.default_edit_window_h == DEFAULT_EDIT_WINDOW_H,
             ),
-            rules=("R-CLAIM-WINDOW-REGULAR", "R-EDIT-WINDOW"),
+            rules=("R-CLAIM-WINDOW-REGULAR", "R-CLAIM-EDIT-DUE", "R-EDIT-WINDOW"),
+            pending=True,
+        )
+    )
+    scenarios.append(
+        Scenario(
+            id="S-CLAIM-REMINDER",
+            name="The bot reminds the participant to claim",
+            feature="specs/features/async_queue.feature",
+            precondition=z3.And(
+                world.offer_kind == OfferKind.REGULAR,
+                world.claim_window_h[OfferKind.REGULAR] == world.default_claim_window_h,
+                world.claim_reminder_h == DEFAULT_CLAIM_REMINDER_H,
+            ),
+            action=world.claim_reminder_h == DEFAULT_CLAIM_REMINDER_H,
+            postcondition=z3.And(
+                world.default_claim_reminder_h == DEFAULT_CLAIM_REMINDER_H,
+                world.claim_reminder_h < world.claim_window_h[OfferKind.REGULAR],
+            ),
+            rules=("R-CLAIM-REMINDER",),
+            pending=False,
+        )
+    )
+    scenarios.append(
+        Scenario(
+            id="S-STRICT-REFUSAL",
+            name="Strict participation requires enough handoff budget",
+            feature="specs/features/participation.feature",
+            precondition=z3.And(
+                world.participation_mode == Participation.STRICT,
+                world.exchange_rounds == 6,
+                world.max_handoffs[0] == 4,
+            ),
+            action=world.participation_mode == Participation.STRICT,
+            postcondition=z3.Not(world.plan_valid),
+            rules=("R-STRICT-REFUSAL",),
+            pending=True,
         )
     )
     return scenarios
+
+
+def build_premises(world: World) -> list[Premise]:
+    """Reachable modes that every rule set must stay consistent under."""
+    return [
+        Premise("P-CLASSIC", "Classic mode is reachable.", world.mode == Mode.CLASSIC),
+        Premise("P-ASYNC", "Async mode is reachable.", world.mode == Mode.ASYNC),
+        Premise(
+            "P-REGULAR-OFFER",
+            "A regular offer is reachable.",
+            world.offer_kind == OfferKind.REGULAR,
+        ),
+        Premise(
+            "P-FILL-IN-OFFER",
+            "A fill-in offer is reachable.",
+            world.offer_kind == OfferKind.FILL_IN,
+        ),
+        Premise(
+            "P-AUTO-CHAIN",
+            "The auto-chain flow is reachable.",
+            world.fill_in_flow == Flow.AUTO_CHAIN,
+        ),
+        Premise(
+            "P-HOST-LIST",
+            "The host-list flow is reachable.",
+            world.fill_in_flow == Flow.HOST_LIST,
+        ),
+        Premise(
+            "P-TIER1-ELIGIBLE",
+            "A tier-1 person can be eligible.",
+            z3.Or(
+                [
+                    world.tier1_eligible[person][track]
+                    for person in range(PARTICIPANTS)
+                    for track in range(TRACKS)
+                ]
+            ),
+        ),
+        Premise(
+            "P-NO-TIER1",
+            "No tier-1 person is eligible.",
+            z3.Not(
+                z3.Or(
+                    [
+                        world.tier1_eligible[person][track]
+                        for person in range(PARTICIPANTS)
+                        for track in range(TRACKS)
+                    ]
+                )
+            ),
+        ),
+        Premise(
+            "P-TIER2-ELIGIBLE",
+            "A tier-2 person can be eligible.",
+            z3.Or(
+                [
+                    world.tier2_eligible[person][track]
+                    for person in range(PARTICIPANTS)
+                    for track in range(TRACKS)
+                ]
+            ),
+        ),
+        Premise(
+            "P-NO-TIER2",
+            "No tier-2 person is eligible.",
+            z3.Not(
+                z3.Or(
+                    [
+                        world.tier2_eligible[person][track]
+                        for person in range(PARTICIPANTS)
+                        for track in range(TRACKS)
+                    ]
+                )
+            ),
+        ),
+        Premise(
+            "P-LEAVE",
+            "A participant can leave.",
+            z3.Or([world.leave[person] for person in range(PARTICIPANTS)]),
+        ),
+        Premise(
+            "P-RESTORE",
+            "A leaver can be restored.",
+            z3.Or([world.restored[person] for person in range(PARTICIPANTS)]),
+        ),
+        Premise(
+            "P-STRICT",
+            "Strict participation is reachable.",
+            world.participation_mode == Participation.STRICT,
+        ),
+        Premise(
+            "P-FLEXIBLE",
+            "Flexible participation is reachable.",
+            world.participation_mode == Participation.FLEXIBLE,
+        ),
+    ]

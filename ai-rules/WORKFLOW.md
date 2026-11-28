@@ -48,15 +48,21 @@ product contract is hand-written in `docs/`.
 ## Requirement changes
 
 An agent must update the formal model in `specs/requirements/` before it adds
-or changes a PRD requirement. The same rule applies to an EVENT_SETTINGS row,
-a decision, or a Gherkin scenario. Then run `scripts/requirements-check.sh`.
+a PRD requirement in the modeled scope or changes one. The same rule applies
+to an `EVENT_SETTINGS` row, a decision, or a Gherkin scenario in the modeled
+scope. Then run `scripts/requirements-check.sh`.
 
-- A contradiction, an unsatisfiable scenario, or a coverage gap blocks the
-  change.
+The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
+pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+outside the modeled scope.
+
+- A contradiction, an unsatisfiable scenario, a missing entailment, an
+  unsatisfiable premise, a rule without a necessity witness, or a coverage gap
+  blocks the change.
 - The natural-language source wins. The formal model is a reviewed
   formalization. A stale model is a defect.
 - The model change is reviewed like a test. The reviewer reads the rule
-  formula, the source links, and the scenario links.
+  formula, the kind, the source links, and the scenario links.
 - A rule has a stable id, a source link, a Z3 formula, and a paraphrase in
   ASD-STE100. A scenario links the rules that it exercises.
 - Add the natural-language change, the model change, and the generated report

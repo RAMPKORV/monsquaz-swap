@@ -131,3 +131,5 @@ The local tracker is the issue source of truth. Do not enable GitHub Issues.
 | `requirements: FAILED (the z3-solver Python package is not installed)` | Run `python3 -m pip install -r specs/requirements/requirements.txt`. |
 | `requirements: FAILED (... is stale)` | Run `scripts/requirements-check.sh` and commit the generated report. |
 | `requirements: ... contradiction` | Read the two source links and the unsat core. Fix the natural-language source or the model. Do not weaken the rule. |
+| `requirements: ... solver unknown` | Treat it as a failure. Tighten the query or fix the model. Do not ignore it. |
+| `requirements: ... is not exercised` | Add or strengthen a scenario for the rule. Do not delete the rule. |

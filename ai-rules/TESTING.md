@@ -150,15 +150,18 @@ file that cucumber-rs runs counts as mapped in full and needs no per-test
 comment. When you add a test that proves a scenario, add the `// scenario:`
 comment and remove the `@pending` tag in the same PR.
 
-A new or changed scenario also updates the formal requirement model in
-`specs/requirements/model.py` and runs `scripts/requirements-check.sh` (D-076).
-A contradiction, an unsatisfiable scenario, or a coverage gap blocks the
-change.
+A new or changed scenario in the modeled scope also updates the formal
+requirement model in `specs/requirements/model.py` and runs
+`scripts/requirements-check.sh` (D-076). A contradiction, an unsatisfiable
+scenario, a missing entailment, an unsatisfiable premise, a rule without a
+necessity witness, or a coverage gap blocks the change. The modeled scope is
+the fill-in, leave, handoff, and scheduling rules.
 
 ## DoD
 
 A behaviour is done when its scenario exists, its test fails before the change
 and passes after, the test declares the scenario with `// scenario:`, the
 scenario has no `@pending` tag, `scripts/check.sh` is green, and the tracker has
-evidence. A change to a requirement, setting, decision, or scenario also
-updates `specs/requirements/` and the requirement gate passes.
+evidence. A change to a requirement, setting, decision, or scenario in the
+modeled scope also updates `specs/requirements/` and the requirement gate
+passes.

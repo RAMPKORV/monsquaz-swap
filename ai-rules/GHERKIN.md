@@ -115,11 +115,17 @@ spec in three places — link.
 
 ## Requirement consistency (D-076)
 
-A new or changed scenario updates the formal model in
+A new or changed scenario in the modeled scope updates the formal model in
 `specs/requirements/model.py` in the same PR. Link the scenario to at least one
 rule and link the rule to the scenario. Run `scripts/requirements-check.sh`.
-A contradiction, an unsatisfiable scenario, or a coverage gap blocks the
-change. The natural-language scenario wins; a stale model is a defect.
+A contradiction, an unsatisfiable scenario, a missing entailment, an
+unsatisfiable premise, a rule without a necessity witness, or a coverage gap
+blocks the change. The natural-language scenario wins; a stale model is a
+defect.
+
+The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
+pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are outside the
+modeled scope.
 
 The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. The format and the
 review duty are in `ai-rules/skills/formal-verification/SKILL.md`.

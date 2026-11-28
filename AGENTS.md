@@ -39,7 +39,8 @@ This file is a router. Detailed rules live in `ai-rules/`.
   `swap-engine` runs the classic walking skeleton.
 - Product spec and Gherkin live in `docs/` and `specs/features/`. The formal
   requirement model is in `specs/requirements/`; the gate is
-  `scripts/requirements-check.sh`.
+  `scripts/requirements-check.sh`. The pilot scope is the fill-in, leave,
+  handoff, and scheduling rules.
 - Tracker is live in `.project/project.db` (never committed); the durable dump
   is `project/ledger/current.jsonl`.
 - The host UI shell covers mission control, settings, and the audit log, with a
@@ -158,9 +159,10 @@ states, the review waves, the human checkpoints, and the reject list.
 - A change to a file in `specs/tla/mapping.json` updates the model or the
   mapping, and `scripts/formal/check.sh` passes.
 - A change to a PRD requirement, EVENT_SETTINGS row, decision, or Gherkin
-  scenario updates `specs/requirements/`, and `scripts/requirements-check.sh`
-  passes. A contradiction, an unsatisfiable scenario, or a coverage gap blocks
-  the change.
+  scenario in the modeled scope updates `specs/requirements/`, and
+  `scripts/requirements-check.sh` passes. A contradiction, an unsatisfiable
+  scenario, a missing entailment, an unsatisfiable premise, a rule without a
+  necessity witness, or a coverage gap blocks the change.
 - For UI work, the UI quality gate passes with screenshots and review evidence.
 - `scripts/check.sh` passes.
 - The tracker has evidence and the issue is closed through the CLI.

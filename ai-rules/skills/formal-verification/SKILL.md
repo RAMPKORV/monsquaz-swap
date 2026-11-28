@@ -31,25 +31,32 @@ natural-language source wins. A stale model is a defect.
 
 ### When to update the model
 
-Update the model before you add or change any of these:
+Update the model before you add or change any of these in the modeled scope:
 
 - a PRD requirement in `docs/PRD.md`;
 - an `EVENT_SETTINGS.md` row or rule;
 - a decision in the tracker or `ai-rules/DECISIONS.md`;
 - a Gherkin scenario in `specs/features/`.
 
+The modeled scope is the fill-in, leave, handoff, and scheduling rules. The
+pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+outside the modeled scope.
+
 ### File format
 
-- `schema.py` holds the typed enums, the finite domain sizes, and the `Rule`,
-  `Scenario`, and `Source` records.
+- `schema.py` holds the typed enums, the finite domain sizes, the defaults,
+  and the `Premise`, `Rule`, `Scenario`, and `Source` records.
 - `model.py` holds the symbolic world, the domain definitions, `build_rules`,
-  and `build_scenarios`.
-- A `Rule` has a stable id, source links, a Z3 formula, and a paraphrase in
-  ASD-STE100.
+  `build_scenarios`, and `build_premises`.
+- A `Rule` has a stable id, source links, a Z3 formula, a paraphrase in
+  ASD-STE100, and a kind (`behaviour`, `setting`, `invariant`, or
+  `definition`).
 - A `Scenario` has an id, the source scenario name and feature file, a
-  precondition, an action, a postcondition, and rule links.
-- `checker.py` runs the four checks: the base conjunction, every scenario,
-  every rule pair, and the coverage links.
+  precondition, an action, a postcondition, rule links, and the source
+  `@pending` flag.
+- `checker.py` runs the base conjunction, the rule pairs, the scenario
+  witnesses, the scenario entailment, the premises, the necessity checks, the
+  coverage links, and the fail-closed solver check.
 
 ### Run
 
@@ -58,28 +65,36 @@ scripts/requirements-check.sh           # generate the report
 scripts/requirements-check.sh --check   # fail when the report is stale
 ```
 
-The gate fails on a contradiction, an unsatisfiable scenario, a coverage gap,
-a missed known-bad case, or a stale report. The report is
-`docs/generated/REQUIREMENT_CONSISTENCY.md`.
+The gate fails on a contradiction, an unsatisfiable scenario, a scenario
+without entailment, an unsatisfiable premise, a rule that is not necessary, a
+coverage gap, a missed known-bad case, a solver `unknown` or timeout, or a
+stale report. The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`.
 
 ### Read an unsat core
 
 - The core names the rule ids. `domain` means the shared definitions are
   unsatisfiable; fix the model, not a rule.
+- A premise core starts with `premise:<name>`. The premise is a reachable
+  mode, not a domain definition. Read the premise before you edit a rule.
 - The contradiction table names both rules and their source links. Read the
   sources before you edit a formula.
-- A scenario failure lists the rules that conflict with the scenario. The
-  scenario is impossible under the rules; fix the source or the model.
+- A scenario failure lists the witness core or reports an entailment
+  counterexample. A witness failure means the scenario is impossible. An
+  entailment failure means the postcondition does not follow.
+- A rule marked `NO` in the necessity table is not exercised by its linked
+  scenarios. Add or strengthen a scenario; do not delete the rule.
 - Do not delete a rule, weaken a formula, or remove a scenario link to make the
   gate pass. Report the finding.
-- The known-bad corpus and the seeded mutation must stay. They prove that the
-  gate detects the historical contradictions.
+- The known-bad corpus, the seeded mutation, the negative tier tests, the
+  solver-unknown test, and the link manifest must stay. They prove that the
+  gate detects the historical contradictions and the ineligible offers.
 
 ### Review duty
 
 Review a model change like a test. Check the source link, the formula, the
-paraphrase, and the scenario links. The model change, the natural-language
-change, and the generated report go in the same PR.
+kind, the paraphrase, the scenario links, and the pending flag. The model
+change, the natural-language change, and the generated report go in the same
+PR. A rule with no necessity witness is a model gap, not a pass.
 
 ## Run the TLA+ checks
 

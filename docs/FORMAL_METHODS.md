@@ -158,25 +158,41 @@ The model is in `specs/requirements/`. It is a reviewed formalization, not a
 second source of truth. The natural-language source wins. A stale model is a
 defect.
 
-The gate checks four properties:
+The gate checks eight properties:
 
 1. The conjunction of all must rules is satisfiable.
-2. Every formalized scenario is satisfiable under all must rules.
-3. No pair of rules has an unsatisfiable conjunction.
-4. Every rule links at least one scenario, and every scenario links at least
+2. No pair of rules has an unsatisfiable conjunction.
+3. Every formalized scenario has a witness: `rules and pre and action and post`
+   is satisfiable.
+4. Every formalized scenario entails its postcondition:
+   `rules and pre and action and not post` is unsatisfiable.
+5. Every reachable premise is satisfiable with all must rules.
+6. Every rule is necessary: remove it, and at least one linked scenario no
+   longer entails its postcondition.
+7. Every rule links at least one scenario, and every scenario links at least
    one rule.
+8. No solver query returns `unknown` or times out. The gate fails closed.
 
-A failure reports the rule ids, the source links, and the unsat core. The
-report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. It lists the rule table,
-the scenario results, the contradiction pairs, the unsat cores, the coverage
-gaps, the known-bad results, and the solver version.
+A failure reports the rule ids, the source links, the premise, and the unsat
+core. The report is `docs/generated/REQUIREMENT_CONSISTENCY.md`. It lists the
+rule table, the scenario results, the premises, the contradiction pairs, the
+unsat cores, the rule necessity, the coverage gaps, the known-bad results, and
+the solver version.
 
-The pilot covers the fill-in, leave, handoff, and scheduling rules. The domain
-is finite and explicit: 3 participants, 3 tracks, 3 rounds, 6 turns, and 2
-restore invitations. The model uses integer hours; wall-clock time and DST stay
-outside the model.
+The pilot has 20 formalized scenarios from 19 source scenarios. The other scenarios are
+outside the modeled scope. Eleven of the 20 formalized scenarios are `@pending`.
+PASS means model satisfiability and entailment, not implementation.
 
-### Known-bad corpus and mutation
+The domain is finite and explicit: 3 participants, 3 tracks, 3 rounds, 6
+turns, and 2 restore invitations. The model uses integer hours; wall-clock
+time and DST stay outside the model. Defaults are separate from the current
+event settings. A host-set 12-hour regular claim window is allowed.
+
+The replan opt-in in REQ-JOIN-006 is a documented exception. The rule
+`R-RESTORE-FILLIN-ONLY` applies only when `replan_allowed` is false. The tests
+show that the opt-in can give a personal track.
+
+### Known-bad corpus, mutation, and negative tests
 
 `specs/requirements/tests/known_bad.py` reproduces the three contradictions
 from the 2026-11-28 reviews:
@@ -186,18 +202,32 @@ from the 2026-11-28 reviews:
 - a shared handoff budget and an extra tier-2 turn outside the budget
   (D-014, D-050).
 
-The gate must detect each case and name both sources. A seeded mutation removes
-the offer-kind scope from the regular claim window. The gate must catch that
-mutation. A coverage test removes a rule and shows the gap.
+Each case has a separate premise. The gate must detect each case and name both
+sources. The tests include:
+
+- a tier-1 offer to a removed participant is unsatisfiable;
+- a tier-2 offer with no submitted own turn is unsatisfiable;
+- a tier-2 offer with no plan gap is unsatisfiable;
+- a mock solver `unknown` fails the gate;
+- a premise-dependent contradiction is unsatisfiable;
+- a host-set 12-hour regular claim window is satisfiable;
+- the replan opt-in is satisfiable;
+- the restore boundary is exclusive at 168 hours;
+- deleting `R-NO-REPEAT` or mutating the fill-in claim window fails the gate;
+- a rule removal leaves a coverage gap;
+- the link manifest detects a partial link removal.
 
 ### Trusted gap
 
 The model is a finite formalization. A wrong or incomplete model can miss a
 contradiction in the natural-language source. The source links and the review
-of the model are mandatory. The pair check covers two rules at a time; the base
-conjunction check covers all must rules together. The model does not prove the
-product code, the SQLite schema, Discord delivery, or wall-clock time. It does
-not replace the TLA+ protocol models or the tests.
+of the model are mandatory. Entailment is relative to the model: a weak
+postcondition can pass. The necessity check catches a rule that no linked
+scenario exercises. The pair check covers two rules at a time; the base
+conjunction check covers all must rules together and is the authoritative
+global check. The model does not prove the product code, the SQLite schema,
+Discord delivery, or wall-clock time. It does not replace the TLA+ protocol
+models or the tests.
 
 ## Invariants
 
@@ -322,7 +352,7 @@ cargo test -p swap-files scrub         # module-scrub property tests
 - Update `specs/tla/README.md` and `specs/tla/mapping.json` when a property,
   bound, or mapping changes.
 - A change to a PRD requirement, EVENT_SETTINGS row, decision, or Gherkin
-  scenario updates `specs/requirements/` and runs
+  scenario in the modeled scope updates `specs/requirements/` and runs
   `scripts/requirements-check.sh` in the same PR. Review the model change like
   a test.
 - Run the mutation set after a model change.

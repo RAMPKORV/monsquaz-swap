@@ -64,6 +64,30 @@ class TurnKind(IntEnum):
     FILL_IN = 1
 
 
+class FillInSource(IntEnum):
+    """A tier-1 fill-in source from D-014 and D-050."""
+
+    VOLUNTEER = 0
+    CONVERTED_SIGNUP = 1
+    HOST_APPOINTED = 2
+    NONE = 3
+
+
+class Participation(IntEnum):
+    """Participation mode from REQ-SCHED-012."""
+
+    STRICT = 0
+    FLEXIBLE = 1
+
+
+class TrackOutcome(IntEnum):
+    """The outcome when no eligible fill-in exists."""
+
+    PASSED = 0
+    RETURNED = 1
+    HELD = 2
+
+
 # The finite domain. The numbers are small on purpose: a reviewer can read
 # every pair, and the solver stays under the one-minute gate budget.
 PARTICIPANTS = 3
@@ -72,15 +96,16 @@ ROUNDS = 3
 TURNS = 6
 INVITATIONS = 2
 
-# Hours. The model uses hours as integers so that DST and wall-clock rendering
-# stay outside the model.
 HOURS_PER_DAY = 24
 RESTORE_INVITATION_HOURS = 7 * HOURS_PER_DAY
-REGULAR_CLAIM_WINDOW_H = 24
-FILL_IN_CLAIM_WINDOW_H = 6
-EDIT_WINDOW_H = 24
+DEFAULT_REGULAR_CLAIM_WINDOW_H = 24
+DEFAULT_FILL_IN_CLAIM_WINDOW_H = 6
+DEFAULT_CLAIM_REMINDER_H = 12
+DEFAULT_EDIT_WINDOW_H = 24
 AUTO_CHAIN_MAX_OFFERS = 3
-HOST_APPOINT_EDIT_WINDOW_H = 24
+
+CLAIM_WINDOW_MIN_H = 1
+CLAIM_WINDOW_MAX_H = 48
 
 SourceKind = Literal["decision", "prd", "setting", "scenario"]
 
@@ -106,6 +131,7 @@ class Rule:
     paraphrase: str
     formula: object  # z3.BoolRef; typed as object to keep z3 out of the schema.
     severity: str = "must"
+    kind: str = "behaviour"
     tags: tuple[str, ...] = field(default_factory=tuple)
 
     def source_refs(self) -> tuple[str, ...]:
@@ -117,7 +143,9 @@ class Scenario:
     """One formalized Gherkin scenario.
 
     The formula is the conjunction of the precondition, the action, and the
-    postcondition. The rule links define coverage.
+    postcondition. The rule links define coverage. `pending` mirrors the
+    source scenario's @pending tag: PASS is model satisfiability, not
+    implementation.
     """
 
     id: str
@@ -127,9 +155,25 @@ class Scenario:
     action: object
     postcondition: object
     rules: tuple[str, ...]
+    pending: bool = False
 
     @property
     def formula(self):
         import z3
 
         return z3.And(self.precondition, self.action, self.postcondition)
+
+    @property
+    def body(self):
+        import z3
+
+        return z3.And(self.precondition, self.action)
+
+
+@dataclass(frozen=True)
+class Premise:
+    """A reachable mode that the rules must stay consistent under."""
+
+    id: str
+    description: str
+    formula: object

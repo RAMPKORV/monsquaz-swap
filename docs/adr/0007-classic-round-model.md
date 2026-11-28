@@ -72,6 +72,8 @@ the seed deadline, and the whole-round deadline.
     transparency: the matrix, seed owners, editor names, titles, and comments.
     The join card discloses the loss of anonymity. The R1 band is still
     host-only in the default mode.
+    *Superseded in part by D-045 (2026-11-28): an open schedule shows
+    assignments only, never owners, titles, or comments before the reveal.*
 
 12. **Versions are not rounds.** A file version is the count of successful
     submissions for that track. A skipped round creates no version. The UI

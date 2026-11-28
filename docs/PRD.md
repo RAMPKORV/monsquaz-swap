@@ -156,7 +156,7 @@ named command. IDs are stable.
 | REQ-SCHED-013 | must | The host CAN record an away range for a participant. The planner SHALL skip overlapping projected rounds and report the gaps. History SHALL stay in UTC. | `participation.feature` |
 | REQ-SCHED-003 | must | Each round SHALL assign at most one track per participant and at most one participant per track. | `scheduling.feature` |
 | REQ-SCHED-004 | must | The host SHALL preview, regenerate with a diff, manually edit, validate, lock, and commit the schedule; hard invariants SHALL block invalid edits. | `scheduling.feature` |
-| REQ-SCHED-005 | must | When a schedule is locked, the bot SHALL publish a commit-reveal hash; replans SHALL create a new commitment and be limited to two. | `scheduling.feature` |
+| REQ-SCHED-005 | must | When a schedule is locked, the bot SHALL publish a commit-reveal hash; each replan SHALL create a new commitment. The reveal SHALL publish `verify.txt`, and `/swap verify` SHALL recompute the commitment (D-043). | `scheduling.feature` |
 | REQ-SCHED-006 | should | The planner SHALL show feasibility, overcrowding, group balance, swap-cadence, and fun-estimate warnings, and explain infeasibility with the conflicted people/tracks. | `groups.feature` |
 
 ### Scheduling (async)
@@ -164,11 +164,11 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-ASYNC-001 | must | Async mode SHALL use one global queue with a social-diversity objective. It SHALL NOT use participant groups, group migration, barriers, or reserved queues. | `async_queue.feature` |
-| REQ-ASYNC-002 | must | Offers SHALL be claim-first. The claim window SHALL be 24 hours by default with a 12-hour reminder. The edit deadline SHALL start at claim. One daily release window SHALL run two dispatch waves. | `async_queue.feature` |
+| REQ-ASYNC-002 | must | Offers SHALL be claim-first. The claim window SHALL be 24 hours by default. The claim reminder SHALL be a setting (6h, 12h, none, custom) with a 12-hour default (D-041). The edit deadline SHALL start at claim. One daily release window SHALL run two dispatch waves. | `async_queue.feature` |
 | REQ-ASYNC-003 | must | The dispatcher SHALL support a deficit-ordered hybrid (default), strict precomputed queues, and an opportunistic pool. Each strategy SHALL preserve the seen ledger. | `async_queue.feature` |
 | REQ-ASYNC-004 | must | Completeness SHALL mean exposure: every participant claims every track that the event plans to expose to them. Full N-1 exposure is the special case. Capped events report coverage and gaps. The app SHALL NOT promise edit completeness. The default length SHALL be N-1 for 12 or fewer participants and 6–8 rounds above 12. The host can choose full exposure after the planner shows the projected duration. | `async_queue.feature` |
 | REQ-ASYNC-005 | should | The host SHALL be able to change the release time. Unclaimed offers SHALL shift. Claimed assignments SHALL keep their stated due date. | `async_queue.feature` |
-| REQ-ASYNC-006 | must | The app SHALL protect against repeated unclaimed offers. It SHALL offer only to a Ready participant, SHALL never re-offer the same track to the same person after an expiry, SHALL apply the host-configured strike/cooldown policy, and SHALL report exposure gaps without looping. | `async_queue.feature` |
+| REQ-ASYNC-006 | must | The app SHALL protect against repeated unclaimed offers. It SHALL offer only to a Ready participant, SHALL apply the re-offer setting after an expiry (default: never re-offer the same track to the same person), SHALL apply the host-selected expiry preset (D-041), and SHALL report exposure gaps without looping. | `async_queue.feature` |
 | REQ-ASYNC-007 | must | The app SHALL show each participant a personal season view: tracks seen, tracks edited, days remaining, and the current offer. It SHALL NOT show group labels or a global queue. | `async_queue.feature` |
 | REQ-ASYNC-008 | must | At the deadline the bot SHALL notify the host and show a decision card with a 6-hour response target. It SHALL NOT auto-advance. | `async_queue.feature` |
 | REQ-ASYNC-009 | could | Async mode MAY add optional genre or mood content tags to the diversity score after v1. It SHALL NOT add participant groups. | deferred |
@@ -187,7 +187,7 @@ named command. IDs are stable.
 | ID | Pri | Requirement | Verification |
 |---|---|---|---|
 | REQ-DELIVERY-001 | must | The bot SHALL offer a track with its opaque code and deadline; the file SHALL be sent only after the participant claims. | `delivery.feature` |
-| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 12h) without marking the pair seen; after two expiries the participant SHALL be auto-paused and the host alerted. | `delivery.feature` |
+| REQ-DELIVERY-002 | must | An unclaimed offer SHALL expire after the claim window (default 24h) without marking the pair seen. The expiry preset (D-041) SHALL decide the next step. The default preset starts a 24h cooldown at the first expiry and pauses the participant at the second expiry. An auto-pause SHALL alert the host. | `delivery.feature` |
 | REQ-DELIVERY-003 | must | A claimed submission SHALL be downloaded immediately, hashed, validated, and stored; a receipt SHALL confirm what happens next. | `files.feature` |
 | REQ-DELIVERY-004 | must | A participant SHALL resubmit before the deadline; the latest valid version wins and all versions are retained. | `delivery.feature` |
 | REQ-DELIVERY-005 | must | If a DM is blocked, the bot SHALL use a host-approved private thread and alert the host; it SHALL never silently drop a delivery. | `delivery.feature` |
@@ -234,7 +234,7 @@ named command. IDs are stable.
 | REQ-ANON-001 | must | Participant-facing surfaces SHALL NOT expose seed owners, contributors, original titles, comments, or the full schedule before reveal. | `anonymity.feature` |
 | REQ-ANON-002 | must | Track codes SHALL be opaque and not derived from owner or submission order; outbound filenames SHALL omit holder and version. | `anonymity.feature` |
 | REQ-ANON-003 | must | Public progress SHALL be status + countdown only before the deadline; no per-person counts. | `anonymity.feature` |
-| REQ-ANON-004 | must | By default, participants SHALL see only their own assignments. The host CAN choose an open schedule that exposes the full matrix, owners, names, titles, and comments. The join card SHALL disclose the loss of anonymity. | `anonymity.feature` |
+| REQ-ANON-004 | must | By default, participants SHALL see only their own assignments. The host CAN choose an open schedule that shows which participant edits which track code in each round. An open schedule SHALL NOT show owners, titles, or comments before the reveal (D-045). The join card SHALL disclose the open schedule. | `anonymity.feature` |
 | REQ-ANON-005 | must | Comments/questionnaire SHALL be host+reveal only by default; at reveal they are attributed with host redaction. | `anonymity.feature` |
 | REQ-ANON-006 | must | Skips SHALL be host-only during the event and show as anonymous gaps by default at reveal. | `anonymity.feature` |
 | REQ-ANON-007 | must | Stream-safe mode SHALL hide the mapping and redact IDs for screen sharing. | `anonymity.feature` |
@@ -313,7 +313,7 @@ anonymity test suites green.
 | 5 | Release stream integration depth | Discord scheduled event + countdown; OBS external. | Before REQ-REVEAL-003 |
 | 6 | Participant name changes between join and reveal | Join-time display name snapshot; refresh with host review. | Before REQ-REVEAL-002 |
 | 7 | Async content tags | Optional later; no participant groups. | After v1 |
-| 8 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive. | Before async implementation |
+| 8 | Expiry strike defaults | Decided in D-041: strike + cooldown preset by default; strikes reset on resume. | Closed |
 
 **Assumptions**
 

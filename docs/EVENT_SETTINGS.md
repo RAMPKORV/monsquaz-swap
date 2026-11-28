@@ -2,7 +2,11 @@
 
 This file lists every event setting, its default, its options, and its lock
 behaviour. The host can change a setting only when the lock column allows it.
-All timestamps are UTC in the database and local in the UI.
+All instants are UTC in the database and local in the UI. The async release
+time is a wall-clock time in the host IANA zone (D-042).
+
+A row marked **decided, building in MSW-###** is an accepted decision that the
+code does not implement yet. The named issue builds it.
 
 ## 1. Event identity
 
@@ -11,7 +15,7 @@ All timestamps are UTC in the database and local in the UI.
 | Event name | `Monsquaz Swap <n>` | Free text | No |
 | Guild / server | The host's selected guild | One active event per guild | Yes |
 | Host | The app owner | One primary host | Yes |
-| Co-hosts | None | Add Discord users; full mapping access; audited | No |
+| Co-hosts | None | Add Discord accounts; full mapping access; audited | No |
 | Language | English | English in v1; strings are i18n-ready | No |
 
 ## 2. Mode, length, completeness
@@ -27,11 +31,11 @@ All timestamps are UTC in the database and local in the UI.
 | Async handoff deadline | 24 hours after claim | 12–168 hours | Yes |
 | Async expected songs | Seeded track count | 1–1000; must be reached before start | Yes |
 | Async claims per participant | Tracks minus one | 1–40; must be below the track count | Yes |
-| Async release | 18:00 UTC, two waves two hours apart | Host time; second offset fixed at two hours | Yes |
-| Async late seeds | Off | Off; host review with a feasibility check | Yes |
+| Async release | 18:00 in the host IANA zone, two waves two hours apart | Any HH:MM in the host IANA zone; the second wave is two hours after the first | Yes |
+| Async late seeds | Off | Off; host review with a feasibility check. Decided, building in MSW-091 | Yes |
 | Classic round deadline | 24 hours; final exchange 48 hours | 12–336 hours; final can differ | Yes |
 | Participation | Strict full exposure | Strict; Flexible earliest rounds with gaps | Yes |
-| Schedule visibility | Own assignments only | Own assignments only; Open schedule (full transparency) | Yes |
+| Schedule visibility | Own assignments only | Own assignments only; Open schedule (assignments only, D-045) | Yes |
 | Away ranges | None | Host-recorded UTC ranges; planner skips overlapping rounds | No |
 | Round/phase dates | Host-set | Calendar windows; host can shift | No |
 
@@ -44,8 +48,9 @@ Rules:
   up to the cap and leaves coverage gaps. The host fills the gaps.
 - An away range removes the overlapping projected rounds. Strict participation
   refuses the plan and asks for flexible participation.
-- Open schedule is the explicit zero-anonymity mode. It shows the full matrix,
-  seed owners, names, titles, and comments. The join card discloses this rule.
+- Open schedule shows which participant edits which track code in each round.
+  It never shows seed owners, titles, or comments before the reveal (D-045).
+  The join card discloses this rule.
 - Above 12 participants, each track can have many contributors. The planner
   must show the contributor count and the event duration.
 - The host can cap the length. A capped event does not touch every track with
@@ -69,7 +74,7 @@ social-diversity objective. Optional genre/mood content tags can come later.
 | Group count | Lookup: 1 for ≤9; 2 for 10–13; 3 for 14–18 and 23–32; 4 for 19–22 and 33–40 | 1–4, or manual | Yes |
 | Group size | Balanced, 5–12 | Soft bounds; warn outside | Yes |
 | Group visibility | Hidden | Hidden, host-only names | Yes |
-| Rotation default | Participants | Participants, track pools, both, merge/re-split | Yes |
+| Rotation default | Participants | Participants; track pools; merge/re-split. Rotate both is rejected (D-012). Track pools and merge/re-split: decided, building in MSW-090 | Yes |
 | Scheduler strategy | Balanced | Balanced, random matching, cyclic | No |
 | Swap cadence | `K ≈ T/4` (3–5 phases) | K rounds, calendar, host-triggered, exhausted | No |
 | Exhausted policy | Allowed with a warning | Warn when `group_size > T+1` | No |
@@ -101,7 +106,7 @@ Rules:
   tracks.
 - Group membership is hidden from participants.
 - A group swap must not break the seen ledger.
-- Async group migration is an open decision. See `docs/PRD.md` §10.
+- Async mode has no groups and no group migration (D-024).
 
 ## 4. Visibility and anonymity
 
@@ -134,7 +139,7 @@ Rules:
 
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
-| Pack type | Module template + samples | Module template + samples; samples only; reference track; none | Yes |
+| Pack type | Module template + samples | Module template + samples; samples only; reference track; none. Decided, building in MSW-089 | Yes |
 | Pack requirement | Required with warnings | Required with warnings; recommended; no enforcement | Yes |
 | Pack check | Hash report + host review | Hash report; name report; manual | No |
 | New samples | Disallowed | Disallowed; host-approved; allowed | Yes |
@@ -177,12 +182,12 @@ Rules:
 |---|---|---|---|
 | Claim first | On | On; push files | Yes |
 | Claim window | 24 hours | 1–48 hours | Yes |
-| Claim reminder | 12 hours after offer | 6h, 12h, none, host-set | No |
+| Claim reminder | 12 hours after offer | 6h; 12h; none; custom. The reminder must be before the end of the claim window. Decided, building in MSW-086 | No |
 | Ready gate | On | On; off | Yes |
-| Expiry protection | Host-configurable; recommended strike + cooldown | Strike/cooldown presets; cooldown only; host review; none | No |
-| Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host | No |
+| Expiry protection | Strike + cooldown: the first expiry starts a 24-hour cooldown, the second expiry pauses the participant | Strike + cooldown; cooldown only; host review; none. Decided, building in MSW-084 | No |
+| Same-track re-offer after expiry | Never | Never; after cooldown; last resort; host. Decided, building in MSW-085 | No |
 | Release windows | One per day, two waves | One wave; two waves; four; fixed interval; continuous | No |
-| Release time | Host-chosen local time | Any time; changeable | No |
+| Release time | 18:00 in the host IANA zone | Any HH:MM in the host IANA zone; changeable | No |
 | Release change | Future offers shift; claimed assignments keep their due date | Future shifts; shift all; fixed after start | No |
 | DM fallback | Private thread | Private thread; host mediation; block join | Yes |
 | Submission channel | DM attachment | DM; slash command | Yes |
@@ -194,6 +199,7 @@ Rules:
 - A claim starts the async deadline.
 - An unclaimed offer does not mark the pair seen.
 - A claim-then-skip marks the pair seen.
+- Strikes reset when the participant resumes. An auto-pause alerts the host.
 
 ## 8. Deadlines, reminders, extensions
 
@@ -248,7 +254,8 @@ Rules:
 | Setting | Default | Options | Lock at commit |
 |---|---|---|---|
 | Commit-reveal | On | On; audit only; off | Yes |
-| Replans | 2 maximum | 0–2 | Yes |
+| Replans | No cap (D-043) | Each replan creates a new commitment and an audit entry | Yes |
+| Verification file | `verify.txt` in the reveal | Participants check the seal with `sha256sum` and `/swap verify` (D-043) | Yes |
 | Audit log | On | On | Yes |
 | Mapping access | Host + full co-hosts | Host; co-hosts; per-person | No |
 | Data location | User-chosen library | Library; app data | No |
@@ -286,7 +293,7 @@ These settings stay changeable with an audit entry:
 | Preset | Mode | Length | Groups | Deadline | Release | Notes |
 |---|---|---|---|---|---|---|
 | Classic Monsquaz | Classic | N (R1 + N-1) | 1 for ≤9; lookup above | 24h; final 48h | One/day | Hidden schedule, full anonymity |
-| Fast Async | Async | N-1 handoffs | Lookup | 24h from claim | One/day | Per-person queue, claim-first |
+| Fast Async | Async | N-1 handoffs | None (async has no groups) | 24h from claim | One/day | Per-person queue, claim-first |
 | Large Group Swap | Classic | N (R1 + N-1) | Lookup, K≈T/4 | 24h; final 48h | One/day | Participants rotate; cross-pollination |
 | Casual | Classic | 8 total | 1–2 | 48h | One/day | Shorter, relaxed |
 | Custom | — | — | — | — | — | No preset |
@@ -302,4 +309,4 @@ action for each section.
 | 2 | Windows SmartScreen copy | Document + checksum | Before beta |
 | 3 | Pack delivery channel | DM + pinned post | Before pack implementation |
 | 4 | Async content tags | Optional later; no participant groups | After v1 |
-| 5 | Expiry strike defaults | Host-configurable; recommended 2 strikes auto-pause, 3 unresponsive | Before async implementation |
+| 5 | Expiry strike defaults | Closed by D-041: strike + cooldown preset; strikes reset on resume | Closed |

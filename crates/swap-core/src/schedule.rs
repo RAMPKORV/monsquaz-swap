@@ -1226,6 +1226,50 @@ mod tests {
     }
 
     #[test]
+    fn free_tracks_rest_evenly() {
+        let roster = people(5);
+        let mut specs = tracks(&roster);
+        let free = [
+            TrackSpec {
+                code: TrackCode::new("T98"),
+                owner: ParticipantId::new("left-a"),
+            },
+            TrackSpec {
+                code: TrackCode::new("T99"),
+                owner: ParticipantId::new("left-b"),
+            },
+        ];
+        specs.extend_from_slice(&free);
+        let free_codes = [free[0].code.clone(), free[1].code.clone()];
+        let schedule = Schedule::generate_with_free_tracks(
+            &roster,
+            &specs,
+            &free_codes,
+            4,
+            42,
+            ScheduleStrategy::Balanced,
+        )
+        .unwrap();
+        assert_eq!(schedule.assignments.len(), 20);
+        let mut appearances: HashMap<&str, u32> = HashMap::new();
+        for assignment in &schedule.assignments {
+            *appearances.entry(assignment.track.0.as_str()).or_default() += 1;
+        }
+        assert_eq!(appearances.len(), 7);
+        assert_eq!(appearances.values().sum::<u32>(), 20);
+        let min = *appearances.values().min().unwrap();
+        let max = *appearances.values().max().unwrap();
+        assert!(min >= 2 && max <= 3, "rests are not even: {appearances:?}");
+        for code in &free_codes {
+            assert!(
+                appearances.contains_key(code.0.as_str()),
+                "free track {} never circulates",
+                code.0
+            );
+        }
+    }
+
+    #[test]
     fn a_small_event_is_valid() {
         let people = people(3);
         let tracks = tracks(&people);

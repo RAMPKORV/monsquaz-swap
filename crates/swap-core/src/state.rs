@@ -587,7 +587,8 @@ mod tests {
         }
         assert!(Membership::SignedUp.can_transition_to(Membership::Seeded));
         assert!(!Membership::SignedUp.can_transition_to(Membership::Active));
-        assert!(!Membership::Left.can_transition_to(Membership::Active));
+        assert!(Membership::Left.can_transition_to(Membership::Active));
+        assert!(!Membership::Removed.can_transition_to(Membership::Active));
         assert!(!Membership::Removed.can_transition_to(Membership::SignedUp));
 
         let track_states = [

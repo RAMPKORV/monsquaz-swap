@@ -70,8 +70,8 @@ automatically a bug.
   `ci-gate` and it does not block a pull request.
 - The job uploads `mutants.out/` as an artifact for 14 days.
 
-The job has a 45-minute limit. The final local run took 2 minutes 30 seconds
-with four jobs on a 24-core workstation. Expect 10 to 20 minutes on a 4-core runner.
+The job has a 45-minute limit. The final local run took 4 minutes 7 seconds
+with four jobs on a 24-core workstation. Expect 15 to 25 minutes on a 4-core runner.
 
 Read the survivors:
 
@@ -104,10 +104,11 @@ The script stops with a clear message when cargo-mutants 27.1.0 is absent.
 ### Survivor triage result
 
 The first full run on 2026-11-28 tested 347 mutants. It reported 94 survivors
-and 6 timeouts. The triage added focused tests and line-specific exclusions.
-The final run tests 333 mutants: 315 caught, 18 unviable, 0 survivors, and
-0 timeouts. `.cargo/mutants.toml` documents all 34 excluded mutants: the 20
-private bit-mixing and hash operators and 14 mutants from this triage.
+and 6 timeouts. A later merge added the free-track code. The triage added
+focused tests and line-specific exclusions. The final run tests 355 mutants:
+336 caught, 19 unviable, 0 survivors, and 0 timeouts. `.cargo/mutants.toml`
+documents all 35 excluded mutants: the 20 private bit-mixing and hash
+operators and 15 mutants from this triage.
 
 The triage added tests for:
 

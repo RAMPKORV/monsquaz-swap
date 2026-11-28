@@ -63,24 +63,28 @@ exclude_re = [
 
   # The pair key only needs one consistent order. Ascending and descending
   # orders produce the same counts and the same BalanceReport.
-  "schedule\\.rs:267:36: replace <= with > in Schedule::balance$",
+  "schedule\\.rs:303:36: replace <= with > in Schedule::balance$",
 
   # balance_of stores the round count in a temporary Schedule, and balance()
   # never reads that field. The arithmetic cannot change the report.
-  "schedule\\.rs:377:52: replace \\+ with \\* in balance_of$",
+  "schedule\\.rs:418:52: replace \\+ with \\* in balance_of$",
+
+  # The rest surcharge is a constant on every edge when tracks equal people.
+  # `>=` only differs at that equality point, so the matching is unchanged.
+  "schedule\\.rs:521:40: replace > with >= in attempt_balanced$",
 
   # The sink is a graph label. The graph is allocated from the same value, so
   # the multiplication only relabels the node and the matching is identical.
-  "schedule\\.rs:461:36: replace \\+ with \\* in attempt_balanced$",
+  "schedule\\.rs:508:36: replace \\+ with \\* in attempt_balanced$",
 
   # The rejection loop accepts one extra value at the zone boundary. The
   # returned value is still in range and deterministic; the bias is below the
   # observable contract.
-  "schedule\\.rs:719:22: replace < with <= in SplitMix64::next_bounded$",
+  "schedule\\.rs:780:22: replace < with <= in SplitMix64::next_bounded$",
 
   # These mutants change a strict improvement or a rejection bound into a
   # non-terminating loop. The original code terminates; a test cannot kill a
   # hang without hanging.
-  "schedule\\.rs:662:34: replace < with <= in MinCostFlow::min_cost_flow$",
-  "schedule\\.rs:719:22: replace < with (==|>) in SplitMix64::next_bounded$",
+  "schedule\\.rs:723:34: replace < with <= in MinCostFlow::min_cost_flow$",
+  "schedule\\.rs:780:22: replace < with (==|>) in SplitMix64::next_bounded$",
 ]

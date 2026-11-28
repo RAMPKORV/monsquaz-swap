@@ -117,10 +117,11 @@ The triage added tests for:
 - group lookup, size overflow, cadence, warning boundaries, three-group
   rotation, short final phases, and the global-pool fallback;
 - the scheduler balance report, cyclic fallback, balanced choice, ordered
-  pair, matching preconditions, bounded PRNG use, small shuffles, and known
-  deterministic schedules;
+  pair, matching preconditions, bounded PRNG use, small shuffles, even rest
+  rotation for free tracks, and known deterministic schedules;
 - the HMAC key-length boundary;
-- every state-machine terminal state and the overdue restore path.
+- every state-machine terminal state, the leaver restore, and the overdue
+  restore path.
 
 ### Exclusion rule
 
